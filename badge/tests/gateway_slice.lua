@@ -1,23 +1,43 @@
--- The PR gateway/player path keeps its own documented sequence-first protocol.
+-- Local three-component smoke: self-contained player -> gateway serial stream.
 local world = dofile("badge/tests/harness.lua").new()
 local gateway = world.app("badge/master/main.lua", "00:00:00:00:01:01")
 local player = world.app("badge/slave/main.lua", "00:00:00:00:01:02")
-local tags = { "ING:TOMATO", "STATION:CHOP1", "STATION:POT1", "PLATE:1" }
-local values = { "ING:TOM", "STN:CHOP1", "STN:POT1", "STN:PLATE" }
-for index, tag in ipairs(tags) do
-  world.scan(player, tag, "tag-" .. index)
-  world.tick(300) world.tick(300) world.settle()
-  local frame = "HTN26|RX|00:00:00:00:01:02|-40|OC1|" .. index .. "|N|" .. values[index]
-  assert(world.count(frame) == 3, "gateway must forward unchanged bounded retries")
+
+-- Provision the fixed player number before the round; there is no join flow.
+player.env.on_button(1, 1) -- A / PRESSED
+assert(player.shows("PLAYER 1 SAVED"))
+
+-- Host lifecycle is a compact sequence-tagged control broadcast.
+assert(gateway.transport.send("OC1|000001|G|S"))
+world.settle()
+assert(player.shows("GAME STARTED"))
+assert(world.count("HTN26|RX|00:00:00:00:01:02|-40|OC1|000001|E|P1:READY") == 1)
+
+local function scan_with(button, text, uid)
+  player.env.on_button(button, 1)
+  world.scan(player, text, uid)
+  player.env.on_button(button, 2)
+  world.tick(600)
 end
-local before = #world.packets
-world.scan(player, "STATION:DELIVERY", "delivery-not-player-owned")
-assert(#world.packets == before and player.shows("UNSUPPORTED TAG"))
-gateway.env.on_button(2, 1)
-assert(world.count("HTN26|HOST|SCAN|1PI|PHONE|BURGER") == 1)
-gateway.env.on_button(2, 1)
-assert(world.count("HTN26|HOST|SCAN|1PI|PHONE|BURGER") == 1, "scan request cooldown")
-gateway.env.on_exit() player.env.on_exit()
-assert(not gateway.nfc_on and not player.nfc_on)
+
+scan_with(5, "pantry", "pantry-1") -- RIGHT -> bun
+assert(player.shows("PICKED UP BUN"))
+assert(world.count("HTN26|RX|00:00:00:00:01:02|-40|OC1|000002|E|P1:PU:B") == 1)
+
+-- A second source scan while the hand is full is rejected locally and is not
+-- turned into a gateway event.
+local before = #world.logs
+scan_with(4, "fridge", "fridge-1") -- LEFT -> raw meat, invalid with bun held
+assert(player.shows("HAND FULL"))
+assert(#world.logs == before)
+
+assert(gateway.transport.send("OC1|000002|G|E"))
+world.settle()
+assert(player.shows("GAME ENDED"))
+assert(player.shows("Plate: NONE") and player.shows("Hand: EMPTY"))
+
+gateway.env.on_exit()
+player.env.on_exit()
+assert(not gateway.transport.send("ping"))
 assert(not player.transport.send("ping"))
-print("PASS: player NFC -> unchanged OC1 -> radio-only gateway sys.log; bounded retries, host scan, cleanup")
+print("PASS: fixed player setup/start/end, NFC intent, local rejection, compact gateway forwarding")

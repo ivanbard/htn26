@@ -13,7 +13,10 @@ function M.new()
     end
     local function noop() end
     local badge = {
-      radio = setmetatable({}, { __index = function() error("hardware radio touched") end }),
+      -- The local bus stands in for documented badge.radio. Apps that use the
+      -- shared transport receive the same endpoint, so the smoke test covers
+      -- the direct self-contained player app without BLE hardware.
+      radio = app.transport,
       sys = {
         ms = function() return world.now end,
         log = function(message)
@@ -33,7 +36,11 @@ function M.new()
         read_text = function() return app.text end,
       },
       led = { clear = noop, show = noop, set = noop, set_all = noop },
-      input = { BUTTON = { A = 1, START = 2 }, KIND = { PRESSED = 1, RELEASED = 2 } },
+      input = {
+        BUTTON = { A = 1, B = 2, START = 3, LEFT = 4, RIGHT = 5, DOWN = 6 },
+        KIND = { PRESSED = 1, RELEASED = 2 },
+      },
+      sensor = { tap = function() return false end, shake = function() return false end },
       ui = { label = function(_, text)
         local label = { text = text, align = noop, style = noop, set_font_size = noop, set_color = noop }
         function label:set_text(value) self.text = value end

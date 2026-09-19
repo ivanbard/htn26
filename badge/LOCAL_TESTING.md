@@ -16,10 +16,11 @@ python -m unittest discover -s badge/slave/tests -v
 ```
 
 `run_local.py` executes the actual Lua apps in independent environments sharing
-`local_transport.lua`. NFC card/text, clock, screen, LEDs, and storage are host
-fakes. Transport messages invoke the apps' actual registered receive handlers;
-normal ticks drain the existing queues and run the real host state transitions.
-The fake `badge.radio` throws on access, so a passing slice never starts BLE.
+`local_transport.lua`. NFC card/text, clock, screen, LEDs, sensors, and storage
+are host fakes. The local bus is also injected as the documented `badge.radio`
+endpoint for the self-contained player app, so transport messages invoke the
+apps' actual registered receive handlers without starting BLE. Normal ticks
+drain the existing queues and run the real host state transitions.
 
 The scripted game scans `I:TOM`, places it on `P:01`, and submits that plate at
 the serving app. It checks `GAME|PLATE_ADD|01|TOM`, `GAME|SUBMIT|01|OK`, and
@@ -30,10 +31,12 @@ score/logs, missing host, exit cleanup, and the radio adapter contract.
 
 ## Transport boundary
 
-Apps load `require("transport")`. The contract is `enable()`, `disable()`,
-`on_recv(handler)`, `send(payload)`, `mac()`, and `dropped()`. The receive handler
-takes `(sender_mac, rssi, payload)` for both implementations. Sending succeeds
-only for 1–44 bytes and does not imply host acceptance.
+The legacy gateway/serve slices load `require("transport")`; the current
+self-contained player app calls the documented `badge.radio` API directly. Both
+paths use the same contract: `enable()`, `disable()`, `on_recv(handler)`,
+`send(payload)`, `mac()`, and `dropped()`. The receive handler takes
+`(sender_mac, rssi, payload)`. Sending succeeds only for 1–44 bytes and does
+not imply host acceptance.
 
 The local runner injects a bus endpoint for each app. The badge deployment
 module `transport.lua` selects `radio_transport.lua` with its enable flag set
