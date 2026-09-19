@@ -40,9 +40,9 @@ not imply host acceptance.
 
 The local runner injects a bus endpoint for each app. The badge deployment
 module `transport.lua` selects `radio_transport.lua` with its enable flag set
-to **false**. It will not call any hardware radio API while blocked. After the
-firmware is fixed, change only that flag to `true`; no gameplay changes are
-required. Hardware startup, timing, radio range, and real NFC remain unverified.
+to **true**, allowing the host badge to broadcast lifecycle controls and
+forward player events. Hardware startup, timing, radio range, and real NFC
+remain unverified.
 
 For a badge upload, put `transport.lua` and `radio_transport.lua` beside each
 app's `main.lua` using the IDE's extra-file support. For `overcooked-*.lua`, use
