@@ -29,7 +29,8 @@ export function createApp({ root, transport, now = () => Date.now() }) {
     button.disabled = true;
     connectionError = "";
     try {
-      await transport.command(button.dataset.command);
+      const nextState = await transport.command(button.dataset.command);
+      render(nextState);
     } catch (error) {
       connectionError = `COMMAND NOT SENT — ${error.message}`;
       render(state);
