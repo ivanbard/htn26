@@ -159,5 +159,6 @@ class ProtocolTests(unittest.TestCase):
         self.assertIsNone(plan.next_attempt())
         self.assertEqual(plan.attempts, MAX_ATTEMPTS)
 
+
 if __name__ == "__main__":
     unittest.main()
