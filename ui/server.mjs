@@ -14,7 +14,14 @@ const contentTypes = {
 };
 
 const server = createServer((request, response) => {
-  const pathname = decodeURIComponent(new URL(request.url || "/", `http://${request.headers.host || "localhost"}`).pathname);
+  let pathname;
+  try {
+    pathname = decodeURIComponent(new URL(request.url || "/", `http://${request.headers.host || "localhost"}`).pathname);
+  } catch {
+    response.writeHead(400, { "content-type": "text/plain; charset=utf-8" });
+    response.end("Bad request");
+    return;
+  }
   const requested = pathname === "/" ? "/index.html" : pathname;
   const file = normalize(join(root, requested));
 
