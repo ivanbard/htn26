@@ -506,8 +506,9 @@ ActionResult MasterEngine::receive_tracking(
         !std::isfinite(player.y) || !std::isfinite(player.confidence) ||
         player.confidence < 0.0 || player.confidence > 1.0 ||
         player.timestamp_ms > now_ms) {
-      return reject(ActionCode::InvalidObservation,
-                    "tracking packet contains an invalid player observation");
+      return reject_with_time_update(
+          reject(ActionCode::InvalidObservation,
+                 "tracking packet contains an invalid player observation"));
     }
     if (state_.players.find(player.player_id) != state_.players.end()) {
       has_known_player = true;

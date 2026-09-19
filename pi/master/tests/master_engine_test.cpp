@@ -230,9 +230,9 @@ void test_tracking_rejection_and_health_publication() {
   GameState published;
   engine.set_state_listener([&](const auto& snapshot) { published = snapshot; });
   const auto invalid = engine.receive_tracking(
-      WorkerObservation{"cam1", 8, 1001, {}}, 1001);
+      WorkerObservation{"cam1", 8, 1001, {{1, 0.5, 0.5, 2.0, 1001}}}, 1001);
   require(invalid.code == ActionCode::InvalidObservation,
-          "empty tracking should be rejected");
+          "invalid tracking should be rejected");
   require(engine.worker_state("cam1") == HealthState::Stale &&
               published.workers.at("cam1").state == HealthState::Stale,
           "health transitions must be published with rejected input");
