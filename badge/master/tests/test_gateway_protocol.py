@@ -37,7 +37,8 @@ class GatewayProtocolTests(unittest.TestCase):
     def test_accepts_documented_event(self):
         self.run_lua(
             'assert(gateway_test.valid_player_packet("OC1|0042|N|ING:TOM"))\n'
-            'assert(gateway_test.valid_player_packet("OC1|7|M|CHOP"))'
+            'assert(gateway_test.valid_player_packet("OC1|7|M|CHOP"))\n'
+            'assert(gateway_test.valid_player_packet("OC1|42|X|CUSTOM"))'
         )
 
     def test_accepts_player_sender_order(self):
@@ -56,7 +57,6 @@ class GatewayProtocolTests(unittest.TestCase):
             "OC1|",
             "OC1|42|N|",
             "OC1|x|N|ING:TOM",
-            "OC1|42|X|ING:TOM",
             "OC1|H|42|P",
             "OC1|0001|H|P|extra",
             "OC1|42|N|ING|TOM",
@@ -98,9 +98,14 @@ class GatewayProtocolTests(unittest.TestCase):
             'assert(gateway_test.valid_player_packet("OC1|E|0003|I:MEAT"))\n'
             'assert(gateway_test.valid_player_packet("OC1|E|0004|I:BUNS"))\n'
             'assert(gateway_test.valid_player_packet("OC1|E|0005|S:CHOP1"))\n'
-            'assert(gateway_test.valid_player_packet("OC1|E|0006|S:STOVE2"))\n'
-            'assert(gateway_test.valid_player_packet("OC1|E|0007|P:03"))\n'
+            'assert(gateway_test.valid_player_packet("OC1|E|0006|S:CHOP2"))\n'
+            'assert(gateway_test.valid_player_packet("OC1|E|0007|S:STOVE1"))\n'
+            'assert(gateway_test.valid_player_packet("OC1|E|0008|S:STOVE2"))\n'
+            'assert(gateway_test.valid_player_packet("OC1|E|0009|P:01"))\n'
+            'assert(gateway_test.valid_player_packet("OC1|E|0010|P:02"))\n'
+            'assert(gateway_test.valid_player_packet("OC1|E|0011|P:03"))\n'
             'assert(gateway_test.valid_plate_tag("P:01"))\n'
+            'assert(gateway_test.valid_plate_tag("P:02"))\n'
             'assert(gateway_test.valid_plate_tag("P:03"))\n'
             'assert(not gateway_test.valid_plate_tag("P:04"))\n'
             'assert(not gateway_test.valid_plate_tag("I:MEAT"))\n'

@@ -107,10 +107,10 @@ local function valid_player_packet(payload)
   if string.find(payload, "\r", 1, true) ~= nil then return false end
   if string.find(payload, "\n", 1, true) ~= nil then return false end
   local kind, sequence, value = string.match(payload,
-    "^OC1|([NMBHEVARU])|(%d%d%d%d)|([^|]+)$")
+    "^OC1|([A-Z])|(%d%d%d%d)|([^|]+)$")
   if kind == nil then
     sequence, kind, value = string.match(payload,
-      "^OC1|([0-9]+)|([NMBHEVARU])|([^|]+)$")
+      "^OC1|([0-9]+)|([A-Z])|([^|]+)$")
   end
   return sequence ~= nil and kind ~= nil and value ~= nil
 end
