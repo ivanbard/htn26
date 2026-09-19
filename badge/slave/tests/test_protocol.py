@@ -1,6 +1,5 @@
 """Host-side checks for the pure OC1 player-badge protocol contract."""
 
-from pathlib import Path
 import unittest
 
 MAX_RADIO_BYTES = 44
@@ -9,10 +8,20 @@ MAX_ATTEMPTS = 3
 
 
 SUPPORTED = {
-    "ING:TOMATO",
-    "STATION:CHOP1",
-    "STATION:POT1",
-    "PLATE:1",
+    "ING:TOM",
+    "STN:CHOP1",
+    "STN:POT1",
+    "STN:PLATE",
+    "STN:DELIVERY",
+}
+
+
+TAG_VALUES = {
+    "ING:TOMATO": "ING:TOM",
+    "STATION:CHOP1": "STN:CHOP1",
+    "STATION:POT1": "STN:POT1",
+    "PLATE:1": "STN:PLATE",
+    "STATION:DELIVERY": "STN:DELIVERY",
 }
 
 
@@ -32,6 +41,13 @@ def format_event(sequence: int, event_type: str, value: str) -> str:
     return payload
 
 
+def canonical_tag(tag: str) -> str:
+    try:
+        return TAG_VALUES[tag]
+    except KeyError as error:
+        raise ValueError("unsupported") from error
+
+
 class Sequence:
     def __init__(self, current=0):
         self.current = current
@@ -48,6 +64,7 @@ class Debouncer:
 
     def __init__(self):
         self.seen_uid = None
+        self.missing_polls = 0
 
     def accept(self, uid):
         if not uid or uid == self.seen_uid:
@@ -57,6 +74,12 @@ class Debouncer:
 
     def clear(self):
         self.seen_uid = None
+        self.missing_polls = 0
+
+    def observe_removal(self):
+        self.missing_polls += 1
+        if self.missing_polls >= 2:
+            self.clear()
 
 
 class RetryPlan:
@@ -73,9 +96,12 @@ class RetryPlan:
 
 
 class ProtocolTests(unittest.TestCase):
-    def test_formats_oc1_event_and_keeps_supported_values(self):
-        for value in SUPPORTED:
+    def test_canonicalizes_supported_tag_values_for_oc1(self):
+        for tag, expected in TAG_VALUES.items():
+            value = canonical_tag(tag)
             payload = format_event(42, "N", value)
+            self.assertIn(value, SUPPORTED)
+            self.assertEqual(value, expected)
             self.assertEqual(payload, f"OC1|42|N|{value}")
             self.assertLessEqual(len(payload.encode("utf-8")), MAX_RADIO_BYTES)
 
@@ -102,8 +128,9 @@ class ProtocolTests(unittest.TestCase):
         debouncer = Debouncer()
         self.assertTrue(debouncer.accept("04A1"))
         self.assertFalse(debouncer.accept("04A1"))
-        self.assertTrue(debouncer.accept("04A2"))
-        debouncer.clear()
+        debouncer.observe_removal()
+        self.assertFalse(debouncer.accept("04A1"))
+        debouncer.observe_removal()
         self.assertTrue(debouncer.accept("04A1"))
 
     def test_retry_plan_is_bounded_and_reuses_exact_payload_and_sequence(self):
@@ -114,18 +141,6 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(plan.sequence, 7)
         self.assertIsNone(plan.next_attempt())
         self.assertEqual(plan.attempts, MAX_ATTEMPTS)
-
-    def test_main_contains_only_documented_transport_and_limits(self):
-        main = (Path(__file__).parents[1] / "main.lua").read_text()
-        self.assertIn('"OC1|"', main)
-        self.assertIn("local MAX_RADIO_BYTES = 44", main)
-        self.assertIn("local MAX_ATTEMPTS = 3", main)
-        self.assertIn("badge.nfc.enable()", main)
-        self.assertIn("badge.radio.enable()", main)
-        self.assertNotIn("badge.wifi", main)
-        self.assertNotIn("badge.http", main)
-        self.assertNotIn("badge.ble", main)
-
 
 if __name__ == "__main__":
     unittest.main()

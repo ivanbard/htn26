@@ -12,13 +12,16 @@ The app accepts these NFC NDEF Text values:
 - `STATION:CHOP1`
 - `STATION:POT1`
 - `PLATE:1`
+- `STATION:DELIVERY`
 
 A valid read emits an NFC event as
-`OC1|<sequence>|N|<tag-value>`. Values are printable ASCII, and the complete
-payload is limited to the documented 44-byte restricted-radio limit. Repeated
-reads of the same card UID are ignored until the card is removed or **A** is
-pressed to re-arm the reader. Invalid, unsupported, and oversized text is
-reported locally and is not transmitted.
+`OC1|<sequence>|N|<canonical-value>`, mapping the player tag text to
+`ING:TOM`, `STN:CHOP1`, `STN:POT1`, `STN:PLATE`, or `STN:DELIVERY`. Values are
+printable ASCII, and the complete payload is limited to the documented 44-byte
+restricted-radio limit. Repeated reads of the same card UID are ignored until
+two bounded removal polls trigger `badge.nfc.clear()`, or **A** is pressed for
+manual re-arm. Invalid, unsupported, and oversized text is reported locally
+and is not transmitted.
 
 Each accepted event reserves one monotonically increasing sequence number;
 the current number is saved in the app's `seq` store key so reopening does not

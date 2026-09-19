@@ -8,14 +8,16 @@ local MAX_ATTEMPTS = 3
 local RETRY_DELAY_MS = 300
 local MAX_PENDING = 4
 local NFC_POLL_MS = 180
+local NFC_REMOVAL_POLLS = 2
 
 -- These are the semantic NDEF Text values supported by this player app.
 -- Delivery remains a gateway-badge action: the player brings the plate to it.
 local SUPPORTED_TAGS = {
-	["ING:TOMATO"] = "TOMATO",
-	["STATION:CHOP1"] = "CHOP STATION",
-	["STATION:POT1"] = "POT",
-	["PLATE:1"] = "PLATE",
+	["ING:TOMATO"] = "ING:TOM",
+	["STATION:CHOP1"] = "STN:CHOP1",
+	["STATION:POT1"] = "STN:POT1",
+	["PLATE:1"] = "STN:PLATE",
+	["STATION:DELIVERY"] = "STN:DELIVERY",
 }
 
 -- Pure protocol helpers. They have no badge or UI dependencies.
@@ -77,6 +79,7 @@ end
 local nfc_enabled = false
 local radio_enabled = false
 local seen_uid = nil
+local missing_card_polls = 0
 local next_nfc_poll = 0
 local sequence = 0
 
@@ -276,7 +279,7 @@ local function capture_tag(text)
 		set_led_mode("error", badge.sys.ms() + 700)
 		return
 	end
-	local payload, format_error = format_event(next_sequence, "N", text)
+	local payload, format_error = format_event(next_sequence, "N", display_name)
 	if not payload then
 		rejected_tag(format_error)
 		return
@@ -311,9 +314,15 @@ local function poll_nfc(now)
 
 	local card = badge.nfc.card()
 	if not card then
-		seen_uid = nil
+		missing_card_polls = missing_card_polls + 1
+		if missing_card_polls >= NFC_REMOVAL_POLLS then
+			badge.nfc.clear()
+			seen_uid = nil
+			missing_card_polls = 0
+		end
 		return
 	end
+	missing_card_polls = 0
 	local uid = card.uid
 	if not uid or uid == "" or same_tag(uid, seen_uid) then
 		return
@@ -392,6 +401,7 @@ function on_button(button, kind)
 	if nfc_enabled then
 		badge.nfc.clear()
 		seen_uid = nil
+		missing_card_polls = 0
 	end
 	show_ready()
 end
