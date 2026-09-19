@@ -43,20 +43,26 @@ Boot logs `OC_NATIVE|registered`. Overcooked appears as a native launcher app,
 using the existing Share icon for this first shell. Selecting it uses the
 stock clean-reboot policy and the target ID `overcooked`.
 
-The app draws a title, radio status, last packet/peer, and button instructions. Its first tick
+The app draws the burger order, held item, plate contents, score, next action,
+radio status, and button instructions. Its first tick
 checks NVS without erasing it, then starts the existing native radio HAL.
 NVS failure prevents radio initialization. Radio failure remains on screen
-with serial diagnostics. A sends one canonical `I:MEAT` badge event; the peer
-acknowledges the matching decimal sequence and logs a single `HTN26|RX|...`
-frame. A sender makes at most three attempts with the same packet. NFC, the Lua
-VM, and authoritative game logic are not added yet.
+with serial diagnostics. A performs the displayed next action: collect meat,
+cut and cook it, then collect bread, lettuce, and cheese, plate everything,
+and serve for 100 points. Cutting and cooking each take three seconds. B
+discards the held item. Every action is acknowledged by the peer and logged as
+one `HTN26|RX|...` frame; a sender makes at most three attempts.
+
+This is intentionally a badge-only play-test loop. NFC station scans,
+hold-and-shake discard, simultaneous shared state, order timers/burning, and
+Pi-authoritative validation remain outside this slice. Text items are the v0.1 UI.
 See `RADIO_PROTOCOL.md` for packet format, recovered HAL calls, LED meanings,
 and the Windows test peer.
 
 Serial heap measurements include internal 8-bit memory (mask 0x804) and
 default memory (mask 0x1000), at entry, before radio, after radio, exit, and
 every 250 ticks while idle. The nominal tick interval is 20 ms. The permanent
-app object is 148 bytes, excluding allocator, registry, and launcher overhead.
+app object is 244 bytes, excluding allocator, registry, and launcher overhead.
 LVGL allocations belong to the app screen and are reclaimed by stock code.
 
 Home uses stock registry exit handling. The app stops the radio; the registry
@@ -88,8 +94,8 @@ Physical acceptance: cold boot, launcher entry, native radio success, several
 minutes of stable heap logs, repeated exit/reentry with focus restoration,
 then My Badge/identity, Share transfer, Sync, and installed Lua app regression
 checks. Actual Share/Sync transfer checks require a peer/station. Two-way
-PING/PONG was proven on two badges before this controller slice. The event/ACK
-protocol and serial frame still require physical acceptance before adding NFC.
+PING/PONG and the first event/ACK controller slice were proven on two badges.
+The gameplay build still requires physical acceptance before adding NFC.
 
 See `../NATIVE_INVESTIGATION.md` for recovered interfaces and NVS recovery
 behavior. The addresses are private ABI details, not a stable SDK.

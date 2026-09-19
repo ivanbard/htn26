@@ -55,7 +55,7 @@ def scenario(nvs_error=0, radio_error=0, allocation_failure=False, send_error=0)
         elif address == 0x4203AACE:
             registrations.append(a0)
         elif address == 0x40397474:
-            assert (a0, a1) == (1, 148)
+            assert (a0, a1) == (1, 244)
             result = 0 if allocation_failure else app
         elif address == 0x4211B726:
             text = string(a0)
@@ -81,7 +81,7 @@ def scenario(nvs_error=0, radio_error=0, allocation_failure=False, send_error=0)
         elif address == 0x42010FC2:
             cpu.mem_write(a0, bytes.fromhex('e83dc12986d0'))
         elif address == 0x42010C54:
-            assert a1 in (17, 21)
+            assert 17 <= a1 < 45
             packets.append(bytes(cpu.mem_read(a0, a1)))
             result = send_error
         elif address == 0x4211BC16:
@@ -96,7 +96,7 @@ def scenario(nvs_error=0, radio_error=0, allocation_failure=False, send_error=0)
                 elif spec.endswith('d') and value & 0x80000000:
                     value -= 0x100000000
                 return spec % value
-            rendered = re.sub(r'%(?:\.\d+|0\d+)?[sxud]', replace, fmt).encode()
+            rendered = re.sub(r'%(?:\.\d+|0\d+)?[csxud]', replace, fmt).encode()
             cpu.mem_write(a0, rendered[:a1-1] + b'\0')
             result = len(rendered)
         else:
@@ -149,44 +149,74 @@ def scenario(nvs_error=0, radio_error=0, allocation_failure=False, send_error=0)
     invoke(0x5C)
     assert stages[:2] == ["entry", "before_radio"]
     if nvs_error:
-        assert 0x420109C6 not in calls and "NVS error\nRadio not started" in texts
+        assert 0x420109C6 not in calls and "NVS error / radio not started" in texts
     else:
         assert calls.index(0x42101718) < calls.index(0x420109C6)
         assert stages[2] == "after_radio"
-        assert ("Radio error\nSee serial log" if radio_error else "Radio ready") in texts
+        assert ("Radio error / see serial" if radio_error else "Radio ready - press A") in texts
     if not nvs_error and not radio_error:
         invoke(0x60, 0x100)  # A release does not send.
         assert not packets
         invoke(0x60, 0xa5a50000)  # Packed two-byte ABI leaves upper bits unspecified.
-        assert packets == [b'OC1|45441741|N|I:MEAT']
+        assert packets == [b'OC1|45441741|N|PICK:MEAT']
         if send_error:
             assert 'Send error' in texts
         else:
             for bad in (b'MEAT', b'OC1|45441741|A|NO', b'OC1|4544174x|A|OK',
-                        b'OC1|45441741|N|I:BEEF'):
+                        b'OC1|45441741|N|PICK:BEEF'):
                 incoming(bad); invoke(0x5c)
-            assert 'Event acknowledged' not in texts
+            assert 'Action acknowledged' not in texts
             incoming(b'OC1|45441741|A|OK');invoke(0x5c)
-            assert 'Event acknowledged' in texts
+            assert 'Action acknowledged' in texts
+            assert any('HELD: RAW MEAT' in text for text in texts)
+
+            def act(expected):
+                invoke(0x60, 0xa5a50000)
+                packet = packets[-1]
+                assert packet.endswith(b'|N|' + expected.encode())
+                incoming(b'OC1|' + packet[4:12] + b'|A|OK'); invoke(0x5c)
+
+            act('CUT')
+            assert 'Processing: CUT (3 sec)' in texts
+            for _ in range(150): invoke(0x5c)
+            assert any('HELD: CHOPPED MEAT' in text for text in texts)
+            act('STOVE')
+            for _ in range(150): invoke(0x5c)
+            assert any('HELD: COOKED MEAT' in text for text in texts)
+            for action in ('PLATE', 'PICK:BREAD', 'PLATE', 'PICK:LETTUCE', 'CUT'):
+                act(action)
+            for _ in range(150): invoke(0x5c)
+            for action in ('PLATE', 'PICK:CHEESE', 'PLATE', 'SERVE'):
+                act(action)
+            assert 'ORDER COMPLETE +100' in texts
+            assert any('SCORE: 100' in text and 'PLATE: B- M- L- C-' in text for text in texts)
+
+            act('PICK:MEAT')
+            invoke(0x60, 1)
+            discard = packets[-1]
+            assert discard.endswith(b'|N|DISCARD')
+            incoming(b'OC1|' + discard[4:12] + b'|A|OK'); invoke(0x5c)
+            assert 'Item discarded' in texts
+
             count = len(packets)
-            incoming(b'OC1|87654321|N|I:MEAT');invoke(0x5c)
+            incoming(b'OC1|87654321|N|PICK:MEAT');invoke(0x5c)
             assert packets[-1] == b'OC1|87654321|A|OK' and len(packets) == count+1
             assert any(line.startswith('HTN26|RX|') for line in prints)
-            incoming(b'OC1|87654321|N|I:MEAT');invoke(0x5c)
+            incoming(b'OC1|87654321|N|PICK:MEAT');invoke(0x5c)
             assert len(packets) == count+1  # Current ACK advertisement covers duplicates.
             for _ in range(100):invoke(0x5c)
-            incoming(b'OC1|87654321|N|I:MEAT');invoke(0x5c)
+            incoming(b'OC1|87654321|N|PICK:MEAT');invoke(0x5c)
             assert len(packets) == count+2  # A later retry receives another ACK, not another log.
             assert prints.count('HTN26|RX|%02x:%02x:%02x:%02x:%02x:%02x|%d|%s\n') == 1
             invoke(0x60, 0)
             pending = packets[-1]
-            assert pending.endswith(b'|N|I:MEAT')
+            assert pending.endswith(b'|N|PICK:MEAT')
             incoming(b'OC1|00000001|A|OK');invoke(0x5c)
             before = len(texts)
             sent = len(packets)
             for _ in range(451):invoke(0x5c)
             assert packets[sent:] == [pending, pending]
-            assert 'Event timeout / A retries' in texts[before:]
+            assert 'Action timeout / press A again' in texts[before:]
     for _ in range(250):
         invoke(0x5C)
     assert "idle" in stages
@@ -196,7 +226,7 @@ def scenario(nvs_error=0, radio_error=0, allocation_failure=False, send_error=0)
     assert cpu.mem_read(app + 4, 24) == bytes(24)
     if handler:
         before = len(packets)
-        incoming(b'OC1|00000001|N|I:MEAT');invoke(0x5c)
+        incoming(b'OC1|00000001|N|PICK:MEAT');invoke(0x5c)
         assert len(packets) == before
 
 
@@ -207,4 +237,4 @@ if __name__ == "__main__":
     scenario(radio_error=-1)
     scenario(allocation_failure=True)
     scenario(send_error=-1)
-    print("PASS: compiled native ABI, NVS guard, gameplay event/ACK, serial framing, deduplication, retries, send failure, cleanup")
+    print("PASS: compiled native ABI, NVS guard, complete burger loop, processing, discard, radio framing, retries, cleanup")

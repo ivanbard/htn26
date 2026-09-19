@@ -8,10 +8,12 @@ import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / ".tools/ble"))
 COMPANY = 0xFFFF  # Existing badge HAL's manufacturer ID; OC1 separates our packets.
+ACTIONS = {b"PICK:MEAT", b"PICK:BREAD", b"PICK:LETTUCE", b"PICK:CHEESE",
+           b"CUT", b"STOVE", b"PLATE", b"SERVE", b"DISCARD"}
 
 
 def decode(data):
-    if len(data) == 21 and data[:4] == b"OC1|" and data[12:] == b"|N|I:MEAT":
+    if 18 <= len(data) < 45 and data[:4] == b"OC1|" and data[12:15] == b"|N|" and data[15:] in ACTIONS:
         kind = "EVENT"
     elif len(data) == 17 and data[:4] == b"OC1|" and data[12:] == b"|A|OK":
         kind = "ACK"
@@ -23,7 +25,7 @@ def decode(data):
 
 
 def packet(kind, sequence):
-    suffix = "|N|I:MEAT" if kind == "EVENT" else "|A|OK" if kind == "ACK" else ""
+    suffix = "|N|PICK:MEAT" if kind == "EVENT" else "|A|OK" if kind == "ACK" else ""
     result = f"OC1|{sequence}{suffix}".encode("ascii")
     if decode(result) is None:
         raise ValueError("Invalid controller packet")
@@ -176,7 +178,9 @@ if __name__ == "__main__":
     if args.self_test:
         assert decode(packet("EVENT", "01234567")) == ("EVENT", "01234567")
         assert decode(packet("ACK", "87654321")) == ("ACK", "87654321")
-        for bad in (b"MEAT", b"OC1|01234567|N|I:BEEF", b"OC1|0123456x|A|OK",
+        for action in ACTIONS:
+            assert decode(b"OC1|01234567|N|" + action) == ("EVENT", "01234567")
+        for bad in (b"MEAT", b"OC1|01234567|N|PICK:BEEF", b"OC1|0123456x|A|OK",
                     b"OC2|01234567|A|OK", bytes(225)):
             assert decode(bad) is None
         print("PASS: packet format, strict length, namespace, and sequence validation")
