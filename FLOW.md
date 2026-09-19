@@ -2,22 +2,17 @@
 
 ## Materials:
 
-A game starts with:
-- 3 raspberry pis with cameras on each one
-- 3 plates (paper plates with nfc tags on them)
-- 2 stoves (paper plates with handles and nfc tags)
-- 2 chopping boards (cardboard sheet with nfc tag on it, meant to be stationary during the game)
-- 4 source materials (same as above but put printed icons)
+A game starts with one QNX Raspberry Pi, one Apple phone used as the setup
+camera, one stationary host badge, and three fixed player badges. The physical
+level has four NFC zones: pantry, fridge, cutting board, and stove.
 
 ## Game Setup
 
-1. Position the raspberry pi modules as follows
-- one raspberry pi at where serving should be
-- other two raspberry pis covering the gameplay field from afar
-2. plug in one badge into the raspberry pi at the serving area (we will call this the master pi and master badge)
-3. Open the stationary gateway app on the serving-area badge. It always runs in host mode; the other badges run the player app.
-4. Press START on the host badge. It emits `HTN26|HOST|SCAN|3PI|BURGER`; the three Raspberry Pis take photos and generate the floor plan that they display.
-5. you can approve the floorplan, and once it's approved it auto generates the burger level and tells you where to put each things
+1. Connect the phone camera to the Raspberry Pi and photograph the play area.
+2. Connect the stationary host badge to the Pi and open its host app; open the player app on the three badges.
+3. Generate and approve the floor plan on the local UI, then place the four NFC zones as instructed.
+4. Press START on the host badge. It owns the two-minute countdown, resets the fixed-player session, and emits `HTN26|GAME|START_GAME|120|3` to serial and as a best-effort radio lifecycle hint.
+5. When the countdown ends, the host emits `HTN26|GAME|GAME_END|3` and resets the host session.
 
 btw we're doing the burger level
 
@@ -28,11 +23,11 @@ buns -> put on plate etc.
 
 and then possible orders are just varations on the toppings
 
-6. games should last around 2 minutes.
+6. The Pi receives player events only through the host badge's one-way radio-to-serial gateway path.
 
 ## UI
 
 So the UI should look similar to the overcooked game (there's no washing dishes)
-it should show the live locations of the players (which the cameras capture)
+it should show the fixed player icons, held items, and action state; the setup camera does not track live player locations
 it also shows the orders
 and because this is waterloo, the customers next to serving should be a line of like standing geese (like waterloo mascot)
