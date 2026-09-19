@@ -31,6 +31,17 @@ test("marks an old player position and worker heartbeat stale", () => {
   assert.match(html, /TRACKING DEGRADED/);
 });
 
+test("marks a player with missing coordinates as tracking lost", () => {
+  const state = createInitialMockState(1_000);
+  delete state.players[1].position;
+
+  const html = renderApp(state, 1_000);
+
+  assert.match(html, /data-player="p2" data-stale="true"/);
+  assert.match(html, /P2[\s\S]*TRACKING LOST/);
+  assert.doesNotMatch(html, /data-player="p2"[^>]*style="left:0%;top:0%;/);
+});
+
 test("host commands move setup through scan, approval, start, and end", async () => {
   let now = 10_000;
   const transport = createMockTransport({ now: () => now });

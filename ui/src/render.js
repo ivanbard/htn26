@@ -80,13 +80,14 @@ function renderFloorPlan(state, now) {
     </div>`).join("");
   const players = (state.players || []).map((player) => {
     const position = playerPosition(player);
-    const stale = isStale(player, now);
-    const trackingText = stale ? "TRACKING STALE" : upper(player.tracking?.source || "TRACKING");
+    const stale = !position || isStale(player, now);
+    const trackingText = !position ? "TRACKING LOST" : stale ? "TRACKING STALE" : upper(player.tracking?.source || "TRACKING");
     const classes = `player-token player-${escapeAttr(player.color || player.id)}${stale ? " is-stale" : ""}`;
     const inventory = player.inventory?.length ? ` — ${player.inventory.join(", ")}` : "";
-    const label = `${player.name || player.label || player.id}${stale ? ", tracking stale" : ", tracking healthy"}${inventory}`;
+    const label = `${player.name || player.label || player.id}${!position ? ", tracking lost" : stale ? ", tracking stale" : ", tracking healthy"}${inventory}`;
+    const positionStyle = position ? ` style="left:${clamp(position.x)}%;top:${clamp(position.y)}%;"` : "";
     return `
-      <div class="${classes}" style="left:${clamp(position.x)}%;top:${clamp(position.y)}%;" data-player="${escapeAttr(player.id)}" data-stale="${stale}" aria-label="${escapeAttr(label)}">
+      <div class="${classes}"${positionStyle} data-player="${escapeAttr(player.id)}" data-stale="${stale}" aria-label="${escapeAttr(label)}">
         <span class="player-badge">${escapeHtml(player.label || player.id)}</span>
         <span class="player-name">${escapeHtml(player.name || "PLAYER")}</span>
         <span class="player-tracking">${escapeHtml(trackingText)}</span>
