@@ -61,6 +61,8 @@ test("host commands follow start, scan, approval, burger placement, and round li
   assert.equal(transport.snapshot().setup.phase, SETUP_PHASES.BURGER_PLACEMENT);
   assert.equal(transport.snapshot().floorPlan.accepted, true);
   assert.equal(transport.snapshot().burgerLevel.status, "placement-ready");
+  const placementHtml = renderApp(transport.snapshot(), now);
+  assert.match(placementHtml, /data-command="START_GAME"(?! disabled)/);
 
   now += 1_000;
   await transport.command(GAME_ACTIONS.START_GAME);
