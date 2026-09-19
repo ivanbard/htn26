@@ -6,7 +6,7 @@
 
 Build a real-world multiplayer cooking game inspired by Overcooked.
 
-Players wear Hacker Badges. Physical NFC tags represent ingredient sources, workstations, pots, serving stations, etc. Three Raspberry Pis running QNX use cameras and on-device AI to track player positions. A central QNX Raspberry Pi maintains the authoritative game state.
+Players wear Hacker Badges. Physical NFC tags represent ingredient sources, workstations, stoves, serving stations, etc. Three Raspberry Pis running QNX use cameras and on-device AI to track player positions. A central QNX Raspberry Pi maintains the authoritative game state.
 
 The system must run locally. Do not depend on cloud services.
 
@@ -106,10 +106,10 @@ Answers:
 
 Examples:
 
-* picked up tomato
+* picked up meat
 * interacted with chopping board
-* interacted with pot
-* delivered a plate
+* interacted with stove
+* delivered a burger
 
 ### Camera / AI
 
@@ -139,10 +139,10 @@ Vision:
 Player 2 is physically inside CHOP1 zone
 
 Game state:
-Player 2 is holding RAW_TOMATO
+Player 2 is holding RAW_MEAT
 
 Result:
-Start chopping RAW_TOMATO
+Start chopping RAW_MEAT
 ```
 
 The camera system is not expected to visually recognize every ingredient.
@@ -264,15 +264,15 @@ Prefer NDEF text tags when convenient.
 Suggested namespace:
 
 ```text
-ING:TOM
-ING:ONION
+ING:BUN
+ING:MEAT
+ING:CHEESE
 ING:LETTUCE
 
 STN:CHOP1
 STN:CHOP2
-STN:POT1
-STN:POT2
-STN:PLATE
+STN:STOVE1
+STN:STOVE2
 STN:DELIVERY
 ```
 
@@ -361,17 +361,15 @@ Start with exactly one complete recipe before expanding.
 Suggested MVP:
 
 ```text
-TOMATO SOUP
+BURGER
 
-1. scan tomato source
-2. go to chopping board
-3. scan chopping board
-4. perform chopping action
-5. scan pot
-6. wait for cooking timer
-7. scan plate
-8. scan delivery
-9. receive score
+1. scan bun, meat, cheese, or lettuce source
+2. go to a chopping board when the ingredient requires cutting
+3. perform the cutting action
+4. cook the meat at a stove
+5. assemble the burger to match the active toppings
+6. scan delivery
+7. receive score
 ```
 
 First target:
@@ -381,9 +379,9 @@ First target:
 * 1 master Pi
 * 1 camera
 * one recipe
-* one ingredient
+* burger ingredients
 * one chopping station
-* one pot
+* one stove
 * one delivery station
 
 Only add all three cameras and four players after this loop works end-to-end.
@@ -700,10 +698,10 @@ OC1|<sequence>|<type>|<value>
 Examples:
 
 ```text
-OC1|0001|N|ING:TOM
+OC1|0001|N|ING:MEAT
 OC1|0002|N|STN:CHOP1
 OC1|0003|M|CHOP
-OC1|0004|N|STN:POT1
+OC1|0004|N|STN:STOVE1
 ```
 
 Sequence numbers are per badge.
@@ -731,14 +729,14 @@ Do not generate a new sequence number for each retry.
 Preferred semantic tag values:
 
 ```text
-ING:TOM
-ING:ONION
+ING:BUN
+ING:MEAT
+ING:CHEESE
 ING:LETTUCE
 
 STN:CHOP1
 STN:CHOP2
-STN:POT1
-STN:PLATE
+STN:STOVE1
 STN:DELIVERY
 ```
 
@@ -759,11 +757,11 @@ Do not repeatedly perform expensive NFC text reads every tick.
 The badge may display:
 
 ```text
-TOMATO PICKED UP
-GO TO CHOPPING
+INGREDIENT PICKED UP
+GO TO THE NEXT STATION
 ```
 
-after the player scans a tomato.
+after the player scans an ingredient.
 
 That is immediate local feedback, not proof that the server accepted the action.
 
@@ -779,7 +777,7 @@ because the current architecture has no guaranteed return communication path fro
 Prefer:
 
 ```text
-TOMATO SCANNED
+INGREDIENT SCANNED
 EVENT SENT
 ```
 

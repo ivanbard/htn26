@@ -16,7 +16,7 @@ Open <http://127.0.0.1:4173>. The development page uses the mock master-Pi trans
 
 1. `Start` host mode.
 2. `Scan Room` to show the proposed floor plan.
-3. `Approve Layout` to accept the plan and generate burger-level placement instructions.
+3. `Approve Layout` (the existing `Accept Layout` protocol alias) to accept the plan and generate burger-level placement instructions.
 4. Place the cheese, lettuce, meat, and bun sources, the chopping boards, stoves, and serving badge as shown.
 5. `Start Game` for a roughly two-minute round.
 
