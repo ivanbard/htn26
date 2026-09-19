@@ -9,10 +9,8 @@ using namespace std::chrono_literals;
 int main() {
   // Host Start normally produces this calibration from an approved room scan
   // on the serving-area master. The demo substitutes a synthetic floor plan.
-  const Calibration simulated_approved_room_scan = Calibration{
-      Homography{{1.0, 0.0, 0.0,
-                  0.0, 1.0, 0.0,
-                  0.0, 0.0, 1.0}}};
+  const Calibration simulated_approved_room_scan =
+      Calibration{Homography{{1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0}}};
 
   WorkerConfig config;
   config.node_id = "field-worker-demo";

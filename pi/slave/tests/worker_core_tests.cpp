@@ -213,10 +213,10 @@ void test_failure_recovery() {
 
 void test_calibration_reset_clears_track_diagnostics() {
   WorkerCore core(config());
-  require(core.process_detections(
-              at_ms(0), {detection(1, 1.0, 1.0, 0.8, true, 42),
-                         detection(2, 2.0, 2.0, 0.8)},
-              1ms)
+  require(core.process_detections(at_ms(0),
+                                  {detection(1, 1.0, 1.0, 0.8, true, 42),
+                                   detection(2, 2.0, 2.0, 0.8)},
+                                  1ms)
               .has_value(),
           "calibrated worker records track diagnostics");
   require(core.diagnostics().known_tracks == 1 &&
@@ -229,8 +229,7 @@ void test_calibration_reset_clears_track_diagnostics() {
           "clearing calibration clears stale track diagnostics");
 
   core.set_calibration(unit_calibration());
-  require(core.process_detections(
-              at_ms(10), {detection(3, 3.0, 3.0, 0.8)}, 1ms)
+  require(core.process_detections(at_ms(10), {detection(3, 3.0, 3.0, 0.8)}, 1ms)
               .has_value(),
           "replacement calibration accepts new observations");
   require(core.diagnostics().known_tracks == 0 &&
