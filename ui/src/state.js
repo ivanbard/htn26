@@ -94,7 +94,12 @@ export function canRunAction(state, action) {
     case GAME_ACTIONS.APPROVE_LAYOUT:
       return phase === SETUP_PHASES.LAYOUT_PROPOSED && state?.floorPlan?.accepted !== true;
     case GAME_ACTIONS.RESCAN:
-      return phase !== SETUP_PHASES.RUNNING;
+      return [
+        SETUP_PHASES.SCANNING,
+        SETUP_PHASES.LAYOUT_PROPOSED,
+        SETUP_PHASES.BURGER_PLACEMENT,
+        SETUP_PHASES.LAYOUT_ACCEPTED,
+      ].includes(phase);
     case GAME_ACTIONS.START_GAME:
       return state?.floorPlan?.accepted === true
         && [SETUP_PHASES.BURGER_PLACEMENT, SETUP_PHASES.LAYOUT_ACCEPTED].includes(phase);

@@ -91,6 +91,11 @@ function scanRoom(state, now) {
   }, now);
 }
 
+function rescanRoom(state, now) {
+  if (![SETUP_PHASES.SCANNING, SETUP_PHASES.LAYOUT_PROPOSED, SETUP_PHASES.BURGER_PLACEMENT, SETUP_PHASES.LAYOUT_ACCEPTED].includes(state.setup.phase)) return state;
+  return scanRoom(state, now);
+}
+
 function approveLayout(state, now) {
   if (state.setup.phase !== SETUP_PHASES.LAYOUT_PROPOSED) return state;
   return withUpdate(state, {
@@ -134,7 +139,7 @@ export function reduceMockState(state, command, now = Date.now()) {
   switch (action) {
     case GAME_ACTIONS.START_HOST: return startHost(state, now);
     case GAME_ACTIONS.SCAN_ROOM: return scanRoom(state, now);
-    case GAME_ACTIONS.RESCAN: return scanRoom(state, now);
+    case GAME_ACTIONS.RESCAN: return rescanRoom(state, now);
     case GAME_ACTIONS.APPROVE_LAYOUT: return approveLayout(state, now);
     case GAME_ACTIONS.START_GAME: return startGame(state, now);
     case GAME_ACTIONS.END_GAME: return endGame(state, now);

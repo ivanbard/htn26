@@ -51,11 +51,18 @@ test("host commands follow start, scan, approval, burger placement, and round li
   const transport = createMockTransport({ now: () => now });
 
   assert.equal(transport.snapshot().setup.phase, SETUP_PHASES.IDLE);
+  const idleHtml = renderApp(transport.snapshot(), now);
+  assert.match(idleHtml, /data-command="RESCAN" disabled/);
+  await transport.command(GAME_ACTIONS.RESCAN);
+  assert.equal(transport.snapshot().setup.phase, SETUP_PHASES.IDLE);
+
   await transport.command(GAME_ACTIONS.START_HOST);
   assert.equal(transport.snapshot().setup.phase, SETUP_PHASES.SCANNING);
   await transport.command(GAME_ACTIONS.SCAN_ROOM);
   assert.equal(transport.snapshot().setup.phase, SETUP_PHASES.LAYOUT_PROPOSED);
   assert.equal(transport.snapshot().floorPlan.accepted, false);
+  await transport.command(GAME_ACTIONS.RESCAN);
+  assert.equal(transport.snapshot().setup.phase, SETUP_PHASES.LAYOUT_PROPOSED);
 
   await transport.command(GAME_ACTIONS.APPROVE_LAYOUT);
   assert.equal(transport.snapshot().setup.phase, SETUP_PHASES.BURGER_PLACEMENT);
@@ -74,8 +81,6 @@ test("host commands follow start, scan, approval, burger placement, and round li
   assert.equal(transport.snapshot().setup.phase, SETUP_PHASES.ENDED);
   assert.equal(transport.snapshot().clock.status, "ended");
 
-  await transport.command(GAME_ACTIONS.RESCAN);
-  assert.equal(transport.snapshot().setup.phase, SETUP_PHASES.LAYOUT_PROPOSED);
   await transport.command(GAME_ACTIONS.RESET_GAME);
   assert.equal(transport.snapshot().setup.phase, SETUP_PHASES.IDLE);
   assert.equal(transport.snapshot().floorPlan.accepted, false);
