@@ -95,9 +95,10 @@ class GatewayProtocolTests(LuaTestMixin, unittest.TestCase):
             'local finish = gateway_test.serial_end_frame()\n'
             'assert(start == "HTN26|GAME|START_GAME|120|3")\n'
             'assert(finish == "HTN26|GAME|GAME_END|3")\n'
-            'assert(gateway_test.lifecycle_radio_frame("START_GAME") == start)\n'
-            'assert(gateway_test.lifecycle_radio_frame("GAME_END") == finish)\n'
-            "assert(#start <= 44 and #finish <= 44)"
+            'assert(gateway_test.lifecycle_radio_frame("START_GAME") == "OC1|000001|G|S")\n'
+            'assert(gateway_test.lifecycle_radio_frame("GAME_END") == "OC1|000002|G|E")\n'
+            'assert(#start <= 44 and #finish <= 44)\n'
+            'assert(#gateway_test.lifecycle_radio_frame("START_GAME") <= 44)'
         )
 
     def test_fifo_is_bounded_and_preserves_order(self):
@@ -150,11 +151,13 @@ class HostLifecycleTests(LuaTestMixin, unittest.TestCase):
             "on_enter({})\n"
             "on_button(8, 1)\n"
             'assert(logs[2] == "HTN26|GAME|START_GAME|120|3")\n'
-            'assert(broadcasts[1] == "HTN26|GAME|START_GAME|120|3")\n'
+            'assert(logs[3] == "HTN26|HOST|CONTROL|OC1|000001|G|S")\n'
+            'assert(broadcasts[1] == "OC1|000001|G|S")\n'
             "now = 120000\n"
             "on_tick()\n"
-            'assert(logs[3] == "HTN26|GAME|GAME_END|3")\n'
-            'assert(broadcasts[2] == "HTN26|GAME|GAME_END|3")'
+            'assert(logs[4] == "HTN26|GAME|GAME_END|3")\n'
+            'assert(logs[5] == "HTN26|HOST|CONTROL|OC1|000002|G|E")\n'
+            'assert(broadcasts[2] == "OC1|000002|G|E")'
         )
 
 
