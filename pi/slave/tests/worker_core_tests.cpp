@@ -98,6 +98,23 @@ void test_freshness_and_stale_data() {
   require(queue.stale_drop_count() == 1, "stale discard is diagnosed");
 }
 
+void test_out_of_order_detections_are_rejected() {
+  WorkerCore core(config());
+  require(core.process_detections(at_ms(100),
+                                  {detection(1, 10.0, 10.0, 0.8)}, 4ms)
+              .has_value(),
+          "newer detection is accepted");
+  require(!core.process_detections(at_ms(99),
+                                   {detection(1, 99.0, 99.0, 0.8)}, 20ms),
+          "older detection is rejected");
+  const auto latest = core.latest_observation(at_ms(100));
+  require(latest && latest->timestamp == at_ms(100) &&
+              latest->players[0].position.x == 10.0,
+          "older detection cannot replace the latest observation");
+  require(core.diagnostics().last_inference_latency == 4ms,
+          "rejected detection does not overwrite diagnostics");
+}
+
 void test_bounded_replacement() {
   ReplaceableObservationQueue queue(2);
   queue.push(observation(1, 0), at_ms(0), 1s);
@@ -207,6 +224,7 @@ struct FakeCamera final : CameraAdapter {
 struct FakeInference final : InferenceAdapter {
   bool initialize_ok = true;
   bool infer_ok = true;
+  int shutdowns = 0;
   AdapterResult initialize() override { return {initialize_ok, "fake AI"}; }
   InferenceResult infer(const CameraFrame&, TimePoint) override {
     InferenceResult result;
@@ -216,7 +234,7 @@ struct FakeInference final : InferenceAdapter {
     result.detail = "fake inference";
     return result;
   }
-  void shutdown() override {}
+  void shutdown() override { ++shutdowns; }
 };
 
 struct FakeMaster final : MasterTransport {
@@ -256,16 +274,49 @@ void test_runtime_adapter_failure_recovery() {
   require(camera.shutdowns == 1, "runtime shuts down camera adapter");
 }
 
+void test_runtime_cleans_up_partial_startup() {
+  WorkerCore core(config());
+  FakeCamera camera;
+  FakeInference inference;
+  FakeMaster master;
+  WorkerRuntime runtime(core, camera, inference, master);
+
+  inference.initialize_ok = false;
+  require(!runtime.start(), "runtime rejects failed inference startup");
+  require(camera.shutdowns == 1 && inference.shutdowns == 0,
+          "runtime cleans up only the successfully initialized adapter");
+  require(!runtime.run_once(at_ms(0)), "failed startup cannot run a cycle");
+}
+
+void test_inference_failure_is_not_cleared_by_core_processing() {
+  WorkerCore core(config());
+  core.report_inference_status(false);
+  require(core.process_detections(at_ms(0),
+                                  {detection(1, 1.0, 1.0, 0.8)}, 1ms)
+              .has_value(),
+          "processing can retain a locally produced observation");
+  require(core.state() == WorkerState::InferenceUnavailable,
+          "processing cannot clear an inference failure");
+  core.report_inference_status(true);
+  require(core.process_detections(at_ms(1),
+                                  {detection(1, 1.0, 1.0, 0.8)}, 1ms)
+              .has_value(),
+          "explicit inference recovery permits processing");
+}
+
 }  // namespace
 
 int main() {
   test_homography();
   test_freshness_and_stale_data();
+  test_out_of_order_detections_are_rejected();
   test_bounded_replacement();
   test_unknown_identity_and_bounded_hold();
   test_heartbeat_scheduler();
   test_failure_recovery();
   test_runtime_adapter_failure_recovery();
+  test_runtime_cleans_up_partial_startup();
+  test_inference_failure_is_not_cleared_by_core_processing();
   std::cout << "worker_core_tests: all tests passed\n";
   return EXIT_SUCCESS;
 }

@@ -201,9 +201,12 @@ void WorkerCore::report_inference_status(bool healthy) {
 std::optional<TrackingObservation> WorkerCore::process_detections(
     TimePoint timestamp, const std::vector<Detection>& detections,
     Duration inference_latency) {
+  if (last_inference_timestamp_ && timestamp < *last_inference_timestamp_) {
+    return std::nullopt;
+  }
+
   diagnostics_.last_inference_latency =
       std::max(inference_latency, Duration::zero());
-  diagnostics_.inference = Health::Healthy;
 
   if (last_inference_timestamp_ && timestamp > *last_inference_timestamp_) {
     const std::chrono::duration<double> seconds =
@@ -351,11 +354,19 @@ WorkerRuntime::WorkerRuntime(WorkerCore& core, CameraAdapter& camera,
       master_(master) {}
 
 bool WorkerRuntime::start() {
+  if (started_) return true;
+
   const AdapterResult camera_result = camera_.initialize();
   core_.report_camera_status(camera_result.ok);
   const AdapterResult inference_result = inference_.initialize();
   core_.report_inference_status(inference_result.ok);
   started_ = camera_result.ok && inference_result.ok;
+  if (!started_) {
+    if (camera_result.ok) camera_.shutdown();
+    if (inference_result.ok) inference_.shutdown();
+    core_.report_camera_status(false);
+    core_.report_inference_status(false);
+  }
   return started_;
 }
 
