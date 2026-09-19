@@ -15,8 +15,8 @@ A game starts with:
 - one raspberry pi at where serving should be
 - other two raspberry pis covering the gameplay field from afar
 2. plug in one badge into the raspberry pi at the serving area (we will call this the master pi and master badge)
-3. on the master badge set to "host" mode in the app. Set "player" mode on the 3 other badges
-4. Click start on the host badge and the raspberry pis take photos and generate a floor plan that it displays
+3. Open the stationary gateway app on the serving-area badge. It always runs in host mode; the other badges run the player app.
+4. Press START on the host badge. It emits `HTN26|HOST|SCAN|3PI|BURGER`; the three Raspberry Pis take photos and generate the floor plan that they display.
 5. you can approve the floorplan, and once it's approved it auto generates the burger level and tells you where to put each things
 
 btw we're doing the burger level
