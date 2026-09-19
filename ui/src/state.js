@@ -45,7 +45,9 @@ export function isStale(item, now, fallback = 2_000) {
 }
 
 export function playerPosition(player) {
-  return player?.position || player || {};
+  const position = player?.position || player;
+  if (!Number.isFinite(Number(position?.x)) || !Number.isFinite(Number(position?.y))) return null;
+  return position;
 }
 
 export function healthStatus(item, now) {
