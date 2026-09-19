@@ -23,7 +23,7 @@ function parseArgs(argv) {
   return options;
 }
 
-export async function createRuntime({ env = process.env, now = () => Date.now(), fetchImpl = globalThis.fetch, dataDir } = {}) {
+export async function createRuntime({ env = process.env, now = () => Date.now(), fetchImpl = globalThis.fetch, dataDir, authoritativeEngine } = {}) {
   const directory = dataDir || env.HTN26_DATA_DIR || path.join(path.dirname(fileURLToPath(import.meta.url)), "data");
   const photoStore = new PhotoStore({ directory });
   await photoStore.init();
@@ -35,6 +35,7 @@ export async function createRuntime({ env = process.env, now = () => Date.now(),
     orderIntervalMinSeconds: Number(env.HTN26_ORDER_INTERVAL_MIN_SECONDS) || 8,
     orderIntervalMaxSeconds: Number(env.HTN26_ORDER_INTERVAL_MAX_SECONDS) || 35,
     maxActiveOrders: Number(env.HTN26_MAX_ACTIVE_ORDERS) || 3,
+    authoritativeEngine,
   });
   const serialAdapter = createSerialStreamAdapter({
     onRecord: (record) => {

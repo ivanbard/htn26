@@ -82,7 +82,7 @@ export function createInitialProjectionState(now = Date.now()) {
 export class ServerProjection {
   constructor({ provider, now = () => Date.now(), roundSeconds = ROUND_SECONDS,
     orderIntervalSeconds, orderIntervalMinSeconds = 8, orderIntervalMaxSeconds = 35,
-    maxActiveOrders = 3, random = Math.random } = {}) {
+    maxActiveOrders = 3, random = Math.random, authoritativeEngine } = {}) {
     this.now = now;
     this.provider = provider || new LocalFloorplanProvider({ now });
     this.roundSeconds = roundSeconds;
@@ -91,6 +91,7 @@ export class ServerProjection {
     this.orderIntervalMaxSeconds = Math.max(this.orderIntervalMinSeconds, Math.min(180, Number.isFinite(fixedInterval) ? fixedInterval : Number(orderIntervalMaxSeconds)));
     this.maxActiveOrders = Math.max(1, Math.min(6, Number(maxActiveOrders) || 3));
     this.random = typeof random === "function" ? random : Math.random;
+    this.authoritativeEngine = authoritativeEngine || null;
     this._nextOrderAt = null;
     this._orderSequence = 0;
     this._state = createInitialProjectionState(now());
@@ -124,6 +125,15 @@ export class ServerProjection {
   }
 
   _touch(now = this.now()) { this._publish(now); }
+
+  applyAuthoritativeSnapshot(snapshot, now = this.now()) {
+    if (!snapshot || typeof snapshot !== "object") throw new Error("an authoritative snapshot is required");
+    this._state = clone(snapshot);
+    this._state.setup ??= { phase: "idle", message: "", updatedAt: iso(now) };
+    this._state.setup.updatedAt = iso(now);
+    this._emit(now);
+    return this.snapshot(now);
+  }
 
   _patienceSeconds() {
     const span = this.orderIntervalMaxSeconds - this.orderIntervalMinSeconds;
@@ -333,6 +343,11 @@ export class ServerProjection {
   }
 
   submit(player, value, now) {
+    if (this.authoritativeEngine?.submit) {
+      const result = this.authoritativeEngine.submit({ playerId: player?.id || null, value, now });
+      if (result?.state) this.applyAuthoritativeSnapshot(result.state, now);
+      return result?.submission || result;
+    }
     const raw = String(value || "").toUpperCase();
     const active = this._activeOrders();
     const current = active[0] || null;
@@ -390,6 +405,17 @@ export class ServerProjection {
   ingestBadgeEvent(intent, now = this.now()) {
     const sequenceKey = `${String(intent.senderMac || "").toUpperCase()}#${intent.sequence}`;
     if (this._seenEvents.has(sequenceKey)) return { accepted: false, duplicate: true, detail: "duplicate badge sequence ignored" };
+    const isHostControl = intent.type === "H" && (intent.value === "START" || intent.value === "END");
+    if (!isHostControl && this._state.timer.status !== "running") {
+      this._state.health.gateway = { ...this._state.health.gateway, status: "healthy", lastSeenAt: iso(now), detail: "Host badge / USB online" };
+      this._touch(now);
+      return { accepted: false, duplicate: false, ignored: true, detail: "badge event ignored before game start", stateVersion: this._state.version };
+    }
+    if (this.authoritativeEngine?.ingestBadgeEvent) {
+      const result = this.authoritativeEngine.ingestBadgeEvent(intent, now);
+      if (result?.state) this.applyAuthoritativeSnapshot(result.state, now);
+      return result;
+    }
     const player = this._playerForIntent(intent);
     const value = String(intent.value || "");
     let detail = "badge event projected";

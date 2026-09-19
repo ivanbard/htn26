@@ -112,6 +112,12 @@ Projection reads:
   `/api/submissions`: small browser-friendly projections.
 - `GET /api/events`: SSE snapshots; clients should use the `version` field.
 
+When the QNX master adapter is connected, pass it to `createRuntime` as
+`authoritativeEngine`. Its `ingestBadgeEvent` and `submit` methods return the
+canonical result and optional state snapshot; the HTTP projection mirrors that
+snapshot. The local projection rules are retained as the workstation fixture
+path until the QNX adapter is available.
+
 Exactly four recipes are generated: `PLAIN_MEAT`, `CHEESEBURGER`,
 `LETTUCE_MEAT`, and `CHEESE_LETTUCE_MEAT`. Every recipe contains meat; cheese
 and lettuce are optional. A submission event should carry

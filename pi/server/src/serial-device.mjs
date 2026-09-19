@@ -6,17 +6,40 @@ import { createSerialStreamAdapter } from "./protocol.mjs";
  * /dev/ser* node or a Linux tty; it only consumes byte chunks from this
  * adapter. No serial package is required for the first slice.
  */
-export function openSerialDevice(devicePath, { onRecord = () => {}, onError = () => {}, parser: suppliedParser } = {}) {
+export function openSerialDevice(devicePath, { onRecord = () => {}, onError = () => {}, parser: suppliedParser, reconnectDelayMs = 250 } = {}) {
   if (!devicePath) throw new Error("a serial device path is required");
-  const stream = createReadStream(devicePath, { encoding: null, highWaterMark: 1024 });
   const parser = suppliedParser || createSerialStreamAdapter({ onRecord });
-  stream.on("data", (chunk) => parser.push(chunk));
-  stream.on("end", () => parser.flush());
-  stream.on("error", onError);
+  let stream = null;
+  let closed = false;
+  let retryTimer = null;
+  const open = () => {
+    if (closed) return;
+    stream = createReadStream(devicePath, { encoding: null, highWaterMark: 1024 });
+    stream.on("data", (chunk) => parser.push(chunk));
+    stream.on("end", scheduleReconnect);
+    stream.on("error", (error) => {
+      onError(error);
+      scheduleReconnect();
+    });
+  };
+  const scheduleReconnect = () => {
+    if (closed || retryTimer) return;
+    retryTimer = setTimeout(() => {
+      retryTimer = null;
+      open();
+    }, Math.max(0, Number(reconnectDelayMs) || 0));
+    retryTimer.unref?.();
+  };
+  open();
   return {
     path: devicePath,
-    stream,
+    get stream() { return stream; },
     parser,
-    close() { stream.destroy(); },
+    close() {
+      closed = true;
+      if (retryTimer) clearTimeout(retryTimer);
+      retryTimer = null;
+      stream?.destroy();
+    },
   };
 }
