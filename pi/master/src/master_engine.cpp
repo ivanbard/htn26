@@ -165,9 +165,6 @@ std::string MasterEngine::event_key(const protocol::BadgeIntent& intent) {
 
 bool MasterEngine::remember_event(const protocol::BadgeIntent& intent) {
   const std::string key = event_key(intent);
-  if (seen_event_keys_.find(key) != seen_event_keys_.end()) {
-    return false;
-  }
   seen_event_keys_.insert(key);
   seen_event_order_.push_back(key);
   const std::size_t capacity = std::max<std::size_t>(1, config_.dedup_capacity);
@@ -176,6 +173,10 @@ bool MasterEngine::remember_event(const protocol::BadgeIntent& intent) {
     seen_event_order_.erase(seen_event_order_.begin());
   }
   return true;
+}
+
+bool MasterEngine::has_seen_event(const protocol::BadgeIntent& intent) const {
+  return seen_event_keys_.find(event_key(intent)) != seen_event_keys_.end();
 }
 
 bool MasterEngine::set_health_for_time(std::uint64_t now_ms) {
@@ -463,7 +464,7 @@ ActionResult MasterEngine::ingest_serial_line(std::string_view line,
   state_.gateway.last_received_ms = now_ms;
   ++state_.gateway.packet_count;
 
-  if (!remember_event(parsed.intent)) {
+  if (has_seen_event(parsed.intent)) {
     ActionResult duplicate = reject(ActionCode::Duplicate, "duplicate badge sequence ignored");
     publish();
     duplicate.state_version = state_.version;
@@ -471,6 +472,9 @@ ActionResult MasterEngine::ingest_serial_line(std::string_view line,
   }
 
   ActionResult result = apply_intent(parsed.intent, now_ms);
+  if (result.accepted) {
+    remember_event(parsed.intent);
+  }
   publish();
   result.state_version = state_.version;
   return result;
@@ -478,8 +482,9 @@ ActionResult MasterEngine::ingest_serial_line(std::string_view line,
 
 ActionResult MasterEngine::receive_tracking(
     const protocol::WorkerObservation& observation, std::uint64_t now_ms) {
+  bool time_state_changed = state_.now_ms != now_ms;
   state_.now_ms = now_ms;
-  bool time_state_changed = set_health_for_time(now_ms);
+  time_state_changed = set_health_for_time(now_ms) || time_state_changed;
   time_state_changed = update_fused_positions(now_ms) || time_state_changed;
   auto reject_with_time_update = [&](ActionResult result) {
     if (time_state_changed) {
@@ -539,8 +544,9 @@ ActionResult MasterEngine::receive_tracking(
 
 ActionResult MasterEngine::receive_heartbeat(
     const protocol::WorkerHeartbeat& heartbeat, std::uint64_t now_ms) {
+  bool time_state_changed = state_.now_ms != now_ms;
   state_.now_ms = now_ms;
-  bool time_state_changed = set_health_for_time(now_ms);
+  time_state_changed = set_health_for_time(now_ms) || time_state_changed;
   time_state_changed = update_fused_positions(now_ms) || time_state_changed;
   auto reject_with_time_update = [&](ActionResult result) {
     if (time_state_changed) {

@@ -216,10 +216,19 @@ void test_tracking_rejection_and_health_publication() {
               .accepted,
           "worker should become healthy");
 
+  GameState published;
+  engine.set_state_listener([&](const auto& snapshot) { published = snapshot; });
   const auto unknown = engine.receive_tracking(
       WorkerObservation{"cam1", 7, 1, {{99, 0.5, 0.5, 0.95, 1}}}, 1);
   require(unknown.code == ActionCode::InvalidObservation,
           "unknown-player tracking should be rejected");
+  require(published.now_ms == 1,
+          "rejected tracking must publish the authoritative clock");
+  const auto invalid_heartbeat = engine.receive_heartbeat(
+      WorkerHeartbeat{"cam1", 2, 2, true, true, -1.0}, 2);
+  require(invalid_heartbeat.code == ActionCode::InvalidHeartbeat &&
+              published.now_ms == 2,
+          "rejected heartbeat must publish the authoritative clock");
   require(engine.register_badge("AA:BB:CC:DD:EE:FF", 1),
           "badge should register after unknown tracking");
   require(engine.receive_tracking(
@@ -227,8 +236,6 @@ void test_tracking_rejection_and_health_publication() {
               .accepted,
           "the same sequence should remain available to a newly registered player");
 
-  GameState published;
-  engine.set_state_listener([&](const auto& snapshot) { published = snapshot; });
   const auto invalid = engine.receive_tracking(
       WorkerObservation{"cam1", 8, 1001, {{1, 0.5, 0.5, 2.0, 1001}}}, 1001);
   require(invalid.code == ActionCode::InvalidObservation,
@@ -236,6 +243,26 @@ void test_tracking_rejection_and_health_publication() {
   require(engine.worker_state("cam1") == HealthState::Stale &&
               published.workers.at("cam1").state == HealthState::Stale,
           "health transitions must be published with rejected input");
+}
+
+void test_rejected_intent_can_be_retried() {
+  MasterEngine engine(test_config());
+  require(engine.register_badge("AA:BB:CC:DD:EE:FF", 1), "badge should register");
+  engine.start_game(0);
+  require(engine.receive_heartbeat(
+              WorkerHeartbeat{"cam1", 1, 0, true, true, 8.0}, 0)
+              .accepted,
+          "worker should become healthy");
+  auto result = engine.ingest_serial_line(rx(1, 'N', "ING:TOM"), 0);
+  require(result.code == ActionCode::StaleOrLowConfidence,
+          "unlocated intent should be rejected without consuming its sequence");
+  require(engine.receive_tracking(
+              WorkerObservation{"cam1", 1, 1, {{1, 0.5, 0.5, 0.95, 1}}}, 1)
+              .accepted,
+          "source observation should be accepted");
+  result = engine.ingest_serial_line(rx(1, 'N', "ING:TOM"), 1);
+  require(result.accepted && result.code == ActionCode::Accepted,
+          "a previously rejected intent should be retryable");
 }
 
 void test_default_station_boundaries_do_not_overlap() {
@@ -282,6 +309,7 @@ int main() {
     test_complete_tomato_soup_flow_and_dedup();
     test_location_bounds_and_worker_failure();
     test_tracking_rejection_and_health_publication();
+    test_rejected_intent_can_be_retried();
     test_default_station_boundaries_do_not_overlap();
     test_order_timer_and_invalid_inputs();
   } catch (const std::exception& error) {

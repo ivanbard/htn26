@@ -190,6 +190,7 @@ class MasterEngine {
   bool remember_event(const protocol::BadgeIntent& intent);
   void complete_processing(std::uint64_t now_ms);
   void clear_round_state();
+  bool has_seen_event(const protocol::BadgeIntent& intent) const;
   static std::string event_key(const protocol::BadgeIntent& intent);
 };
 
