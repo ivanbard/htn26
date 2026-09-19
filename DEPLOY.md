@@ -48,6 +48,24 @@ The current native role/payload changes have offline build/emulator coverage,
 not physical acceptance. Complete the four-badge hardware gate before calling
 the OOM resolved.
 
+For NixOS-WSL, use the interactive backup-first deploy helper from the repository
+root:
+
+```sh
+python -m pip install pyserial esptool
+python badge/native/deploy.py
+```
+
+The helper lists every discovered serial port with its description, lets you
+choose the port and `host` or `player` role, builds the native image, prints the
+read-only security check, saves full/partition/factory backups, requires typing
+`FLASH`, writes only the factory partition, and verifies the readback. It never
+erases flash or writes the bootloader, partition table, NVS, PHY, or storage.
+Backups default to `~/htn26-badge-backups/`. Use `--skip-build` only when the
+candidate image has already been built and `--image PATH` to select a specific
+candidate. Do not run it until the selected badge is in its established
+bootloader mode.
+
 ## Pi server
 
 The QNX image must provide Node.js 20 or newer, or an equivalent supported Node runtime. QNX serial-device enumeration, permissions, baud settings, and Node availability remain target-hardware validation items.
