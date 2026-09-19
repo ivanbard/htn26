@@ -56,6 +56,9 @@ test("fixture parser accepts noisy and chunk-framed gateway records", async () =
   assert.equal(records[1].intent.value, "START");
   assert.equal(records[2].intent.senderMac, MAC.replace("01", "02"));
   assert.equal(adapter.stats().malformed, 1);
+  const fixedPlayer = parseGatewayRxLine("debug HTN26|RX|AA:BB:CC:DD:EE:02|-46|OC1|000043|E|P2:PU:R");
+  assert.equal(fixedPlayer.ok, true);
+  assert.equal(fixedPlayer.intent.value, "P2:PU:R");
   assert.equal(parseGatewayRxLine("debug HTN26|RX|bad|-1|OC1|1|H|START").ok, false);
 });
 

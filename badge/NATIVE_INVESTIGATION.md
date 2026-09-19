@@ -43,6 +43,47 @@ executable space.
 | 4 | 0x27DAC4 | 0x40380000 | 0x19BAC |
 | 5 | 0x297678 | 0x50000000 | 0x20 |
 
+## Current Lua failure and causal boundary
+
+The current host and player Lua files are valid against the documented API, but
+validity is not the failing boundary. The host reached the stock radio HAL with
+only 26,124 bytes free and a 15,360-byte largest block, then logged
+`BLE_INIT: Malloc failed`, `nimble_port_init: ESP_ERR_NO_MEM`, and finally the
+Lua host's expected `HTN26|GW|DOWN|0|0`. The player independently failed while
+loading/running Lua with `used 40497 / limit 49152, peak 42713`. That second
+failure occurs before player gameplay can establish a usable radio path.
+
+The earliest observable causal divergence is therefore **runtime selection
+before NimBLE initialization**, not the gateway FIFO, packet parser, or a
+radio send. A launcher-started Lua app must retain the Lua state, compiled
+chunk, app tables, closures, and widgets in the shared ESP32 heap before it
+calls `badge.radio.enable()`. The proven native clean-reboot path enters with
+75,384 bytes free and a 65,536-byte largest block before radio, then reaches
+radio-ready state. The failing Lua host enters the same HAL about 49 KiB lower
+in both free and contiguous memory. Increasing `heap_kb` would only raise a Lua
+quota; it would not reserve physical RAM or supply NimBLE's contiguous blocks.
+
+The smallest already-measured counterfactual was the Milestone 1 native shell:
+it changed only app registration/runtime, reused the same stock firmware and
+radio HAL, and had no gameplay, NFC, or Lua VM. It cost 28 bytes of entry heap
+relative to stock Share and successfully initialized BLE. This isolates the
+memory result before the later controller features and is stronger evidence
+than trimming individual Lua labels or queues. There is no measured Lua-only
+reduction in this repository that recovers the approximately 49 KiB gap, so
+this revision does not claim that cosmetic Lua simplification would fix either
+badge.
+
+The supported low-memory deployment consequently uses the native Overcooked
+app on the host **and all three players**. Native packets carry the same
+`OC1|<sequence>|E|P<player>:<action>` application bytes and host lifecycle/
+serial records as the current Lua contracts, but use the recovered stock HAL
+directly. Lua `badge.radio` adds and filters a private `LUA1` carrier prefix, so
+a mixed native/Lua round is not supported. The Lua files remain installable as
+an explicit whole-fleet rollback; they are not deleted or silently replaced.
+The current native contract changes after the historical measurements below
+have only offline build/emulator coverage until the physical gate in
+`native/README.md` is repeated.
+
 ## Native registration and Share
 
 Directly observed in RV32 compressed-instruction disassembly:

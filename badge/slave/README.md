@@ -1,10 +1,33 @@
 # HTN26 fixed player badge
 
-`badge/slave/main.lua` is the current self-contained player app. It uses only
+`badge/slave/main.lua` is the self-contained Lua player profile. It uses only
 APIs in [`../badge-app-guide.md`](../badge-app-guide.md); it has no `require`,
 network, camera, Pi-response, or multi-Pi dependency.
 
-## Install files
+## Supported deployment profiles
+
+The supplied player also reproduces a Lua allocation failure (`used 40497 /
+limit 49152, peak 42713`). The v1 low-memory deployment is therefore the pinned
+native factory extension in [`../native/README.md`](../native/README.md) on all
+three players and the host. Open **Overcooked**, press A, choose one unique fixed
+number 1–3 with LEFT/RIGHT, and press A again; native radio and NFC start only
+after confirmation.
+
+This Lua file remains the explicit compatibility/rollback profile for stock
+firmware and is not replaced or deleted. Rollback is whole-fleet: use the Lua
+host and all three Lua players together. A mixed round cannot work because Lua
+`badge.radio` adds/filters a private `LUA1` carrier prefix while native mode uses
+the recovered stock HAL directly. Native flashing, backup, factory-only write,
+rollback, and remaining physical gates are owned by the native guide.
+
+The gameplay controls and compact OC1 application payloads below are shared by
+both profiles. Native event sequences are six digits and monotonic for one app
+boot, randomized at boot; unlike the Lua store-backed sequence, they are not
+persisted across a reboot. Starting a fresh round resets gateway/Pi session
+state, but repeated reboot/collision behavior remains a hardware integration
+gate.
+
+## Lua rollback install files
 
 The exact badge app files are:
 
@@ -110,7 +133,8 @@ production Lua file rather than a second protocol model.
 
 Host tests cannot validate NFC field coupling, tap or shake thresholds, BLE
 radio range/loss/queueing, LED appearance, cooking timing on real hardware, or
-USB gateway forwarding. A physical badge run requires the Badge IDE: connect
-with a data cable, push exactly `manifest.cfg` and `main.lua`, then open the
-player app on each of three badges. Physical validation remains pending until
-that upload and run are performed.
+USB gateway forwarding. The Lua profile requires the Badge IDE and exactly
+`manifest.cfg` plus `main.lua`. The current native role/payload changes have
+separate build/emulator coverage but still require the four-badge and Pi gate in
+`../native/README.md`; neither offline suite proves the player OOM resolved on
+hardware.

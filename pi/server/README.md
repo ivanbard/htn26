@@ -45,11 +45,13 @@ The expected logical gateway records are the existing badge contract:
 ```text
 HTN26|RX|AA:BB:CC:DD:EE:FF|-48|OC1|42|H|START
 HTN26|RX|AA:BB:CC:DD:EE:FF|-48|OC1|43|B|SUBMIT:CHEESEBURGER
+HTN26|RX|AA:BB:CC:DD:EE:FF|-48|OC1|000044|E|P2:PU:R
 HTN26|GW|UP|12|0
 ```
 
 The parser searches for `HTN26|` anywhere in a line, accepts human-readable
-prefix noise, validates MAC/RSSI/protocol/sequence/type/payload size, and
+prefix noise, validates MAC/RSSI/protocol/sequence/type/payload size, accepts
+the fixed-player `E|P<player>:<action>` transport without rewriting it, and
 handles USB chunks that split a record across reads. The stream adapter is
 shared by fixtures, `/api/serial`, and the physical device. Duplicate
 `MAC + sequence` events are ignored by the projection.

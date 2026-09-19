@@ -24,8 +24,10 @@ There are two types of badges.
 
 Each player wears a badge.
 
-The current player app is the fixed three-player app documented in
-[`slave/README.md`](slave/README.md). It is responsible for:
+The fixed-player behavior is documented in [`slave/README.md`](slave/README.md).
+The current low-memory deployment runs that behavior through the pinned native
+extension; the self-contained Lua player remains the stock-firmware rollback.
+The player path is responsible for:
 
 * reading NFC interactions
 * identifying ingredient/station interactions
@@ -50,8 +52,9 @@ V1 submission is a simultaneous-shake action between the three fixed players.
 There is no delivery-zone or serving-plate NFC contract in the current product.
 
 The gateway badge runs its app continuously while a game is being hosted.
-
-Its primary data path is:
+The supported native/Lua profile selection and no-mixing rule are documented in
+[`master/README.md`](master/README.md) and [`native/README.md`](native/README.md).
+Both preserve the primary data path:
 
 ```text
 player badge
@@ -140,6 +143,7 @@ control contract is owned by [`master/README.md`](master/README.md) and
 [`slave/README.md`](slave/README.md).
 
 Important actions may be retransmitted, but retransmissions must reuse the same sequence number.
+The native host acknowledges these retries but never forwards ACK packets.
 
 The gateway and Pi may deduplicate using:
 
@@ -148,6 +152,11 @@ sender MAC + sequence number
 ```
 
 Radio is not assumed to be perfectly reliable.
+
+Native and Lua deployment profiles preserve these application bytes but are not
+radio-carrier compatible: Lua's restricted API adds/filters `LUA1`, while the
+pinned native extension calls the stock HAL. Deploy or roll back all four
+badges together.
 
 ---
 
