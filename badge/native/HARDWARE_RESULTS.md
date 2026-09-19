@@ -6,7 +6,7 @@ of unavailable stock source. No original ESP-IDF project was recovered.
 
 ## Image and preservation
 
-Candidate: `build/overcooked-factory.bin`, 2,718,448 bytes.
+Milestone 1 candidate (archived): `build/milestone1/overcooked-factory.bin`, 2,718,448 bytes.
 Factory capacity: 2,752,512 bytes; remaining: 34,064 bytes.
 SHA-256: `e2f2de744e9b86a59c6f28b3380ea9485ad4c49148b8ac04e03349a3de5057d3`.
 
@@ -126,6 +126,6 @@ Actual Share transfers need another badge; full Sync needs a compatible station.
 Neither is established by opening those screens. A power-disconnect cold boot,
 long-duration soak, and broader stock-app checks remain physical acceptance work;
 the recorded cold reset used USB/JTAG hardware reset rather than removing power.
-No PING/PONG, NFC, gameplay, LEDs, or server implementation is included here.
-The next development milestone is a small PING/PONG transport test after the
-remaining peer/station checks, retaining the current heap diagnostics.
+These are Milestone 1 results. Subsequent PING/PONG implementation and testing
+are documented in `RADIO_PROTOCOL.md` and `MILESTONE2_RESULTS.md`. NFC, gameplay,
+and a server are still outside the native diagnostic app.

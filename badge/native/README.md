@@ -1,4 +1,4 @@
-# Native Overcooked shell
+# Native Overcooked diagnostic app
 
 This is a binary extension of the backed-up stock firmware, not a replacement
 firmware or a source rebuild. It is pinned to `v0.1.2-392-gd3089c4` and the
@@ -43,16 +43,19 @@ Boot logs `OC_NATIVE|registered`. Overcooked appears as a native launcher app,
 using the existing Share icon for this first shell. Selecting it uses the
 stock clean-reboot policy and the target ID `overcooked`.
 
-The app draws a title, radio status, and Home instruction. Its first tick
+The app draws a title, radio status, last packet/peer, and button instructions. Its first tick
 checks NVS without erasing it, then starts the existing native radio HAL.
 NVS failure prevents radio initialization. Radio failure remains on screen
-with serial diagnostics. No networking retry loop, NFC, Lua VM, game logic,
-or transfer protocol is added.
+with serial diagnostics. A sends a diagnostic PING; the app replies to incoming
+PINGs with PONG. Matching random challenges distinguish replies from stale
+advertisements. No automatic retry loop, NFC, Lua VM, or game logic is added.
+See `RADIO_PROTOCOL.md` for packet format, recovered HAL calls, LED meanings,
+and the Windows test peer.
 
 Serial heap measurements include internal 8-bit memory (mask 0x804) and
 default memory (mask 0x1000), at entry, before radio, after radio, exit, and
 every 250 ticks while idle. The nominal tick interval is 20 ms. The permanent
-app object is 16 bytes, excluding allocator, registry, and launcher overhead.
+app object is 128 bytes, excluding allocator, registry, and launcher overhead.
 LVGL allocations belong to the app screen and are reclaimed by stock code.
 
 Home uses stock registry exit handling. The app stops the radio; the registry
@@ -83,8 +86,9 @@ pre-write backup. Keeping it there permits readback before application startup.
 Physical acceptance: cold boot, launcher entry, native radio success, several
 minutes of stable heap logs, repeated exit/reentry with focus restoration,
 then My Badge/identity, Share transfer, Sync, and installed Lua app regression
-checks. Actual Share/Sync transfer checks require a peer/station. PING/PONG
-work remains gated on these results.
+checks. Actual Share/Sync transfer checks require a peer/station. The user
+authorized PING/PONG development while that second badge is unavailable;
+two-way radio success must still be measured before adding NFC or gameplay.
 
 See `../NATIVE_INVESTIGATION.md` for recovered interfaces and NVS recovery
 behavior. The addresses are private ABI details, not a stable SDK.
