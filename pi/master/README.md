@@ -6,7 +6,9 @@ The master Pi is the single authoritative controller for the game. It combines
 badge intent, fresh camera observations, and deterministic game rules. Worker
 Pis and badges never mutate authoritative state directly.
 
-This directory contains a portable C++ MVP core. QNX device and network code
+This directory contains a portable C++ MVP core. Its worker-observation and
+delivery fixtures are implementation slices from before the current one-Pi v1
+product brief; they are not current v1 product claims. QNX device and network code
 belongs behind the interfaces in `src/platform_adapters.hpp`.
 
 ## MVP implementation

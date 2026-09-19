@@ -44,10 +44,10 @@ The QNX game server decides whether the action is valid.
 
 One badge is permanently connected by USB to the main Raspberry Pi.
 
-This badge is both:
+This badge is the radio gateway between the three player badges and the QNX server.
 
-1. the radio gateway between the player badges and the QNX server
-2. the physical dish-submission station
+V1 submission is a simultaneous-shake action between the three fixed players.
+There is no delivery-zone or serving-plate NFC contract in the current product.
 
 The gateway badge runs its app continuously while a game is being hosted.
 
@@ -101,7 +101,11 @@ main Pi
 
 Physical game objects contain NFC tags.
 
-Examples include:
+The v1 zones are pantry, fridge, cutting board, and stove.
+
+Implementation-specific tag values remain owned by the player and gateway app READMEs.
+
+Examples from older app fixtures include:
 
 ```text
 ING:TOMATO
@@ -124,42 +128,7 @@ Example:
 OC1|42|N|ING:TOMATO
 ```
 
-The server combines this with vision information before modifying authoritative state.
-
----
-
-## Dish Submission
-
-Dish delivery is intentionally different from ordinary player interactions.
-
-The physical serving plate has an NFC tag attached to it.
-
-To submit an order, the player physically brings the plate to the stationary gateway badge and taps the plate's NFC tag against that badge.
-
-Flow:
-
-```text
-completed physical plate
-        ↓
-tap plate NFC tag
-against gateway badge
-        ↓
-gateway reads tag
-        ↓
-USB serial
-        ↓
-main Pi
-        ↓
-validate dish
-        ↓
-complete / reject order
-```
-
-This makes the delivery point a fixed physical location, similar to the serving counter in Overcooked.
-
-The server should only score the dish if its authoritative state says the plate contains a valid recipe.
-
-The NFC tag itself identifies the plate. It does not need to encode the complete contents of the dish.
+The server combines the reported intent with the authoritative game state before applying it.
 
 ---
 
@@ -302,5 +271,4 @@ gateway logs it over USB
 main Pi sees event
 ```
 
-After this works, add stations, motion interactions, plate submission, and richer player feedback.
-
+After this works, add the remaining station, motion, and player-feedback interactions.

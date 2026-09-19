@@ -4,14 +4,16 @@
 
 All Raspberry Pis run QNX.
 
-The Pi layer owns:
+The current v1 Pi layer owns:
 
 * embedded AI inference
-* camera processing
-* player tracking
-* inter-node communication
+* phone-camera setup processing
 * authoritative game-state execution
-* health monitoring
+* host-badge and UI transport
+
+The current v1 deployment uses one Raspberry Pi and an Apple phone camera.
+The worker and multi-camera responsibilities below remain implementation seams
+for future expansion, not current v1 player-location tracking.
 
 No AI inference required for gameplay should depend on the cloud.
 
@@ -27,10 +29,7 @@ Owns:
 
 * authoritative game state
 * USB gateway-badge serial input
-* its own camera pipeline
-* AI inference for camera 1
-* observations from worker Pis
-* multi-camera position fusion
+* phone-camera setup inference
 * station-zone evaluation
 * orders
 * timers
@@ -42,9 +41,9 @@ Owns:
 
 `pi/slave/`
 
-The same worker software is deployed to Pi 2 and Pi 3.
+The same worker software can be deployed to future additional camera Pis.
 
-Each owns:
+When enabled, each worker owns:
 
 * one camera
 * local AI inference

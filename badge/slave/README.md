@@ -33,9 +33,10 @@ LEDs deliberately say **locally captured**, never server-confirmed. A full
 four-event pending queue reports a local drop rather than growing without
 bound.
 
-The intended player flow is tomato -> chop station -> pot -> plate. Delivery is
-owned by the stationary gateway badge: bring the tagged plate to that badge;
-this player app does not pretend to confirm delivery.
+The current product flow is pantry or fridge -> cutting board or stove -> plate,
+with plate contents exchanged between player badges and submitted by the three
+players shaking at the same time. This player app reports intent and does not
+own game state or submission authority.
 
 ## Checks
 

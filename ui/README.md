@@ -17,10 +17,13 @@ Open <http://127.0.0.1:4173>. The development page uses the mock master-Pi trans
 1. `Start` host mode.
 2. `Scan Room` to show the proposed floor plan.
 3. `Approve Layout` (the existing `Accept Layout` protocol alias) to accept the plan and generate burger-level placement instructions.
-4. Place the cheese, lettuce, meat, and bun sources, the chopping boards, stoves, and serving badge as shown.
-5. `Start Game` for a roughly two-minute round.
+4. Place the cheese, lettuce, meat, and bun sources, the chopping board, and stove zones as shown.
+5. Start the roughly two-minute round from the host badge and mirror it in the UI.
 
-The mock also supports delivery fixtures for tests (`DELIVERY_SUCCESS` and `DELIVERY_FAILURE`). The UI renders the serving result and score supplied by the transport; it does not create a delivery result itself.
+The current product uses simultaneous-shake submission, while the checked-in
+mock retains legacy delivery fixtures for transport tests. The UI renders the
+result and score supplied by the transport; it does not validate plates or
+create a result itself.
 
 ## Product flow
 
@@ -33,11 +36,11 @@ host Start
   -> host approves floor plan
   -> burger level placement instructions
   -> two-minute burger round
-  -> topping-variation orders and live player positions
-  -> serving badge validates completed burger
+  -> topping-variation orders and fixed player icons
+  -> simultaneous-shake submission
 ```
 
-A burger uses buns, meat, cheese, and lettuce. Cheese, lettuce, and meat can be cut at chopping boards before assembly. Stoves expose authoritative cooking progress. There is no dish-washing station. The serving panel shows a line of standing Waterloo geese beside the serving location.
+A burger uses buns, meat, cheese, and lettuce. Cheese, lettuce, and meat can be cut at the cutting board before assembly. Stoves expose authoritative cooking progress. There is no dish-washing or delivery station.
 
 ## Architecture and transport seam
 
@@ -59,10 +62,10 @@ A burger uses buns, meat, cheese, and lettuce. Cheese, lettuce, and meat can be 
 Authoritative values stay explicit:
 
 - `floorPlan.accepted`, `floorPlan.stations`, and `burgerLevel.placementInstructions` describe the accepted map and where the physical burger level belongs.
-- `players[].position` and `players[].tracking.lastSeenAt` are master-Pi observations. Missing or old observations are rendered at no fabricated location with a visible `TRACKING LOST` or `TRACKING STALE` marker. Player tokens never animate between snapshots.
+- Player icons remain at the bottom of the screen; held items, chopping state, cooking progress, and submission results come from the master snapshot.
 - `order.remainingSeconds`, `clock.remainingSeconds`, station `progress`, and cooking state are displayed values from the master snapshot. The UI never decrements them locally.
-- `health.gateway`, `health.workers`, and `health.inference` show gateway/camera/AI health. A stale worker produces a visible `TRACKING DEGRADED` callout.
-- `serving.lastEvent` and `score` are rendered exactly as delivered by the transport.
+- `health.gateway` and `health.inference` show gateway and setup-inference health; worker health is relevant only to a future multi-camera deployment.
+- Submission results and score are rendered exactly as delivered by the transport.
 
 ## Tests
 
@@ -70,4 +73,6 @@ Authoritative values stay explicit:
 npm test
 ```
 
-Tests use only Node's standard library and cover burger-level rendering, missing/stale tracking, stale worker health, host scan/approval/start/end/reset transitions, and serving/score success and failure updates.
+Tests use only Node's standard library and cover burger-level rendering,
+legacy tracking and delivery fixtures, host scan/approval/start/end/reset
+transitions, and score success and failure updates.
