@@ -21,29 +21,56 @@ test("renders the approved burger floor plan, topping order, stations, and goose
   assert.match(html, /BURGER LEVEL PLACEMENT/);
   assert.match(html, /data-player="p1"/);
   assert.match(html, /data-player="p2"/);
-  assert.match(html, /BURGER/);
-  assert.match(html, /CHEESE/);
-  assert.match(html, /LETTUCE/);
-  assert.match(html, /STOVE 1/);
-  assert.match(html, /CHOP 3[\s\S]*MEAT[\s\S]*CHOPPING/);
+  assert.match(html, /data-player="p3"/);
+  assert.match(html, /CHEESE-LETTUCE-MEAT BURGER/);
+  assert.match(html, /Holding:[\s\S]*RAW MEAT/);
+  assert.match(html, /PANTRY/);
+  assert.match(html, /FRIDGE/);
+  assert.match(html, /CUTTING BOARD/);
+  assert.match(html, /STOVE/);
+  assert.match(html, /patience-segment/);
   assert.match(html, /62%/);
-  assert.match(html, /4 geese waiting/);
+  assert.match(html, /Ready for the three-player shake/);
   assert.match(html, /01:52/);
+});
+
+test("supports exactly four meat-based recipe definitions and independent order cards", () => {
+  const state = createInitialMockState(1_000);
+  assert.deepEqual(state.recipes.map((recipe) => recipe.name), [
+    "PLAIN MEAT BURGER",
+    "CHEESEBURGER",
+    "LETTUCE-MEAT BURGER",
+    "CHEESE-LETTUCE-MEAT BURGER",
+  ]);
+  assert.equal(state.recipes.every((recipe) => recipe.ingredients.includes("MEAT")), true);
+
+  state.orders.push({
+    id: "order-2",
+    recipe: "CHEESEBURGER",
+    status: "active",
+    remainingSeconds: 74,
+    patienceSegments: ["full", "warning", "empty"],
+    toppings: ["CHEESE"],
+    components: ["BUN", "MEAT", "CHEESE"],
+  });
+  const html = renderApp(state, 1_000);
+  assert.match(html, /2 burger orders/);
+  assert.match(html, /data-order="order-1"/);
+  assert.match(html, /data-order="order-2"/);
+  assert.equal((html.match(/class="patience-segment/g) || []).length, 6);
 });
 
 test("marks old or missing player tracking and stale worker health", () => {
   const state = createInitialMockState(1_000);
   state.players[1].tracking.lastSeenAt = 0;
-  delete state.players[0].position;
   state.health.workers[1].lastSeenAt = 0;
 
   const html = renderApp(state, 7_000);
 
   assert.match(html, /data-player="p1" data-stale="true"/);
-  assert.match(html, /P1[\s\S]*TRACKING LOST/);
-  assert.doesNotMatch(html, /data-player="p1"[^>]*style="left:0%;top:0%;/);
+  assert.match(html, /P1[\s\S]*SIGNAL STALE/);
   assert.match(html, /data-player="p2" data-stale="true"/);
-  assert.match(html, /P2[\s\S]*TRACKING STALE/);
+  assert.match(html, /P2[\s\S]*SIGNAL STALE/);
   assert.match(html, /CAMERA 2[\s\S]*STALE/);
   assert.match(html, /TRACKING DEGRADED/);
 });
@@ -110,7 +137,8 @@ test("renders rejected burger without changing score", async () => {
   assert.equal(state.order.status, "active");
   const html = renderApp(state, 2_000);
   assert.match(html, /WRONG BURGER/);
-  assert.match(html, /NO SCORE/);
+  assert.match(html, /PENALTY APPLIED/);
+  assert.match(html, /NO TIP/);
   assert.match(html, /delivery-failure/);
 });
 

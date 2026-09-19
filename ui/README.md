@@ -12,18 +12,18 @@ npm test
 npm run dev
 ```
 
-Open <http://127.0.0.1:4173>. The development page uses the mock master-Pi transport. Try the host flow:
+Open <http://127.0.0.1:4173>. The development page uses a typed mock master-Pi adapter and a static floorplan fixture. Try the host flow:
 
 1. `Start` host mode.
-2. `Scan Room` to show the proposed floor plan.
-3. `Approve Layout` (the existing `Accept Layout` protocol alias) to accept the plan and generate burger-level placement instructions.
-4. Place the cheese, lettuce, meat, and bun sources, the chopping board, and stove zones as shown.
-5. Start the roughly two-minute round from the host badge and mirror it in the UI.
+2. `Review Fixture` to review the static four-station floorplan (pantry, fridge, cutting board, and stove).
+3. `Approve Layout` to accept the fixture and show burger-level placement instructions.
+4. Start the roughly two-minute round and mirror the three fixed players, orders, and submissions.
 
-The current product uses simultaneous-shake submission, while the checked-in
-mock retains legacy delivery fixtures for transport tests. The UI renders the
-result and score supplied by the transport; it does not validate plates or
-create a result itself.
+For a laptop on the same local network as the Pi, run `HOST=0.0.0.0 npm run dev` on the host machine and open `http://<PI_OR_LAPTOP_IP>:4173/?transport=http` from the laptop. The expected Pi server contract is same-origin `GET /api/state`, `POST /api/command`, and `GET /api/events`; this UI does not implement those endpoints.
+
+The current product uses simultaneous-shake submission. The UI renders results,
+gold, and tips supplied by the transport; it does not validate plates or
+create authoritative outcomes itself.
 
 ## Product flow
 
@@ -31,25 +31,24 @@ The master Pi remains authoritative. The UI mirrors this flow:
 
 ```text
 host Start
-  -> camera room scan
-  -> proposed floor plan
+  -> static four-station floorplan review
   -> host approves floor plan
   -> burger level placement instructions
   -> two-minute burger round
-  -> topping-variation orders and fixed player icons
+  -> one-or-more active recipe orders and fixed player icons
   -> simultaneous-shake submission
 ```
 
-A burger uses buns, meat, cheese, and lettuce. Cheese, lettuce, and meat can be cut at the cutting board before assembly. Stoves expose authoritative cooking progress. There is no dish-washing or delivery station.
+A burger uses buns, meat, cheese, and lettuce. The four supported recipes are plain meat burger, cheeseburger, lettuce-meat burger, and cheese-lettuce-meat burger; every recipe includes meat. Orders expose authoritative three-segment patience and countdown values. There is no dish-washing station.
 
 ## Architecture and transport seam
 
-`src/main.js` depends only on this transport interface:
+`src/main.js` depends only on the adapter contract documented in `src/contract.js`:
 
 ```js
 {
   connect(onState) -> cleanup | Promise<cleanup>,
-  command(action) -> Promise<state>,
+  command({ type, payload? }) -> Promise<masterSnapshot>,
   close() // optional
 }
 ```
@@ -61,10 +60,9 @@ A burger uses buns, meat, cheese, and lettuce. Cheese, lettuce, and meat can be 
 
 Authoritative values stay explicit:
 
-- `floorPlan.accepted`, `floorPlan.stations`, and `burgerLevel.placementInstructions` describe the accepted map and where the physical burger level belongs.
-- Player icons remain at the bottom of the screen; held items, chopping state, cooking progress, and submission results come from the master snapshot.
-- `order.remainingSeconds`, `clock.remainingSeconds`, station `progress`, and cooking state are displayed values from the master snapshot. The UI never decrements them locally.
-- `health.gateway` and `health.inference` show gateway and setup-inference health; worker health is relevant only to a future multi-camera deployment.
+- `floorPlan.accepted`, `floorPlan.stations`, and `burgerLevel.placementInstructions` describe the accepted static map and physical placement.
+- Player cards remain at the bottom of the gameplay view; holdings, logical station/action status, and submission results come from the master snapshot. No camera position is claimed when tracking is unavailable.
+- `orders[*].remainingSeconds`, `orders[*].patienceSegments`, `clock.remainingSeconds`, station `progress`, gold, and tips are displayed values from the master snapshot. The UI never decrements or invents them locally.
 - Submission results and score are rendered exactly as delivered by the transport.
 
 ## Tests
@@ -73,6 +71,7 @@ Authoritative values stay explicit:
 npm test
 ```
 
-Tests use only Node's standard library and cover burger-level rendering,
-legacy tracking and delivery fixtures, host scan/approval/start/end/reset
-transitions, and score success and failure updates.
+Tests use only Node's standard library and cover the public rendered setup/live
+flow, four recipe definitions, independent order cards and patience meters,
+fixed-player holdings, host scan/approval/start/end/reset transitions, and
+submission success and failure updates.
