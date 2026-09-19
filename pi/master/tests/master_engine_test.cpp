@@ -23,15 +23,18 @@ using htn26::protocol::PlayerObservation;
 using htn26::protocol::WorkerHeartbeat;
 using htn26::protocol::WorkerObservation;
 
-void require(bool condition, const std::string& message) {
+void require(bool condition, const std::string &message) {
   if (!condition) {
     throw std::runtime_error(message);
   }
 }
 
-std::string rx(unsigned sequence, char type, const std::string& value) {
+std::string rx(unsigned sequence, char type, const std::string &value) {
   return std::string("serial-prefix HTN26|RX|aa:bb:cc:dd:ee:ff|-53|OC1|") +
-         (sequence < 10 ? "000" : sequence < 100 ? "00" : sequence < 1000 ? "0" : "") +
+         (sequence < 10     ? "000"
+          : sequence < 100  ? "00"
+          : sequence < 1000 ? "0"
+                            : "") +
          std::to_string(sequence) + "|" + type + "|" + value + "\r\n";
 }
 
@@ -59,20 +62,20 @@ void test_protocol_validation() {
           "parsed badge fields should match");
 
   require(!htn26::protocol::parse_gateway_rx_line(
-                "HTN26|RX|AA:BB:CC:DD:EE:FF|-53|OC2|0042|N|ING:TOM")
-                .ok,
+               "HTN26|RX|AA:BB:CC:DD:EE:FF|-53|OC2|0042|N|ING:TOM")
+               .ok,
           "unsupported protocol must be rejected");
   require(!htn26::protocol::parse_gateway_rx_line(
-                "HTN26|RX|not-a-mac|-53|OC1|0042|N|ING:TOM")
-                .ok,
+               "HTN26|RX|not-a-mac|-53|OC1|0042|N|ING:TOM")
+               .ok,
           "invalid MAC must be rejected");
   require(!htn26::protocol::parse_gateway_rx_line(
-                "HTN26|RX|AA:BB:CC:DD:EE:FF|-53|OC1|0042|N|bad|extra")
-                .ok,
+               "HTN26|RX|AA:BB:CC:DD:EE:FF|-53|OC1|0042|N|bad|extra")
+               .ok,
           "extra fields must be rejected");
 
-  const auto status = htn26::protocol::parse_gateway_status_line(
-      "log HTN26|GW|UP|1842|0\r\n");
+  const auto status =
+      htn26::protocol::parse_gateway_status_line("log HTN26|GW|UP|1842|0\r\n");
   require(status.ok && status.status.up && status.status.packet_count == 1842,
           "gateway status should parse");
 }
@@ -82,17 +85,19 @@ void test_complete_tomato_soup_flow_and_dedup() {
   const std::string mac = "AA:BB:CC:DD:EE:FF";
   require(engine.register_badge(mac, 1), "badge should register");
   std::vector<std::uint64_t> published_versions;
-  engine.set_state_listener([&](const auto& snapshot) {
+  engine.set_state_listener([&](const auto &snapshot) {
     published_versions.push_back(snapshot.version);
   });
   require(engine.start_game(0), "game should start");
-  require(engine.receive_heartbeat(
-              WorkerHeartbeat{"cam1", 1, 0, true, true, 8.0}, 0)
-              .accepted,
-          "healthy worker heartbeat should be accepted");
+  require(
+      engine
+          .receive_heartbeat(WorkerHeartbeat{"cam1", 1, 0, true, true, 8.0}, 0)
+          .accepted,
+      "healthy worker heartbeat should be accepted");
 
-  require(engine.receive_tracking(
-              WorkerObservation{"cam1", 1, 0, {{1, 0.5, 0.5, 0.95, 0}}}, 0)
+  require(engine
+              .receive_tracking(
+                  WorkerObservation{"cam1", 1, 0, {{1, 0.5, 0.5, 0.95, 0}}}, 0)
               .accepted,
           "source observation should be accepted");
   auto result = engine.ingest_serial_line(rx(1, 'N', "ING:TOM"), 0);
@@ -107,8 +112,9 @@ void test_complete_tomato_soup_flow_and_dedup() {
   require(engine.state().players.at(1).held_item == Item::RawTomato,
           "duplicate must not apply a second action");
 
-  require(engine.receive_tracking(
-              WorkerObservation{"cam1", 2, 2, {{1, 1.5, 0.5, 0.95, 2}}}, 2)
+  require(engine
+              .receive_tracking(
+                  WorkerObservation{"cam1", 2, 2, {{1, 1.5, 0.5, 0.95, 2}}}, 2)
               .accepted,
           "chopping observation should be accepted");
   require(engine.ingest_serial_line(rx(2, 'N', "STN:CHOP1"), 2).accepted,
@@ -122,8 +128,10 @@ void test_complete_tomato_soup_flow_and_dedup() {
   require(engine.state().players.at(1).held_item == Item::ChoppedTomato,
           "chopping timer should produce chopped tomato");
 
-  require(engine.receive_tracking(
-              WorkerObservation{"cam1", 3, 104, {{1, 2.5, 0.5, 0.95, 104}}}, 104)
+  require(engine
+              .receive_tracking(
+                  WorkerObservation{"cam1", 3, 104, {{1, 2.5, 0.5, 0.95, 104}}},
+                  104)
               .accepted,
           "pot observation should be accepted");
   require(engine.ingest_serial_line(rx(4, 'N', "STN:POT1"), 104).accepted,
@@ -132,11 +140,14 @@ void test_complete_tomato_soup_flow_and_dedup() {
               ProcessingState::Cooking,
           "cooking timer should be running");
   engine.tick(305);
-  require(engine.state().stations.at(StationKind::Pot).contents == Item::CookedSoup,
+  require(engine.state().stations.at(StationKind::Pot).contents ==
+              Item::CookedSoup,
           "cooking timer should produce cooked soup");
 
-  require(engine.receive_tracking(
-              WorkerObservation{"cam1", 4, 306, {{1, 3.5, 0.5, 0.95, 306}}}, 306)
+  require(engine
+              .receive_tracking(
+                  WorkerObservation{"cam1", 4, 306, {{1, 3.5, 0.5, 0.95, 306}}},
+                  306)
               .accepted,
           "plate observation should be accepted");
   require(engine.ingest_serial_line(rx(5, 'N', "STN:PLATE"), 306).accepted,
@@ -144,8 +155,10 @@ void test_complete_tomato_soup_flow_and_dedup() {
   require(engine.state().players.at(1).held_item == Item::SoupPlate,
           "player should hold plated soup");
 
-  require(engine.receive_tracking(
-              WorkerObservation{"cam1", 5, 307, {{1, 4.5, 0.5, 0.95, 307}}}, 307)
+  require(engine
+              .receive_tracking(
+                  WorkerObservation{"cam1", 5, 307, {{1, 4.5, 0.5, 0.95, 307}}},
+                  307)
               .accepted,
           "delivery observation should be accepted");
   result = engine.ingest_serial_line(rx(6, 'N', "STN:DELIVERY"), 307);
@@ -163,14 +176,17 @@ void test_complete_tomato_soup_flow_and_dedup() {
 
 void test_location_bounds_and_worker_failure() {
   MasterEngine engine(test_config());
-  require(engine.register_badge("AA:BB:CC:DD:EE:FF", 1), "badge should register");
+  require(engine.register_badge("AA:BB:CC:DD:EE:FF", 1),
+          "badge should register");
   engine.start_game(0);
-  require(engine.receive_heartbeat(
-              WorkerHeartbeat{"cam1", 1, 0, true, true, 8.0}, 0)
-              .accepted,
-          "worker should become healthy");
-  require(engine.receive_tracking(
-              WorkerObservation{"cam1", 1, 0, {{1, 0.5, 0.5, 0.95, 0}}}, 0)
+  require(
+      engine
+          .receive_heartbeat(WorkerHeartbeat{"cam1", 1, 0, true, true, 8.0}, 0)
+          .accepted,
+      "worker should become healthy");
+  require(engine
+              .receive_tracking(
+                  WorkerObservation{"cam1", 1, 0, {{1, 0.5, 0.5, 0.95, 0}}}, 0)
               .accepted,
           "fresh source observation should be accepted");
   require(engine.ingest_serial_line(rx(1, 'N', "ING:TOM"), 0).accepted,
@@ -189,19 +205,24 @@ void test_location_bounds_and_worker_failure() {
           "explicit worker failure must be represented without crashing");
   result = engine.receive_heartbeat(
       WorkerHeartbeat{"cam1", 3, 1003, true, true, 7.0}, 1003);
-  require(result.accepted && engine.worker_state("cam1") == HealthState::Healthy,
+  require(result.accepted &&
+              engine.worker_state("cam1") == HealthState::Healthy,
           "worker should recover on a newer healthy heartbeat");
 
-  require(engine.receive_tracking(
-              WorkerObservation{"cam1", 2, 1003, {{1, 1.5, 0.5, 0.5, 1003}}}, 1003)
-              .accepted,
-          "low-confidence telemetry is still recorded as telemetry");
+  require(
+      engine
+          .receive_tracking(
+              WorkerObservation{"cam1", 2, 1003, {{1, 1.5, 0.5, 0.5, 1003}}},
+              1003)
+          .accepted,
+      "low-confidence telemetry is still recorded as telemetry");
   result = engine.ingest_serial_line(rx(3, 'N', "STN:CHOP1"), 1003);
   require(!result.accepted && result.code == ActionCode::StaleOrLowConfidence,
           "low-confidence location must be rejected");
 
-  require(engine.receive_gateway_status(
-              htn26::protocol::GatewayStatus{true, 1, 0}, 1003)
+  require(engine
+              .receive_gateway_status(
+                  htn26::protocol::GatewayStatus{true, 1, 0}, 1003)
               .accepted,
           "gateway status should be accepted");
   engine.tick(2504);
@@ -211,13 +232,15 @@ void test_location_bounds_and_worker_failure() {
 
 void test_tracking_rejection_and_health_publication() {
   MasterEngine engine(test_config());
-  require(engine.receive_heartbeat(
-              WorkerHeartbeat{"cam1", 1, 0, true, true, 8.0}, 0)
-              .accepted,
-          "worker should become healthy");
+  require(
+      engine
+          .receive_heartbeat(WorkerHeartbeat{"cam1", 1, 0, true, true, 8.0}, 0)
+          .accepted,
+      "worker should become healthy");
 
   GameState published;
-  engine.set_state_listener([&](const auto& snapshot) { published = snapshot; });
+  engine.set_state_listener(
+      [&](const auto &snapshot) { published = snapshot; });
   const auto unknown = engine.receive_tracking(
       WorkerObservation{"cam1", 7, 1, {{99, 0.5, 0.5, 0.95, 1}}}, 1);
   require(unknown.code == ActionCode::InvalidObservation,
@@ -231,10 +254,12 @@ void test_tracking_rejection_and_health_publication() {
           "rejected heartbeat must publish the authoritative clock");
   require(engine.register_badge("AA:BB:CC:DD:EE:FF", 1),
           "badge should register after unknown tracking");
-  require(engine.receive_tracking(
+  require(
+      engine
+          .receive_tracking(
               WorkerObservation{"cam1", 7, 2, {{1, 0.5, 0.5, 0.95, 2}}}, 2)
-              .accepted,
-          "the same sequence should remain available to a newly registered player");
+          .accepted,
+      "the same sequence should remain available to a newly registered player");
 
   const auto invalid = engine.receive_tracking(
       WorkerObservation{"cam1", 8, 1001, {{1, 0.5, 0.5, 2.0, 1001}}}, 1001);
@@ -247,17 +272,20 @@ void test_tracking_rejection_and_health_publication() {
 
 void test_rejected_intent_can_be_retried() {
   MasterEngine engine(test_config());
-  require(engine.register_badge("AA:BB:CC:DD:EE:FF", 1), "badge should register");
+  require(engine.register_badge("AA:BB:CC:DD:EE:FF", 1),
+          "badge should register");
   engine.start_game(0);
-  require(engine.receive_heartbeat(
-              WorkerHeartbeat{"cam1", 1, 0, true, true, 8.0}, 0)
-              .accepted,
-          "worker should become healthy");
+  require(
+      engine
+          .receive_heartbeat(WorkerHeartbeat{"cam1", 1, 0, true, true, 8.0}, 0)
+          .accepted,
+      "worker should become healthy");
   auto result = engine.ingest_serial_line(rx(1, 'N', "ING:TOM"), 0);
   require(result.code == ActionCode::StaleOrLowConfidence,
           "unlocated intent should be rejected without consuming its sequence");
-  require(engine.receive_tracking(
-              WorkerObservation{"cam1", 1, 1, {{1, 0.5, 0.5, 0.95, 1}}}, 1)
+  require(engine
+              .receive_tracking(
+                  WorkerObservation{"cam1", 1, 1, {{1, 0.5, 0.5, 0.95, 1}}}, 1)
               .accepted,
           "source observation should be accepted");
   result = engine.ingest_serial_line(rx(1, 'N', "ING:TOM"), 1);
@@ -267,14 +295,17 @@ void test_rejected_intent_can_be_retried() {
 
 void test_default_station_boundaries_do_not_overlap() {
   MasterEngine engine(test_config());
-  require(engine.register_badge("AA:BB:CC:DD:EE:FF", 1), "badge should register");
+  require(engine.register_badge("AA:BB:CC:DD:EE:FF", 1),
+          "badge should register");
   engine.start_game(0);
-  require(engine.receive_heartbeat(
-              WorkerHeartbeat{"cam1", 1, 0, true, true, 8.0}, 0)
-              .accepted,
-          "worker should become healthy");
-  require(engine.receive_tracking(
-              WorkerObservation{"cam1", 1, 0, {{1, 1.0, 0.5, 0.95, 0}}}, 0)
+  require(
+      engine
+          .receive_heartbeat(WorkerHeartbeat{"cam1", 1, 0, true, true, 8.0}, 0)
+          .accepted,
+      "worker should become healthy");
+  require(engine
+              .receive_tracking(
+                  WorkerObservation{"cam1", 1, 0, {{1, 1.0, 0.5, 0.95, 0}}}, 0)
               .accepted,
           "boundary observation should be accepted");
   require(!engine.player_is_at(1, StationKind::TomatoSource, 0),
@@ -287,7 +318,8 @@ void test_order_timer_and_invalid_inputs() {
   MasterConfig config = test_config();
   config.order_duration_ms = 10;
   MasterEngine engine(config);
-  require(engine.register_badge("AA:BB:CC:DD:EE:FF", 1), "badge should register");
+  require(engine.register_badge("AA:BB:CC:DD:EE:FF", 1),
+          "badge should register");
   engine.start_game(0);
   engine.tick(11);
   require(engine.state().phase == GamePhase::Expired &&
@@ -301,7 +333,7 @@ void test_order_timer_and_invalid_inputs() {
           "malformed serial input must not crash or mutate gameplay");
 }
 
-}  // namespace
+} // namespace
 
 int main() {
   try {
@@ -312,10 +344,11 @@ int main() {
     test_rejected_intent_can_be_retried();
     test_default_station_boundaries_do_not_overlap();
     test_order_timer_and_invalid_inputs();
-  } catch (const std::exception& error) {
+  } catch (const std::exception &error) {
     std::cerr << "FAIL: " << error.what() << '\n';
     return 1;
   }
-  std::cout << "PASS: protocol, tomato soup flow, deduplication, timers, location bounds, and worker health\n";
+  std::cout << "PASS: protocol, tomato soup flow, deduplication, timers, "
+               "location bounds, and worker health\n";
   return 0;
 }

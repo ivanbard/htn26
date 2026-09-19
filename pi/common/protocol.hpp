@@ -13,7 +13,7 @@ constexpr std::size_t kMaxBadgePayloadBytes = 44;
 constexpr std::uint32_t kMaxBadgeSequence = 0xffffffffu;
 
 struct BadgeIntent {
-  std::string sender_mac;  // Canonical upper-case AA:BB:CC:DD:EE:FF.
+  std::string sender_mac; // Canonical upper-case AA:BB:CC:DD:EE:FF.
   int rssi = 0;
   std::uint32_t sequence = 0;
   char type = '\0';
@@ -72,4 +72,4 @@ struct WorkerHeartbeat {
   double fps = 0.0;
 };
 
-}  // namespace htn26::protocol
+} // namespace htn26::protocol

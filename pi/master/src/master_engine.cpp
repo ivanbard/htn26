@@ -20,9 +20,9 @@ bool same_double(double left, double right) {
   return std::abs(left - right) < 0.000001;
 }
 
-bool same_observation(const PlayerState& player,
-                     const protocol::PlayerObservation& observation,
-                     StationKind zone) {
+bool same_observation(const PlayerState &player,
+                      const protocol::PlayerObservation &observation,
+                      StationKind zone) {
   return player.has_position && same_double(player.x, observation.x) &&
          same_double(player.y, observation.y) &&
          same_double(player.position_confidence, observation.confidence) &&
@@ -30,8 +30,8 @@ bool same_observation(const PlayerState& player,
          player.current_zone == zone;
 }
 
-StationKind zone_for(const MasterConfig& config, double x, double y) {
-  for (const auto& [station, zone] : config.zones) {
+StationKind zone_for(const MasterConfig &config, double x, double y) {
+  for (const auto &[station, zone] : config.zones) {
     if (station != StationKind::None && zone.contains(x, y)) {
       return station;
     }
@@ -39,7 +39,7 @@ StationKind zone_for(const MasterConfig& config, double x, double y) {
   return StationKind::None;
 }
 
-}  // namespace
+} // namespace
 
 bool Zone::contains(double x, double y) const {
   return x >= min_x && x < max_x && y >= min_y && y < max_y;
@@ -59,15 +59,15 @@ MasterEngine::MasterEngine(MasterConfig config) : config_(std::move(config)) {
   if (config_.zones.empty()) {
     config_.zones = MasterConfig::defaults().zones;
   }
-  for (const StationKind station : {StationKind::TomatoSource,
-                                    StationKind::Chopping, StationKind::Pot,
-                                    StationKind::Plate, StationKind::Delivery}) {
+  for (const StationKind station :
+       {StationKind::TomatoSource, StationKind::Chopping, StationKind::Pot,
+        StationKind::Plate, StationKind::Delivery}) {
     StationState state;
     state.kind = station;
     state_.stations.emplace(station, state);
   }
   state_.order = OrderState{};
-  for (const std::string& node : config_.worker_nodes) {
+  for (const std::string &node : config_.worker_nodes) {
     if (!node.empty()) {
       state_.workers.emplace(node, WorkerHealth{});
     }
@@ -91,7 +91,7 @@ bool MasterEngine::register_badge(std::string_view mac, int player_id) {
     badge_to_player_.erase(player->second.badge_mac);
   }
   badge_to_player_[normalized] = player_id;
-  PlayerState& player_state = state_.players[player_id];
+  PlayerState &player_state = state_.players[player_id];
   player_state.id = player_id;
   player_state.badge_mac = normalized;
   publish();
@@ -102,14 +102,14 @@ void MasterEngine::clear_round_state() {
   state_.phase = GamePhase::Idle;
   state_.score = 0;
   state_.order = OrderState{};
-  for (auto& [station, station_state] : state_.stations) {
+  for (auto &[station, station_state] : state_.stations) {
     (void)station;
     station_state.contents = Item::Empty;
     station_state.processing = ProcessingState::Idle;
     station_state.processing_deadline_ms = 0;
     station_state.processing_player_id = 0;
   }
-  for (auto& [player_id, player] : state_.players) {
+  for (auto &[player_id, player] : state_.players) {
     (void)player_id;
     player.held_item = Item::Empty;
     player.action_state = "idle";
@@ -159,11 +159,11 @@ ActionResult MasterEngine::accept(std::string detail, bool completed) const {
   return result;
 }
 
-std::string MasterEngine::event_key(const protocol::BadgeIntent& intent) {
+std::string MasterEngine::event_key(const protocol::BadgeIntent &intent) {
   return intent.sender_mac + "#" + std::to_string(intent.sequence);
 }
 
-bool MasterEngine::remember_event(const protocol::BadgeIntent& intent) {
+bool MasterEngine::remember_event(const protocol::BadgeIntent &intent) {
   const std::string key = event_key(intent);
   seen_event_keys_.insert(key);
   seen_event_order_.push_back(key);
@@ -175,7 +175,7 @@ bool MasterEngine::remember_event(const protocol::BadgeIntent& intent) {
   return true;
 }
 
-bool MasterEngine::has_seen_event(const protocol::BadgeIntent& intent) const {
+bool MasterEngine::has_seen_event(const protocol::BadgeIntent &intent) const {
   return seen_event_keys_.find(event_key(intent)) != seen_event_keys_.end();
 }
 
@@ -192,7 +192,7 @@ bool MasterEngine::set_health_for_time(std::uint64_t now_ms) {
     changed = true;
   }
 
-  for (auto& [node, health] : state_.workers) {
+  for (auto &[node, health] : state_.workers) {
     (void)node;
     if (health.state == HealthState::Healthy &&
         now_ms >= health.last_heartbeat_received_ms &&
@@ -208,19 +208,20 @@ bool MasterEngine::set_health_for_time(std::uint64_t now_ms) {
   return changed;
 }
 
-std::optional<protocol::PlayerObservation> MasterEngine::best_observation(
-    int player_id, std::uint64_t now_ms) const {
+std::optional<protocol::PlayerObservation>
+MasterEngine::best_observation(int player_id, std::uint64_t now_ms) const {
   std::optional<protocol::PlayerObservation> best;
-  for (const auto& [node, by_player] : observations_) {
+  for (const auto &[node, by_player] : observations_) {
     const auto health = state_.workers.find(node);
-    if (health == state_.workers.end() || health->second.state != HealthState::Healthy) {
+    if (health == state_.workers.end() ||
+        health->second.state != HealthState::Healthy) {
       continue;
     }
     const auto observation = by_player.find(player_id);
     if (observation == by_player.end()) {
       continue;
     }
-    const auto& candidate = observation->second.observation;
+    const auto &candidate = observation->second.observation;
     if (candidate.timestamp_ms > now_ms ||
         now_ms - candidate.timestamp_ms > config_.position_stale_ms ||
         candidate.confidence < config_.minimum_position_confidence) {
@@ -237,7 +238,7 @@ std::optional<protocol::PlayerObservation> MasterEngine::best_observation(
 
 bool MasterEngine::update_fused_positions(std::uint64_t now_ms) {
   bool changed = false;
-  for (auto& [player_id, player] : state_.players) {
+  for (auto &[player_id, player] : state_.players) {
     const auto candidate = best_observation(player_id, now_ms);
     if (!candidate) {
       if (player.has_position || player.current_zone != StationKind::None) {
@@ -271,8 +272,8 @@ bool MasterEngine::player_is_at(int player_id, StationKind station,
 }
 
 bool MasterEngine::require_location(int player_id, StationKind station,
-                                     std::uint64_t now_ms,
-                                     ActionResult& result) const {
+                                    std::uint64_t now_ms,
+                                    ActionResult &result) const {
   const auto observation = best_observation(player_id, now_ms);
   if (!observation) {
     result = reject(ActionCode::StaleOrLowConfidence,
@@ -290,7 +291,7 @@ bool MasterEngine::require_location(int player_id, StationKind station,
 }
 
 void MasterEngine::complete_processing(std::uint64_t now_ms) {
-  for (auto& [station_kind, station] : state_.stations) {
+  for (auto &[station_kind, station] : state_.stations) {
     (void)station_kind;
     if (station.processing == ProcessingState::Idle ||
         station.processing_deadline_ms > now_ms) {
@@ -316,11 +317,12 @@ void MasterEngine::complete_processing(std::uint64_t now_ms) {
   }
 }
 
-ActionResult MasterEngine::apply_intent(const protocol::BadgeIntent& intent,
+ActionResult MasterEngine::apply_intent(const protocol::BadgeIntent &intent,
                                         std::uint64_t now_ms) {
   const auto mapped = badge_to_player_.find(intent.sender_mac);
   if (mapped == badge_to_player_.end()) {
-    return reject(ActionCode::UnknownBadge, "sender MAC is not assigned to a player");
+    return reject(ActionCode::UnknownBadge,
+                  "sender MAC is not assigned to a player");
   }
   const auto player_it = state_.players.find(mapped->second);
   if (player_it == state_.players.end()) {
@@ -332,7 +334,7 @@ ActionResult MasterEngine::apply_intent(const protocol::BadgeIntent& intent,
                   "game is not running");
   }
 
-  PlayerState& player = player_it->second;
+  PlayerState &player = player_it->second;
   ActionResult location_result;
   if (intent.type == 'N') {
     if (intent.value == "ING:TOM") {
@@ -341,7 +343,8 @@ ActionResult MasterEngine::apply_intent(const protocol::BadgeIntent& intent,
         return location_result;
       }
       if (player.held_item != Item::Empty) {
-        return reject(ActionCode::InvalidState, "player is already holding an item");
+        return reject(ActionCode::InvalidState,
+                      "player is already holding an item");
       }
       player.held_item = Item::RawTomato;
       player.action_state = "holding raw tomato";
@@ -352,7 +355,7 @@ ActionResult MasterEngine::apply_intent(const protocol::BadgeIntent& intent,
                             location_result)) {
         return location_result;
       }
-      auto& station = state_.stations.at(StationKind::Chopping);
+      auto &station = state_.stations.at(StationKind::Chopping);
       if (player.held_item != Item::RawTomato ||
           station.processing != ProcessingState::Idle ||
           station.contents != Item::Empty) {
@@ -369,7 +372,7 @@ ActionResult MasterEngine::apply_intent(const protocol::BadgeIntent& intent,
                             location_result)) {
         return location_result;
       }
-      auto& station = state_.stations.at(StationKind::Pot);
+      auto &station = state_.stations.at(StationKind::Pot);
       if (player.held_item != Item::ChoppedTomato ||
           station.processing != ProcessingState::Idle ||
           station.contents != Item::Empty) {
@@ -380,7 +383,8 @@ ActionResult MasterEngine::apply_intent(const protocol::BadgeIntent& intent,
       player.action_state = "cooking soup";
       station.contents = Item::ChoppedTomato;
       station.processing = ProcessingState::Cooking;
-      station.processing_deadline_ms = add_ms(now_ms, config_.cooking_duration_ms);
+      station.processing_deadline_ms =
+          add_ms(now_ms, config_.cooking_duration_ms);
       station.processing_player_id = player.id;
       return accept("soup cooking");
     }
@@ -389,10 +393,11 @@ ActionResult MasterEngine::apply_intent(const protocol::BadgeIntent& intent,
                             location_result)) {
         return location_result;
       }
-      auto& pot = state_.stations.at(StationKind::Pot);
+      auto &pot = state_.stations.at(StationKind::Pot);
       if (player.held_item != Item::Empty || pot.contents != Item::CookedSoup ||
           pot.processing != ProcessingState::Idle) {
-        return reject(ActionCode::InvalidState, "cooked soup is not ready to plate");
+        return reject(ActionCode::InvalidState,
+                      "cooked soup is not ready to plate");
       }
       pot.contents = Item::Empty;
       player.held_item = Item::SoupPlate;
@@ -428,7 +433,7 @@ ActionResult MasterEngine::apply_intent(const protocol::BadgeIntent& intent,
                           location_result)) {
       return location_result;
     }
-    auto& station = state_.stations.at(StationKind::Chopping);
+    auto &station = state_.stations.at(StationKind::Chopping);
     if (player.action_state != "at chopping station" ||
         station.processing != ProcessingState::Idle ||
         station.contents != Item::RawTomato) {
@@ -436,7 +441,8 @@ ActionResult MasterEngine::apply_intent(const protocol::BadgeIntent& intent,
                     "a tomato must be placed at the chopping station first");
     }
     station.processing = ProcessingState::Chopping;
-    station.processing_deadline_ms = add_ms(now_ms, config_.chopping_duration_ms);
+    station.processing_deadline_ms =
+        add_ms(now_ms, config_.chopping_duration_ms);
     station.processing_player_id = player.id;
     player.action_state = "chopping";
     return accept("chopping started");
@@ -446,7 +452,7 @@ ActionResult MasterEngine::apply_intent(const protocol::BadgeIntent& intent,
 }
 
 ActionResult MasterEngine::ingest_serial_line(std::string_view line,
-                                               std::uint64_t now_ms) {
+                                              std::uint64_t now_ms) {
   const auto status = protocol::parse_gateway_status_line(line);
   if (status.ok) {
     return receive_gateway_status(status.status, now_ms);
@@ -465,7 +471,8 @@ ActionResult MasterEngine::ingest_serial_line(std::string_view line,
   ++state_.gateway.packet_count;
 
   if (has_seen_event(parsed.intent)) {
-    ActionResult duplicate = reject(ActionCode::Duplicate, "duplicate badge sequence ignored");
+    ActionResult duplicate =
+        reject(ActionCode::Duplicate, "duplicate badge sequence ignored");
     publish();
     duplicate.state_version = state_.version;
     return duplicate;
@@ -480,8 +487,9 @@ ActionResult MasterEngine::ingest_serial_line(std::string_view line,
   return result;
 }
 
-ActionResult MasterEngine::receive_tracking(
-    const protocol::WorkerObservation& observation, std::uint64_t now_ms) {
+ActionResult
+MasterEngine::receive_tracking(const protocol::WorkerObservation &observation,
+                               std::uint64_t now_ms) {
   bool time_state_changed = state_.now_ms != now_ms;
   state_.now_ms = now_ms;
   time_state_changed = set_health_for_time(now_ms) || time_state_changed;
@@ -495,9 +503,11 @@ ActionResult MasterEngine::receive_tracking(
   };
   if (observation.node.empty() || observation.players.empty()) {
     return reject_with_time_update(
-        reject(ActionCode::InvalidObservation, "tracking packet has no node or players"));
+        reject(ActionCode::InvalidObservation,
+               "tracking packet has no node or players"));
   }
-  const auto previous_sequence = latest_observation_sequence_.find(observation.node);
+  const auto previous_sequence =
+      latest_observation_sequence_.find(observation.node);
   if (previous_sequence != latest_observation_sequence_.end() &&
       observation.sequence <= previous_sequence->second) {
     return reject_with_time_update(
@@ -506,7 +516,7 @@ ActionResult MasterEngine::receive_tracking(
   }
 
   bool has_known_player = false;
-  for (const auto& player : observation.players) {
+  for (const auto &player : observation.players) {
     if (player.player_id <= 0 || !std::isfinite(player.x) ||
         !std::isfinite(player.y) || !std::isfinite(player.confidence) ||
         player.confidence < 0.0 || player.confidence > 1.0 ||
@@ -528,7 +538,7 @@ ActionResult MasterEngine::receive_tracking(
     state_.workers.emplace(observation.node, WorkerHealth{});
   }
   latest_observation_sequence_[observation.node] = observation.sequence;
-  for (const auto& player : observation.players) {
+  for (const auto &player : observation.players) {
     if (state_.players.find(player.player_id) != state_.players.end()) {
       observations_[observation.node][player.player_id] =
           StoredObservation{player, observation.sequence};
@@ -542,8 +552,9 @@ ActionResult MasterEngine::receive_tracking(
   return result;
 }
 
-ActionResult MasterEngine::receive_heartbeat(
-    const protocol::WorkerHeartbeat& heartbeat, std::uint64_t now_ms) {
+ActionResult
+MasterEngine::receive_heartbeat(const protocol::WorkerHeartbeat &heartbeat,
+                                std::uint64_t now_ms) {
   bool time_state_changed = state_.now_ms != now_ms;
   state_.now_ms = now_ms;
   time_state_changed = set_health_for_time(now_ms) || time_state_changed;
@@ -571,7 +582,7 @@ ActionResult MasterEngine::receive_heartbeat(
                "older worker heartbeat cannot replace current health"));
   }
 
-  WorkerHealth& health = health_it->second;
+  WorkerHealth &health = health_it->second;
   health.has_heartbeat = true;
   health.last_heartbeat_received_ms = now_ms;
   health.last_heartbeat_sequence = heartbeat.sequence;
@@ -580,17 +591,18 @@ ActionResult MasterEngine::receive_heartbeat(
                      ? HealthState::Healthy
                      : HealthState::Failed;
   update_fused_positions(now_ms);
-  ActionResult result = accept(health.state == HealthState::Healthy
-                                   ? "worker heartbeat healthy"
-                                   : "worker reported failed",
-                               false);
+  ActionResult result =
+      accept(health.state == HealthState::Healthy ? "worker heartbeat healthy"
+                                                  : "worker reported failed",
+             false);
   publish();
   result.state_version = state_.version;
   return result;
 }
 
-ActionResult MasterEngine::receive_gateway_status(
-    const protocol::GatewayStatus& status, std::uint64_t now_ms) {
+ActionResult
+MasterEngine::receive_gateway_status(const protocol::GatewayStatus &status,
+                                     std::uint64_t now_ms) {
   state_.now_ms = now_ms;
   set_health_for_time(now_ms);
   state_.gateway.packet_count = status.packet_count;
@@ -601,7 +613,8 @@ ActionResult MasterEngine::receive_gateway_status(
   } else {
     state_.gateway.state = HealthState::Failed;
   }
-  ActionResult result = accept(status.up ? "gateway healthy" : "gateway reported down");
+  ActionResult result =
+      accept(status.up ? "gateway healthy" : "gateway reported down");
   publish();
   result.state_version = state_.version;
   return result;
@@ -613,7 +626,7 @@ void MasterEngine::tick(std::uint64_t now_ms) {
   bool changed = set_health_for_time(now_ms);
   changed = update_fused_positions(now_ms) || changed;
 
-  for (auto& [station_kind, station] : state_.stations) {
+  for (auto &[station_kind, station] : state_.stations) {
     (void)station_kind;
     if (station.processing != ProcessingState::Idle &&
         station.processing_deadline_ms <= now_ms) {
@@ -636,113 +649,114 @@ void MasterEngine::tick(std::uint64_t now_ms) {
 
 HealthState MasterEngine::worker_state(std::string_view node) const {
   const auto found = state_.workers.find(std::string(node));
-  return found == state_.workers.end() ? HealthState::Unknown : found->second.state;
+  return found == state_.workers.end() ? HealthState::Unknown
+                                       : found->second.state;
 }
 
-const char* to_string(GamePhase phase) {
+const char *to_string(GamePhase phase) {
   switch (phase) {
-    case GamePhase::Idle:
-      return "IDLE";
-    case GamePhase::Running:
-      return "RUNNING";
-    case GamePhase::Completed:
-      return "COMPLETED";
-    case GamePhase::Expired:
-      return "EXPIRED";
+  case GamePhase::Idle:
+    return "IDLE";
+  case GamePhase::Running:
+    return "RUNNING";
+  case GamePhase::Completed:
+    return "COMPLETED";
+  case GamePhase::Expired:
+    return "EXPIRED";
   }
   return "UNKNOWN";
 }
 
-const char* to_string(Item item) {
+const char *to_string(Item item) {
   switch (item) {
-    case Item::Empty:
-      return "EMPTY";
-    case Item::RawTomato:
-      return "RAW_TOMATO";
-    case Item::ChoppedTomato:
-      return "CHOPPED_TOMATO";
-    case Item::CookedSoup:
-      return "COOKED_SOUP";
-    case Item::SoupPlate:
-      return "SOUP_PLATE";
+  case Item::Empty:
+    return "EMPTY";
+  case Item::RawTomato:
+    return "RAW_TOMATO";
+  case Item::ChoppedTomato:
+    return "CHOPPED_TOMATO";
+  case Item::CookedSoup:
+    return "COOKED_SOUP";
+  case Item::SoupPlate:
+    return "SOUP_PLATE";
   }
   return "UNKNOWN";
 }
 
-const char* to_string(StationKind station) {
+const char *to_string(StationKind station) {
   switch (station) {
-    case StationKind::None:
-      return "NONE";
-    case StationKind::TomatoSource:
-      return "TOMATO_SOURCE";
-    case StationKind::Chopping:
-      return "CHOPPING";
-    case StationKind::Pot:
-      return "POT";
-    case StationKind::Plate:
-      return "PLATE";
-    case StationKind::Delivery:
-      return "DELIVERY";
+  case StationKind::None:
+    return "NONE";
+  case StationKind::TomatoSource:
+    return "TOMATO_SOURCE";
+  case StationKind::Chopping:
+    return "CHOPPING";
+  case StationKind::Pot:
+    return "POT";
+  case StationKind::Plate:
+    return "PLATE";
+  case StationKind::Delivery:
+    return "DELIVERY";
   }
   return "UNKNOWN";
 }
 
-const char* to_string(ProcessingState processing) {
+const char *to_string(ProcessingState processing) {
   switch (processing) {
-    case ProcessingState::Idle:
-      return "IDLE";
-    case ProcessingState::Chopping:
-      return "CHOPPING";
-    case ProcessingState::Cooking:
-      return "COOKING";
+  case ProcessingState::Idle:
+    return "IDLE";
+  case ProcessingState::Chopping:
+    return "CHOPPING";
+  case ProcessingState::Cooking:
+    return "COOKING";
   }
   return "UNKNOWN";
 }
 
-const char* to_string(HealthState health) {
+const char *to_string(HealthState health) {
   switch (health) {
-    case HealthState::Unknown:
-      return "UNKNOWN";
-    case HealthState::Healthy:
-      return "HEALTHY";
-    case HealthState::Failed:
-      return "FAILED";
-    case HealthState::Stale:
-      return "STALE";
+  case HealthState::Unknown:
+    return "UNKNOWN";
+  case HealthState::Healthy:
+    return "HEALTHY";
+  case HealthState::Failed:
+    return "FAILED";
+  case HealthState::Stale:
+    return "STALE";
   }
   return "UNKNOWN";
 }
 
-const char* to_string(ActionCode code) {
+const char *to_string(ActionCode code) {
   switch (code) {
-    case ActionCode::Accepted:
-      return "ACCEPTED";
-    case ActionCode::Completed:
-      return "COMPLETED";
-    case ActionCode::Duplicate:
-      return "DUPLICATE";
-    case ActionCode::Malformed:
-      return "MALFORMED";
-    case ActionCode::UnknownBadge:
-      return "UNKNOWN_BADGE";
-    case ActionCode::NotRunning:
-      return "NOT_RUNNING";
-    case ActionCode::UnsupportedIntent:
-      return "UNSUPPORTED_INTENT";
-    case ActionCode::StaleOrLowConfidence:
-      return "STALE_OR_LOW_CONFIDENCE";
-    case ActionCode::InvalidState:
-      return "INVALID_STATE";
-    case ActionCode::ExpiredOrder:
-      return "EXPIRED_ORDER";
-    case ActionCode::InvalidObservation:
-      return "INVALID_OBSERVATION";
-    case ActionCode::StaleObservation:
-      return "STALE_OBSERVATION";
-    case ActionCode::InvalidHeartbeat:
-      return "INVALID_HEARTBEAT";
+  case ActionCode::Accepted:
+    return "ACCEPTED";
+  case ActionCode::Completed:
+    return "COMPLETED";
+  case ActionCode::Duplicate:
+    return "DUPLICATE";
+  case ActionCode::Malformed:
+    return "MALFORMED";
+  case ActionCode::UnknownBadge:
+    return "UNKNOWN_BADGE";
+  case ActionCode::NotRunning:
+    return "NOT_RUNNING";
+  case ActionCode::UnsupportedIntent:
+    return "UNSUPPORTED_INTENT";
+  case ActionCode::StaleOrLowConfidence:
+    return "STALE_OR_LOW_CONFIDENCE";
+  case ActionCode::InvalidState:
+    return "INVALID_STATE";
+  case ActionCode::ExpiredOrder:
+    return "EXPIRED_ORDER";
+  case ActionCode::InvalidObservation:
+    return "INVALID_OBSERVATION";
+  case ActionCode::StaleObservation:
+    return "STALE_OBSERVATION";
+  case ActionCode::InvalidHeartbeat:
+    return "INVALID_HEARTBEAT";
   }
   return "UNKNOWN";
 }
 
-}  // namespace htn26::master
+} // namespace htn26::master

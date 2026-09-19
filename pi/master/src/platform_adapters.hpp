@@ -13,31 +13,31 @@ namespace htn26::master {
 // monotonic clock, then feed the results to MasterEngine. The core remains
 // portable and testable on a workstation.
 class MonotonicClock {
- public:
+public:
   virtual ~MonotonicClock() = default;
   virtual std::uint64_t now_ms() const = 0;
 };
 
 class GatewaySerialSource {
- public:
+public:
   virtual ~GatewaySerialSource() = default;
   virtual std::optional<std::string> read_line() = 0;
 };
 
 class WorkerObservationSource {
- public:
+public:
   virtual ~WorkerObservationSource() = default;
   virtual std::optional<protocol::WorkerObservation> read_observation() = 0;
   virtual std::optional<protocol::WorkerHeartbeat> read_heartbeat() = 0;
 };
 
 class StatePublisher {
- public:
+public:
   virtual ~StatePublisher() = default;
-  virtual void publish(const GameState& state) = 0;
+  virtual void publish(const GameState &state) = 0;
 };
 
 // An adapter loop should follow this order without putting device work in the
 // game rules: drain bounded serial/worker inputs, call tick(clock.now_ms()),
 // then publish the resulting immutable snapshot to the UI adapter.
-}  // namespace htn26::master
+} // namespace htn26::master

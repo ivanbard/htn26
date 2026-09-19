@@ -38,7 +38,7 @@ std::vector<std::string> split(std::string_view input) {
 }
 
 bool parse_unsigned(std::string_view text, std::uint64_t maximum,
-                    std::uint64_t& value) {
+                    std::uint64_t &value) {
   if (text.empty()) {
     return false;
   }
@@ -57,7 +57,7 @@ bool parse_unsigned(std::string_view text, std::uint64_t maximum,
   return true;
 }
 
-bool parse_signed(std::string_view text, int minimum, int maximum, int& value) {
+bool parse_signed(std::string_view text, int minimum, int maximum, int &value) {
   if (text.empty()) {
     return false;
   }
@@ -71,9 +71,10 @@ bool parse_signed(std::string_view text, int minimum, int maximum, int& value) {
     return false;
   }
   std::uint64_t magnitude = 0;
-  if (!parse_unsigned(text.substr(offset),
-                      static_cast<std::uint64_t>(std::numeric_limits<int>::max()),
-                      magnitude)) {
+  if (!parse_unsigned(
+          text.substr(offset),
+          static_cast<std::uint64_t>(std::numeric_limits<int>::max()),
+          magnitude)) {
     return false;
   }
   const long long signed_value = negative ? -static_cast<long long>(magnitude)
@@ -89,7 +90,8 @@ bool printable_value(std::string_view value) {
   if (value.empty()) {
     return false;
   }
-  for (const unsigned char character : value) {
+  for (const char raw_character : value) {
+    const auto character = static_cast<unsigned char>(raw_character);
     if (character < 0x20 || character > 0x7e || character == '|') {
       return false;
     }
@@ -110,7 +112,7 @@ char upper_hex(char character) {
   return character;
 }
 
-}  // namespace
+} // namespace
 
 bool is_valid_mac(std::string_view mac) {
   if (mac.size() != 17) {
@@ -133,7 +135,7 @@ std::string normalize_mac(std::string_view mac) {
     return {};
   }
   std::string normalized(mac);
-  for (char& character : normalized) {
+  for (char &character : normalized) {
     character = upper_hex(character);
   }
   return normalized;
@@ -173,9 +175,8 @@ ParseResult parse_gateway_rx_line(std::string_view line) {
     result.error = "invalid badge sequence";
     return result;
   }
-  if (fields[6].size() != 1 ||
-      (fields[6][0] != 'N' && fields[6][0] != 'M' && fields[6][0] != 'B' &&
-       fields[6][0] != 'H')) {
+  if (fields[6].size() != 1 || (fields[6][0] != 'N' && fields[6][0] != 'M' &&
+                                fields[6][0] != 'B' && fields[6][0] != 'H')) {
     result.error = "invalid badge event type";
     return result;
   }
@@ -235,4 +236,4 @@ GatewayStatusParseResult parse_gateway_status_line(std::string_view line) {
   return result;
 }
 
-}  // namespace htn26::protocol
+} // namespace htn26::protocol

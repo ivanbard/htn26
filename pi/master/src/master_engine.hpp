@@ -128,8 +128,8 @@ struct ActionResult {
 // The core has no serial, socket, camera, clock, or UI dependencies. Hardware
 // adapters feed these typed values into this class and subscribe to snapshots.
 class MasterEngine {
- public:
-  using StateListener = std::function<void(const GameState&)>;
+public:
+  using StateListener = std::function<void(const GameState &)>;
 
   explicit MasterEngine(MasterConfig config = MasterConfig::defaults());
 
@@ -142,11 +142,11 @@ class MasterEngine {
 
   // Replaceable worker input paths. These are safe to call from an adapter
   // loop; no worker is allowed to mutate game state directly.
-  ActionResult receive_tracking(const protocol::WorkerObservation& observation,
+  ActionResult receive_tracking(const protocol::WorkerObservation &observation,
                                 std::uint64_t now_ms);
-  ActionResult receive_heartbeat(const protocol::WorkerHeartbeat& heartbeat,
+  ActionResult receive_heartbeat(const protocol::WorkerHeartbeat &heartbeat,
                                  std::uint64_t now_ms);
-  ActionResult receive_gateway_status(const protocol::GatewayStatus& status,
+  ActionResult receive_gateway_status(const protocol::GatewayStatus &status,
                                       std::uint64_t now_ms);
 
   // Advances all deterministic timers and health transitions. now_ms must be
@@ -154,14 +154,14 @@ class MasterEngine {
   void tick(std::uint64_t now_ms);
 
   void set_state_listener(StateListener listener);
-  const GameState& state() const { return state_; }
-  const MasterConfig& config() const { return config_; }
+  const GameState &state() const { return state_; }
+  const MasterConfig &config() const { return config_; }
 
   HealthState worker_state(std::string_view node) const;
   bool player_is_at(int player_id, StationKind station,
                     std::uint64_t now_ms) const;
 
- private:
+private:
   struct StoredObservation {
     protocol::PlayerObservation observation;
     std::uint64_t node_sequence = 0;
@@ -179,26 +179,26 @@ class MasterEngine {
   void publish();
   bool set_health_for_time(std::uint64_t now_ms);
   bool update_fused_positions(std::uint64_t now_ms);
-  std::optional<protocol::PlayerObservation> best_observation(
-      int player_id, std::uint64_t now_ms) const;
+  std::optional<protocol::PlayerObservation>
+  best_observation(int player_id, std::uint64_t now_ms) const;
   bool require_location(int player_id, StationKind station,
-                        std::uint64_t now_ms, ActionResult& result) const;
-  ActionResult apply_intent(const protocol::BadgeIntent& intent,
+                        std::uint64_t now_ms, ActionResult &result) const;
+  ActionResult apply_intent(const protocol::BadgeIntent &intent,
                             std::uint64_t now_ms);
   ActionResult reject(ActionCode code, std::string detail) const;
   ActionResult accept(std::string detail, bool completed = false) const;
-  bool remember_event(const protocol::BadgeIntent& intent);
+  bool remember_event(const protocol::BadgeIntent &intent);
   void complete_processing(std::uint64_t now_ms);
   void clear_round_state();
-  bool has_seen_event(const protocol::BadgeIntent& intent) const;
-  static std::string event_key(const protocol::BadgeIntent& intent);
+  bool has_seen_event(const protocol::BadgeIntent &intent) const;
+  static std::string event_key(const protocol::BadgeIntent &intent);
 };
 
-const char* to_string(GamePhase phase);
-const char* to_string(Item item);
-const char* to_string(StationKind station);
-const char* to_string(ProcessingState processing);
-const char* to_string(HealthState health);
-const char* to_string(ActionCode code);
+const char *to_string(GamePhase phase);
+const char *to_string(Item item);
+const char *to_string(StationKind station);
+const char *to_string(ProcessingState processing);
+const char *to_string(HealthState health);
+const char *to_string(ActionCode code);
 
-}  // namespace htn26::master
+} // namespace htn26::master
