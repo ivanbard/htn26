@@ -18,9 +18,7 @@ TimePoint at_ms(int value) {
 }
 
 Calibration unit_calibration() {
-  return Calibration{Homography{{1.0, 0.0, 0.0,
-                                 0.0, 1.0, 0.0,
-                                 0.0, 0.0, 1.0}}};
+  return Calibration{Homography{{1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0}}};
 }
 
 WorkerConfig config() {
@@ -55,7 +53,7 @@ TrackingObservation observation(std::uint64_t sequence, int timestamp_ms) {
   return result;
 }
 
-void require(bool condition, const std::string& message) {
+void require(bool condition, const std::string &message) {
   if (!condition) {
     std::cerr << "FAIL: " << message << '\n';
     std::exit(EXIT_FAILURE);
@@ -63,18 +61,14 @@ void require(bool condition, const std::string& message) {
 }
 
 void test_homography() {
-  Homography transform{{2.0, 0.0, 1.0,
-                        0.0, 3.0, -1.0,
-                        0.0, 0.0, 1.0}};
+  Homography transform{{2.0, 0.0, 1.0, 0.0, 3.0, -1.0, 0.0, 0.0, 1.0}};
   require(transform.valid(), "non-singular homography is valid");
   const auto mapped = transform.project(ImagePoint{4.0, 2.0});
   require(mapped.has_value(), "homography projects an image point");
   require(mapped->x == 9.0 && mapped->y == 5.0,
           "homography maps to configured world coordinates");
 
-  Homography singular{{1.0, 2.0, 3.0,
-                       2.0, 4.0, 6.0,
-                       0.0, 0.0, 0.0}};
+  Homography singular{{1.0, 2.0, 3.0, 2.0, 4.0, 6.0, 0.0, 0.0, 0.0}};
   require(!singular.valid(), "singular calibration is rejected");
   require(!singular.project(ImagePoint{1.0, 1.0}),
           "invalid calibration cannot invent a coordinate");
@@ -82,10 +76,11 @@ void test_homography() {
 
 void test_freshness_and_stale_data() {
   WorkerCore core(config());
-  const auto produced = core.process_detections(
-      at_ms(1000), {detection(1, 3.0, 4.0, 0.9)}, 12ms);
+  const auto produced =
+      core.process_detections(at_ms(1000), {detection(1, 3.0, 4.0, 0.9)}, 12ms);
   require(produced.has_value(), "calibrated worker produces an observation");
-  require(core.tracking_is_fresh(at_ms(1200)), "observation is fresh at boundary");
+  require(core.tracking_is_fresh(at_ms(1200)),
+          "observation is fresh at boundary");
   require(!core.tracking_is_fresh(at_ms(1201)),
           "observation becomes stale after configured age");
   require(!core.latest_observation(at_ms(1201)),
@@ -100,12 +95,12 @@ void test_freshness_and_stale_data() {
 
 void test_out_of_order_detections_are_rejected() {
   WorkerCore core(config());
-  require(core.process_detections(at_ms(100),
-                                  {detection(1, 10.0, 10.0, 0.8)}, 4ms)
-              .has_value(),
-          "newer detection is accepted");
-  require(!core.process_detections(at_ms(99),
-                                   {detection(1, 99.0, 99.0, 0.8)}, 20ms),
+  require(
+      core.process_detections(at_ms(100), {detection(1, 10.0, 10.0, 0.8)}, 4ms)
+          .has_value(),
+      "newer detection is accepted");
+  require(!core.process_detections(at_ms(99), {detection(1, 99.0, 99.0, 0.8)},
+                                   20ms),
           "older detection is rejected");
   const auto latest = core.latest_observation(at_ms(100));
   require(latest && latest->timestamp == at_ms(100) &&
@@ -126,7 +121,8 @@ void test_bounded_replacement() {
   const auto latest = queue.take_latest(at_ms(20), 1s);
   require(latest && latest->sequence == 3,
           "newest tracking state wins over older frames");
-  require(queue.size() == 0, "taking latest clears obsolete intermediate frames");
+  require(queue.size() == 0,
+          "taking latest clears obsolete intermediate frames");
 }
 
 void test_unknown_identity_and_bounded_hold() {
@@ -136,13 +132,13 @@ void test_unknown_identity_and_bounded_hold() {
   require(known && known->players[0].player_id == 2,
           "configured marker deterministically identifies a player");
 
-  auto temporarily_hidden = core.process_detections(
-      at_ms(50), {detection(7, 1.1, 2.1, 0.8)}, 1ms);
+  auto temporarily_hidden =
+      core.process_detections(at_ms(50), {detection(7, 1.1, 2.1, 0.8)}, 1ms);
   require(temporarily_hidden && temporarily_hidden->players[0].player_id == 2,
           "occluded marker is retained only during the short hold window");
 
-  auto expired = core.process_detections(
-      at_ms(151), {detection(7, 1.2, 2.2, 0.8)}, 1ms);
+  auto expired =
+      core.process_detections(at_ms(151), {detection(7, 1.2, 2.2, 0.8)}, 1ms);
   require(expired && !expired->players[0].player_id,
           "identity expires rather than being preserved forever");
 
@@ -157,8 +153,8 @@ void test_unknown_identity_and_bounded_hold() {
       at_ms(170), {detection(-1, 1.0, 2.0, 0.8, true, 42)}, 1ms);
   require(invalid_identified && !invalid_identified->players[0].player_id,
           "invalid tracker IDs remain unknown even with a known marker");
-  auto invalid_hidden = core.process_detections(
-      at_ms(180), {detection(-1, 1.0, 2.0, 0.8)}, 1ms);
+  auto invalid_hidden =
+      core.process_detections(at_ms(180), {detection(-1, 1.0, 2.0, 0.8)}, 1ms);
   require(invalid_hidden && !invalid_hidden->players[0].player_id,
           "invalid tracker IDs do not retain identity across detections");
 }
@@ -187,9 +183,9 @@ void test_failure_recovery() {
   WorkerCore core(missing);
   require(core.state() == WorkerState::WaitingForCalibration,
           "missing calibration enters an explicit waiting state");
-  require(!core.process_detections(at_ms(0),
-                                   {detection(1, 1.0, 1.0, 0.9)}, 1ms),
-          "worker does not produce coordinates without calibration");
+  require(
+      !core.process_detections(at_ms(0), {detection(1, 1.0, 1.0, 0.9)}, 1ms),
+      "worker does not produce coordinates without calibration");
 
   core.set_calibration(unit_calibration());
   require(core.state() == WorkerState::Running,
@@ -197,8 +193,7 @@ void test_failure_recovery() {
   core.set_master_available(false);
   require(core.state() == WorkerState::MasterUnavailable,
           "master loss is explicit and non-blocking");
-  require(core.process_detections(at_ms(10),
-                                  {detection(1, 1.0, 1.0, 0.9)}, 1ms)
+  require(core.process_detections(at_ms(10), {detection(1, 1.0, 1.0, 0.9)}, 1ms)
               .has_value(),
           "local capture/inference continues while master is unavailable");
   core.record_master_send(false, at_ms(10));
@@ -221,8 +216,9 @@ struct FakeCamera final : CameraAdapter {
   bool capture_ok = true;
   int shutdowns = 0;
   AdapterResult initialize() override { return {initialize_ok, "fake camera"}; }
-  AdapterResult capture(CameraFrame& frame) override {
-    if (!capture_ok) return {false, "capture failed"};
+  AdapterResult capture(CameraFrame &frame) override {
+    if (!capture_ok)
+      return {false, "capture failed"};
     frame.sequence++;
     frame.captured_at = at_ms(10);
     return {true, "captured"};
@@ -235,11 +231,12 @@ struct FakeInference final : InferenceAdapter {
   bool infer_ok = true;
   int shutdowns = 0;
   AdapterResult initialize() override { return {initialize_ok, "fake AI"}; }
-  InferenceResult infer(const CameraFrame&, TimePoint) override {
+  InferenceResult infer(const CameraFrame &, TimePoint) override {
     InferenceResult result;
     result.ok = infer_ok;
     result.latency = 3ms;
-    if (infer_ok) result.detections.push_back(detection(1, 2.0, 3.0, 0.7));
+    if (infer_ok)
+      result.detections.push_back(detection(1, 2.0, 3.0, 0.7));
     result.detail = "fake inference";
     return result;
   }
@@ -250,11 +247,11 @@ struct FakeMaster final : MasterTransport {
   bool send_ok = true;
   int tracking_messages = 0;
   int heartbeat_messages = 0;
-  bool send_tracking(const TrackingObservation&) override {
+  bool send_tracking(const TrackingObservation &) override {
     ++tracking_messages;
     return send_ok;
   }
-  bool send_heartbeat(const Heartbeat&) override {
+  bool send_heartbeat(const Heartbeat &) override {
     ++heartbeat_messages;
     return send_ok;
   }
@@ -276,7 +273,8 @@ void test_runtime_adapter_failure_recovery() {
   require(core.state() == WorkerState::CameraUnavailable,
           "camera failure transitions runtime state");
   camera.capture_ok = true;
-  require(runtime.run_once(at_ms(30)), "camera recovers without rebuilding core");
+  require(runtime.run_once(at_ms(30)),
+          "camera recovers without rebuilding core");
   require(core.state() == WorkerState::Running,
           "camera recovery restores running state");
   runtime.shutdown();
@@ -300,20 +298,18 @@ void test_runtime_cleans_up_partial_startup() {
 void test_inference_failure_is_not_cleared_by_core_processing() {
   WorkerCore core(config());
   core.report_inference_status(false);
-  require(core.process_detections(at_ms(0),
-                                  {detection(1, 1.0, 1.0, 0.8)}, 1ms)
+  require(core.process_detections(at_ms(0), {detection(1, 1.0, 1.0, 0.8)}, 1ms)
               .has_value(),
           "processing can retain a locally produced observation");
   require(core.state() == WorkerState::InferenceUnavailable,
           "processing cannot clear an inference failure");
   core.report_inference_status(true);
-  require(core.process_detections(at_ms(1),
-                                  {detection(1, 1.0, 1.0, 0.8)}, 1ms)
+  require(core.process_detections(at_ms(1), {detection(1, 1.0, 1.0, 0.8)}, 1ms)
               .has_value(),
           "explicit inference recovery permits processing");
 }
 
-}  // namespace
+} // namespace
 
 int main() {
   test_homography();

@@ -52,7 +52,7 @@ struct Calibration {
 /** A person detection supplied by the AI adapter. */
 struct Detection {
   int track_id = -1;
-  ImagePoint image_position{};  // Use a stable ground-contact/feet point.
+  ImagePoint image_position{}; // Use a stable ground-contact/feet point.
   double confidence = 0.0;
 
   // marker_visible distinguishes an occluded marker from a visible but
@@ -136,7 +136,7 @@ struct WorkerConfig {
  * replaced; callers can also take_latest() to discard intermediate frames.
  */
 class ReplaceableObservationQueue {
- public:
+public:
   explicit ReplaceableObservationQueue(std::size_t capacity);
 
   bool push(TrackingObservation observation, TimePoint now,
@@ -150,7 +150,7 @@ class ReplaceableObservationQueue {
   std::size_t replacement_count() const { return replacement_count_; }
   std::size_t stale_drop_count() const { return stale_drop_count_; }
 
- private:
+private:
   static bool is_stale(TimePoint timestamp, TimePoint now,
                        Duration stale_after);
 
@@ -162,15 +162,14 @@ class ReplaceableObservationQueue {
 
 /** Associates visible deterministic markers and expires hidden identities. */
 class IdentityAssociator {
- public:
+public:
   IdentityAssociator(std::unordered_map<MarkerId, PlayerId> marker_to_player,
                      Duration identity_hold);
 
-  std::optional<PlayerId> associate(const Detection& detection,
-                                    TimePoint now);
+  std::optional<PlayerId> associate(const Detection &detection, TimePoint now);
   void clear();
 
- private:
+private:
   struct TrackIdentity {
     std::optional<PlayerId> player_id;
     TimePoint last_seen{};
@@ -189,11 +188,11 @@ class IdentityAssociator {
  * feed it detections; QNX-specific adapters remain outside this class.
  */
 class WorkerCore {
- public:
+public:
   explicit WorkerCore(WorkerConfig config);
 
   WorkerState state() const { return state_; }
-  const WorkerDiagnostics& diagnostics() const { return diagnostics_; }
+  const WorkerDiagnostics &diagnostics() const { return diagnostics_; }
 
   void set_calibration(std::optional<Calibration> calibration);
   void set_master_available(bool available);
@@ -202,9 +201,10 @@ class WorkerCore {
 
   // Returns the locally produced observation even when the master is down.
   // No observation is produced while calibration is unavailable/invalid.
-  std::optional<TrackingObservation> process_detections(
-      TimePoint timestamp, const std::vector<Detection>& detections,
-      Duration inference_latency);
+  std::optional<TrackingObservation>
+  process_detections(TimePoint timestamp,
+                     const std::vector<Detection> &detections,
+                     Duration inference_latency);
 
   // These methods describe local freshness, not master delivery status.
   bool tracking_is_fresh(TimePoint now) const;
@@ -221,7 +221,7 @@ class WorkerCore {
   // recovers it (provided calibration and local adapters are healthy).
   void record_master_send(bool success, TimePoint now);
 
- private:
+private:
   void recompute_state();
   Heartbeat make_heartbeat(TimePoint now) const;
   void sync_queue_diagnostics();
@@ -241,4 +241,4 @@ class WorkerCore {
   std::size_t observed_stale_drops_ = 0;
 };
 
-}  // namespace htn26::slave
+} // namespace htn26::slave

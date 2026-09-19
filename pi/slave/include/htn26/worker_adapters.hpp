@@ -24,14 +24,14 @@ struct AdapterResult {
 struct CameraFrame {
   std::uint64_t sequence = 0;
   TimePoint captured_at{};
-  const void* native_handle = nullptr;
+  const void *native_handle = nullptr;
 };
 
 class CameraAdapter {
- public:
+public:
   virtual ~CameraAdapter() = default;
   virtual AdapterResult initialize() = 0;
-  virtual AdapterResult capture(CameraFrame& frame) = 0;
+  virtual AdapterResult capture(CameraFrame &frame) = 0;
   virtual void shutdown() = 0;
 };
 
@@ -48,20 +48,19 @@ struct InferenceResult {
  * after verifying the QNX qualification requirement.
  */
 class InferenceAdapter {
- public:
+public:
   virtual ~InferenceAdapter() = default;
   virtual AdapterResult initialize() = 0;
-  virtual InferenceResult infer(const CameraFrame& frame,
-                                TimePoint now) = 0;
+  virtual InferenceResult infer(const CameraFrame &frame, TimePoint now) = 0;
   virtual void shutdown() = 0;
 };
 
 /** Reliable or best-effort transport selected by the deployment. */
 class MasterTransport {
- public:
+public:
   virtual ~MasterTransport() = default;
-  virtual bool send_tracking(const TrackingObservation& observation) = 0;
-  virtual bool send_heartbeat(const Heartbeat& heartbeat) = 0;
+  virtual bool send_tracking(const TrackingObservation &observation) = 0;
+  virtual bool send_heartbeat(const Heartbeat &heartbeat) = 0;
 };
 
 /**
@@ -69,20 +68,20 @@ class MasterTransport {
  * deliberately has no camera, AI, socket, or QNX headers of its own.
  */
 class WorkerRuntime {
- public:
-  WorkerRuntime(WorkerCore& core, CameraAdapter& camera,
-                InferenceAdapter& inference, MasterTransport& master);
+public:
+  WorkerRuntime(WorkerCore &core, CameraAdapter &camera,
+                InferenceAdapter &inference, MasterTransport &master);
 
   bool start();
   bool run_once(TimePoint now);
   void shutdown();
 
- private:
-  WorkerCore& core_;
-  CameraAdapter& camera_;
-  InferenceAdapter& inference_;
-  MasterTransport& master_;
+private:
+  WorkerCore &core_;
+  CameraAdapter &camera_;
+  InferenceAdapter &inference_;
+  MasterTransport &master_;
   bool started_ = false;
 };
 
-}  // namespace htn26::slave
+} // namespace htn26::slave

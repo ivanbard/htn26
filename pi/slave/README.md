@@ -48,21 +48,13 @@ camera SDK assumptions. `CameraFrame::native_handle` is intentionally opaque.
 A QNX process should implement these interfaces using the selected camera
 pipeline and AI module, then feed detections to `WorkerCore`.
 
-### QNX AI qualification is unresolved
+### QNX AI qualification
 
-The qualifying open-source QNX AI module required by the project has **not yet
-been identified or verified**. This MVP intentionally does not invent a module,
-version, source, or qualification claim.
+The qualifying module status is owned by [`pi/README.md`](../README.md). The
+MVP keeps the narrow `InferenceAdapter` seam until a candidate is verified;
+this directory does not claim QNX camera, AI hardware, or embedded deployment
+validation.
 
-```text
-Qualifying QNX AI module: unresolved
-Version: unresolved
-Source URL: https://oss.qnx.com/ (candidate must be verified there)
-Where used: injected through InferenceAdapter; no hardware adapter is included
-```
-
-No QNX camera, AI hardware, or embedded deployment validation is claimed by the
-host build or tests.
 
 ## Build and host tests
 

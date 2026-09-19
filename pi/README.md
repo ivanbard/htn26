@@ -83,6 +83,15 @@ Where used:
 
 in this README.
 
+Current MVP status:
+
+```text
+Qualifying QNX AI module: unresolved
+Version: unresolved
+Source URL: https://oss.qnx.com/ (candidate must be verified there)
+Where used: not yet selected; the worker exposes an InferenceAdapter seam
+```
+
 Do not assume that merely using any open-source ML library satisfies the sponsor track.
 
 ---
@@ -671,4 +680,3 @@ A camera worker is complete when:
 6. sends those coordinates to master
 7. master marks worker healthy
 8. killing the worker causes master health state to transition to stale/failed
-

@@ -11,15 +11,17 @@ namespace {
 bool finite(double value) { return std::isfinite(value); }
 
 double bounded_confidence(double value) {
-  if (!finite(value)) return 0.0;
+  if (!finite(value))
+    return 0.0;
   return std::clamp(value, 0.0, 1.0);
 }
 
-}  // namespace
+} // namespace
 
 bool Homography::valid(double epsilon) const {
   for (double value : values) {
-    if (!finite(value)) return false;
+    if (!finite(value))
+      return false;
   }
 
   const double determinant =
@@ -44,7 +46,8 @@ std::optional<WorldPoint> Homography::project(ImagePoint image,
   }
 
   WorldPoint result{world_x / denominator, world_y / denominator};
-  if (!finite(result.x) || !finite(result.y)) return std::nullopt;
+  if (!finite(result.x) || !finite(result.y))
+    return std::nullopt;
   return result;
 }
 
@@ -53,7 +56,8 @@ ReplaceableObservationQueue::ReplaceableObservationQueue(std::size_t capacity)
 
 bool ReplaceableObservationQueue::is_stale(TimePoint timestamp, TimePoint now,
                                            Duration stale_after) {
-  if (now < timestamp) return false;
+  if (now < timestamp)
+    return false;
   return now - timestamp > stale_after;
 }
 
@@ -85,10 +89,11 @@ bool ReplaceableObservationQueue::push(TrackingObservation observation,
   return !replaced;
 }
 
-std::optional<TrackingObservation> ReplaceableObservationQueue::take_latest(
-    TimePoint now, Duration stale_after) {
+std::optional<TrackingObservation>
+ReplaceableObservationQueue::take_latest(TimePoint now, Duration stale_after) {
   discard_stale(now, stale_after);
-  if (queue_.empty()) return std::nullopt;
+  if (queue_.empty())
+    return std::nullopt;
 
   TrackingObservation latest = std::move(queue_.back());
   queue_.clear();
@@ -114,12 +119,13 @@ void IdentityAssociator::prune(TimePoint now) {
   }
 }
 
-std::optional<PlayerId> IdentityAssociator::associate(const Detection& detection,
-                                                       TimePoint now) {
+std::optional<PlayerId>
+IdentityAssociator::associate(const Detection &detection, TimePoint now) {
   prune(now);
-  if (detection.track_id < 0) return std::nullopt;
+  if (detection.track_id < 0)
+    return std::nullopt;
 
-  auto& track = tracks_[detection.track_id];
+  auto &track = tracks_[detection.track_id];
   track.last_seen = now;
 
   if (detection.marker_visible) {
@@ -148,8 +154,7 @@ std::optional<PlayerId> IdentityAssociator::associate(const Detection& detection
 void IdentityAssociator::clear() { tracks_.clear(); }
 
 WorkerCore::WorkerCore(WorkerConfig config)
-    : config_(std::move(config)),
-      calibration_(config_.calibration),
+    : config_(std::move(config)), calibration_(config_.calibration),
       identities_(config_.marker_to_player, config_.identity_hold),
       outgoing_(config_.outgoing_observation_capacity) {
   if (config_.tracking_stale_after < Duration::zero()) {
@@ -158,7 +163,8 @@ WorkerCore::WorkerCore(WorkerConfig config)
   if (config_.heartbeat_interval <= Duration::zero()) {
     config_.heartbeat_interval = std::chrono::milliseconds(1);
   }
-  if (!calibration_ || !calibration_->valid()) calibration_.reset();
+  if (!calibration_ || !calibration_->valid())
+    calibration_.reset();
 
   // Until an injected adapter reports a failure, the core is ready to accept
   // its input.  Runtime startup updates these flags with actual adapter state.
@@ -200,9 +206,10 @@ void WorkerCore::report_inference_status(bool healthy) {
   recompute_state();
 }
 
-std::optional<TrackingObservation> WorkerCore::process_detections(
-    TimePoint timestamp, const std::vector<Detection>& detections,
-    Duration inference_latency) {
+std::optional<TrackingObservation>
+WorkerCore::process_detections(TimePoint timestamp,
+                               const std::vector<Detection> &detections,
+                               Duration inference_latency) {
   if (last_inference_timestamp_ && timestamp < *last_inference_timestamp_) {
     return std::nullopt;
   }
@@ -234,10 +241,11 @@ std::optional<TrackingObservation> WorkerCore::process_detections(
 
   std::size_t known = 0;
   std::size_t unknown = 0;
-  for (const Detection& detection : detections) {
-    const auto world = calibration_->image_to_world.project(
-        detection.image_position);
-    if (!world) continue;
+  for (const Detection &detection : detections) {
+    const auto world =
+        calibration_->image_to_world.project(detection.image_position);
+    if (!world)
+      continue;
 
     PlayerObservation player;
     player.track_id = detection.track_id;
@@ -262,26 +270,30 @@ std::optional<TrackingObservation> WorkerCore::process_detections(
 }
 
 bool WorkerCore::tracking_is_fresh(TimePoint now) const {
-  if (!latest_observation_) return false;
-  if (now < latest_observation_->timestamp) return false;
+  if (!latest_observation_)
+    return false;
+  if (now < latest_observation_->timestamp)
+    return false;
   return now - latest_observation_->timestamp <= config_.tracking_stale_after;
 }
 
-std::optional<TrackingObservation> WorkerCore::latest_observation(
-    TimePoint now) const {
-  if (!tracking_is_fresh(now)) return std::nullopt;
+std::optional<TrackingObservation>
+WorkerCore::latest_observation(TimePoint now) const {
+  if (!tracking_is_fresh(now))
+    return std::nullopt;
   return latest_observation_;
 }
 
-std::optional<TrackingObservation> WorkerCore::take_latest_observation(
-    TimePoint now) {
+std::optional<TrackingObservation>
+WorkerCore::take_latest_observation(TimePoint now) {
   const auto result = outgoing_.take_latest(now, config_.tracking_stale_after);
   sync_queue_diagnostics();
   return result;
 }
 
 std::optional<Heartbeat> WorkerCore::heartbeat_if_due(TimePoint now) {
-  if (next_heartbeat_ && now < *next_heartbeat_) return std::nullopt;
+  if (next_heartbeat_ && now < *next_heartbeat_)
+    return std::nullopt;
 
   // Set the next deadline from the time observed now, not from the old
   // deadline.  A stalled loop therefore emits one heartbeat, never a burst.
@@ -342,21 +354,20 @@ void WorkerCore::sync_queue_diagnostics() {
   }
   const auto stale_drops = outgoing_.stale_drop_count();
   if (stale_drops > observed_stale_drops_) {
-    diagnostics_.stale_outgoing_observations += stale_drops - observed_stale_drops_;
+    diagnostics_.stale_outgoing_observations +=
+        stale_drops - observed_stale_drops_;
     observed_stale_drops_ = stale_drops;
   }
 }
 
-WorkerRuntime::WorkerRuntime(WorkerCore& core, CameraAdapter& camera,
-                             InferenceAdapter& inference,
-                             MasterTransport& master)
-    : core_(core),
-      camera_(camera),
-      inference_(inference),
-      master_(master) {}
+WorkerRuntime::WorkerRuntime(WorkerCore &core, CameraAdapter &camera,
+                             InferenceAdapter &inference,
+                             MasterTransport &master)
+    : core_(core), camera_(camera), inference_(inference), master_(master) {}
 
 bool WorkerRuntime::start() {
-  if (started_) return true;
+  if (started_)
+    return true;
 
   const AdapterResult camera_result = camera_.initialize();
   core_.report_camera_status(camera_result.ok);
@@ -364,8 +375,10 @@ bool WorkerRuntime::start() {
   core_.report_inference_status(inference_result.ok);
   started_ = camera_result.ok && inference_result.ok;
   if (!started_) {
-    if (camera_result.ok) camera_.shutdown();
-    if (inference_result.ok) inference_.shutdown();
+    if (camera_result.ok)
+      camera_.shutdown();
+    if (inference_result.ok)
+      inference_.shutdown();
     core_.report_camera_status(false);
     core_.report_inference_status(false);
   }
@@ -373,7 +386,8 @@ bool WorkerRuntime::start() {
 }
 
 bool WorkerRuntime::run_once(TimePoint now) {
-  if (!started_) return false;
+  if (!started_)
+    return false;
 
   bool cycle_ok = true;
   CameraFrame frame;
@@ -383,9 +397,8 @@ bool WorkerRuntime::run_once(TimePoint now) {
     cycle_ok = false;
   } else {
     core_.report_camera_status(true);
-    const TimePoint frame_time = frame.captured_at == TimePoint{}
-                                     ? now
-                                     : frame.captured_at;
+    const TimePoint frame_time =
+        frame.captured_at == TimePoint{} ? now : frame.captured_at;
     const InferenceResult result = inference_.infer(frame, now);
     if (!result.ok) {
       core_.report_inference_status(false);
@@ -408,7 +421,8 @@ bool WorkerRuntime::run_once(TimePoint now) {
 }
 
 void WorkerRuntime::shutdown() {
-  if (!started_) return;
+  if (!started_)
+    return;
   camera_.shutdown();
   inference_.shutdown();
   started_ = false;
@@ -416,4 +430,4 @@ void WorkerRuntime::shutdown() {
   core_.report_inference_status(false);
 }
 
-}  // namespace htn26::slave
+} // namespace htn26::slave
