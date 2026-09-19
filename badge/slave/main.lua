@@ -330,7 +330,7 @@ local nfc_enabled, radio_enabled = false, false
 local nfc_blocked_uid, nfc_clear_at, next_nfc_poll = nil, 0, 0
 local inbox, inbox_count, radio_drop_count = {}, 0, 0
 local last_peer_sequence = { 0, 0, 0 }
-local control_key = nil
+local latest_control_sequence = 0
 local ready_until = { 0, 0, 0 }
 local submit_record = nil
 local submission_committed = false
@@ -364,6 +364,14 @@ local function reset_local_state()
   clear_submission()
   transfer_until = 0
   last_chop_step = -1
+end
+
+local function accept_control_sequence(control_sequence)
+  if type(control_sequence) ~= "number" or control_sequence <= latest_control_sequence then
+    return false
+  end
+  latest_control_sequence = control_sequence
+  return true
 end
 
 local function render_state(now)
@@ -461,9 +469,7 @@ local function start_game(control_sequence, code)
     set_status("PLAYER NOT SAVED", "Choose 1, 2, or 3 and press A before start", 0xffcc66)
     return
   end
-  local key = tostring(control_sequence) .. ":" .. code
-  if control_key == key then return end
-  control_key = key
+  if not accept_control_sequence(control_sequence) then return end
   active = true
   reset_local_state()
   set_status("GAME STARTED", "State cleared; waiting for pantry or fridge", 0x8ed8ff)
@@ -471,9 +477,7 @@ local function start_game(control_sequence, code)
 end
 
 local function end_game(control_sequence, code)
-  local key = tostring(control_sequence) .. ":" .. code
-  if control_key == key then return end
-  control_key = key
+  if not accept_control_sequence(control_sequence) then return end
   active = false
   reset_local_state()
   set_status("GAME ENDED", "All held items, plates, and timers discarded", 0xffcc66)
@@ -873,6 +877,7 @@ if badge == nil then
     event_payload = event_payload,
     parse_event = parse_event,
     parse_control = parse_control,
+    accept_control_sequence = accept_control_sequence,
     resolve_tag_action = resolve_tag_action,
     is_platable = is_platable,
   }

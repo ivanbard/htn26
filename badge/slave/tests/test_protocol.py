@@ -50,6 +50,14 @@ class PlayerBadgeTests(unittest.TestCase):
           assert(c == 8 and code == "E")
         ''')
 
+    def test_control_sequences_are_monotonic(self):
+        self.execute('''
+          assert(player_test.accept_control_sequence(7))
+          assert(not player_test.accept_control_sequence(7))
+          assert(not player_test.accept_control_sequence(6))
+          assert(player_test.accept_control_sequence(8))
+        ''')
+
     def test_pantry_plate_assembly_and_duplicate_prevention(self):
         self.execute('''
           local s = player_test.new_state()

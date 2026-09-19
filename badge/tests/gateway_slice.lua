@@ -7,10 +7,11 @@ local player = world.app("badge/slave/main.lua", "00:00:00:00:01:02")
 player.env.on_button(1, 1) -- A / PRESSED
 assert(player.shows("PLAYER 1 SAVED"))
 
--- Host lifecycle is a compact sequence-tagged control broadcast.
-assert(gateway.transport.send("OC1|000001|G|S"))
+-- Host START owns the compact sequence-tagged lifecycle broadcast.
+gateway.env.on_button(3, 1) -- START
 world.settle()
 assert(player.shows("GAME STARTED"))
+assert(world.count("HTN26|HOST|CONTROL|OC1|000001|G|S") == 1)
 assert(world.count("HTN26|RX|00:00:00:00:01:02|-40|OC1|000001|E|P1:READY") == 1)
 
 local function scan_with(button, text, uid)
@@ -31,10 +32,24 @@ scan_with(4, "fridge", "fridge-1") -- LEFT -> raw meat, invalid with bun held
 assert(player.shows("HAND FULL"))
 assert(#world.logs == before)
 
-assert(gateway.transport.send("OC1|000002|G|E"))
+-- Host end is likewise emitted by the host path, not injected by the smoke test.
+gateway.env.on_button(3, 1) -- START is ignored while the round is active
+world.tick(120000)
 world.settle()
 assert(player.shows("GAME ENDED"))
+assert(world.count("HTN26|HOST|CONTROL|OC1|000002|G|E") == 1)
 assert(player.shows("Plate: NONE") and player.shows("Hand: EMPTY"))
+
+-- Delayed controls cannot reopen the ended round or close a newer one.
+assert(gateway.transport.send("OC1|000001|G|S"))
+world.settle()
+assert(player.shows("GAME ENDED"))
+gateway.env.on_button(3, 1) -- begin a fresh host-owned round
+world.settle()
+assert(player.shows("GAME STARTED"))
+assert(gateway.transport.send("OC1|000002|G|E"))
+world.settle()
+assert(player.shows("GAME STARTED"))
 
 gateway.env.on_exit()
 player.env.on_exit()
