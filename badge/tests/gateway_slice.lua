@@ -15,10 +15,10 @@ assert(world.count("HTN26|HOST|CONTROL|OC1|000001|G|S") == 1)
 assert(world.count("HTN26|RX|00:00:00:00:01:02|-40|OC1|000001|E|P1:READY") == 1)
 
 local function scan_with(button, text, uid)
-  player.env.on_button(button, 1)
-  world.scan(player, text, uid)
-  player.env.on_button(button, 2)
-  world.tick(600)
+	player.env.on_button(button, 1)
+	world.scan(player, text, uid)
+	player.env.on_button(button, 2)
+	world.tick(600)
 end
 
 scan_with(5, "pantry", "pantry-1") -- RIGHT -> bun

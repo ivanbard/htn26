@@ -1,9 +1,9 @@
-# Local gameplay with radio blocked
+# Local badge testing
 
-The three-badge MVP still uses `OC1|<type>|<four-digit sequence>|<value>`.
-The host owns client hands, plates, duplicate replies, and score. Player NFC
-creates `E` actions; serving NFC creates `V` submissions. No game state or
-protocol translation lives in either transport.
+The current fixed player app is tested by the focused production-helper suite
+documented in [`slave/README.md`](slave/README.md). The older local gameplay
+runner below remains a legacy compatibility slice; it is not the current
+player-badge contract.
 
 Run from the repository root:
 
@@ -15,21 +15,21 @@ python -m unittest discover -s badge/master/tests -v
 python -m unittest discover -s badge/slave/tests -v
 ```
 
-`run_local.py` executes the actual Lua apps in independent environments sharing
+The legacy `run_local.py` executes Lua apps in independent environments sharing
 `local_transport.lua`. NFC card/text, clock, screen, LEDs, sensors, and storage
 are host fakes. The local bus is also injected as the documented `badge.radio`
 endpoint for the self-contained player app, so transport messages invoke the
 apps' actual registered receive handlers without starting BLE. Normal ticks
 drain the existing queues and run the real host state transitions.
 
-The scripted game scans `I:TOM`, places it on `P:01`, and submits that plate at
+Its scripted game scans `I:TOM`, places it on `P:01`, and submits that plate at
 the serving app. It checks `GAME|PLATE_ADD|01|TOM`, `GAME|SUBMIT|01|OK`, and
 `GAME|SCORE|10`. A second plate reaches 20 points. It also checks invalid tags,
 empty hands, full hands, occupied plates, empty submissions, identity targeting,
 NFC debounce, a lost acknowledgement, exact-packet bounded retries, no duplicate
 score/logs, missing host, exit cleanup, and the radio adapter contract.
 
-## Transport boundary
+## Legacy transport boundary
 
 The legacy gateway/serve slices load `require("transport")`; the current
 self-contained player app calls the documented `badge.radio` API directly. Both
@@ -44,20 +44,21 @@ to **true**, allowing the host badge to broadcast lifecycle controls and
 forward player events. Hardware startup, timing, radio range, and real NFC
 remain unverified.
 
-For a badge upload, put `transport.lua` and `radio_transport.lua` beside each
-app's `main.lua` using the IDE's extra-file support. For `overcooked-*.lua`, use
-the bundle header for `manifest.cfg` and the remainder for `main.lua` as before.
-Do not upload the desktop runner, local bus, or tests. The standalone radio probe
-is deliberately diagnostic and is not part of this transport-based game path.
+The self-contained player upload does not use these legacy transport modules.
+For legacy `overcooked-*.lua` uploads, put `transport.lua` and
+`radio_transport.lua` beside `main.lua` using the IDE's extra-file support.
+Do not upload the desktop runner, local bus, or tests. The standalone radio
+probe is diagnostic only.
 
-## Reviewed PR components
+## Legacy reviewed components
 
 PRs #1–#5 add the camera worker, stationary gateway, player, UI, and Pi core.
 The gateway and player now use the same transport boundary. Their separate
 local test executes production NFC polling and gateway serial logging, including
 three identical retries and gateway-owned plate submission.
 
-These components are useful foundations, not a connected burger game yet:
+These historical slices are retained for compatibility and are not the
+current fixed player flow:
 
 | Path | Protocol/state owner | Verified scope |
 | --- | --- | --- |
