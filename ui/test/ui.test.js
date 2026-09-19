@@ -24,6 +24,7 @@ test("renders the approved burger floor plan, topping order, stations, and goose
   assert.match(html, /CHEESE/);
   assert.match(html, /LETTUCE/);
   assert.match(html, /STOVE 1/);
+  assert.match(html, /CHOP 3[\s\S]*MEAT[\s\S]*CHOPPING/);
   assert.match(html, /62%/);
   assert.match(html, /4 geese waiting/);
   assert.match(html, /01:52/);
