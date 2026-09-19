@@ -67,9 +67,11 @@ USB serial
 main QNX Raspberry Pi
 ```
 
-The gateway badge should not run authoritative game logic.
-
-It forwards player events to the Pi.
+The host badge owns only the host lifecycle: its START action resets the three
+fixed-player session, starts the two-minute countdown, and emits START_GAME;
+timeout emits GAME_END and resets the session. It does not own player intent,
+inventory, orders, scoring, or resulting game state. Player events are still
+forwarded to the Pi.
 
 ---
 
