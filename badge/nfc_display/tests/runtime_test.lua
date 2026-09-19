@@ -4,27 +4,41 @@ local state = { now = 0, card = nil, text = nil, error_text = nil, labels = {} }
 local noop = function() end
 
 local badge = {
-  ui = {
-    label = function(_, text)
-      local label = { text = text }
-      function label:align() end
-      function label:style() end
-      function label:set_text(value) self.text = value end
-      function label:set_color() end
-      state.labels[#state.labels + 1] = label
-      return label
-    end,
-  },
-  nfc = {
-    enable = function() return true end,
-    disable = noop,
-    clear = function() state.card = nil end,
-    card = function() return state.card end,
-    read_text = function() return state.text, state.error_text end,
-  },
-  led = { clear = noop, show = noop, set_all = noop },
-  sys = { ms = function() return state.now end },
-  input = { BUTTON = { A = 1 }, KIND = { PRESSED = 1 } },
+	ui = {
+		label = function(_, text)
+			local label = { text = text }
+			function label:align() end
+			function label:style() end
+			function label:set_text(value)
+				self.text = value
+			end
+			function label:set_color() end
+			state.labels[#state.labels + 1] = label
+			return label
+		end,
+	},
+	nfc = {
+		enable = function()
+			return true
+		end,
+		disable = noop,
+		clear = function()
+			state.card = nil
+		end,
+		card = function()
+			return state.card
+		end,
+		read_text = function()
+			return state.text, state.error_text
+		end,
+	},
+	led = { clear = noop, show = noop, set_all = noop },
+	sys = {
+		ms = function()
+			return state.now
+		end,
+	},
+	input = { BUTTON = { A = 1 }, KIND = { PRESSED = 1 } },
 }
 
 _G.badge = badge
@@ -32,10 +46,12 @@ dofile("badge/nfc_display/main.lua")
 on_enter({})
 
 local function shown(text)
-  for _, label in ipairs(state.labels) do
-    if string.find(label.text, text, 1, true) then return true end
-  end
-  return false
+	for _, label in ipairs(state.labels) do
+		if string.find(label.text, text, 1, true) then
+			return true
+		end
+	end
+	return false
 end
 
 assert(shown("NO TAG"), "no-tag state is visible")
