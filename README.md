@@ -1,504 +1,251 @@
-# FILE: `/README.md`
+# HTN26 - Overcooked IRL
 
-# HTN26 — Overcooked IRL
+## Current v1 product intent
 
-## Goal
+HTN26 is a local cooperative cooking game inspired by Overcooked.
 
-Build a real-world multiplayer cooking game inspired by Overcooked.
+The first playable version uses one Raspberry Pi and one phone camera.
 
-Players wear Hacker Badges. Physical NFC tags represent ingredient sources, workstations, stoves, serving stations, etc. Three Raspberry Pis running QNX use cameras and on-device AI to track player positions. A central QNX Raspberry Pi maintains the authoritative game state.
+The phone camera is an Apple phone connected to the Pi for room photographs and setup inference.
 
-The system must run locally. Do not depend on cloud services.
+The v1 Pi remains the QNX target, and AI inference for setup runs on the Pi without cloud services.
 
-This project is also being built for the QNX prize track:
+The qualifying open-source QNX AI module is still unresolved and its status is owned by [`pi/README.md`](pi/README.md).
 
-* Project must run on QNX OS.
-* Project must use at least one qualifying open-source AI module available from `https://oss.qnx.com/`.
-* AI inference must run on embedded hardware or a QNX VM, not in the cloud.
-* The design should demonstrate real-time behaviour, reliability, and graceful handling of failures.
+The v1 round uses one host or gateway badge and exactly three fixed player badges.
 
-The exact qualifying QNX AI module must be verified against `oss.qnx.com` and documented before submission. Do not silently substitute an unrelated AI package and assume it satisfies the sponsor requirement.
+Players receive unique player numbers before a round and do not join dynamically during play.
 
----
+The game uses four NFC zones: pantry, fridge, cutting board, and stove.
 
-## System architecture
+The burger level uses buns, meat, cheese, and lettuce, with orders varying by required toppings.
 
-```text
-       PLAYER BADGES
- ┌────────┬────────┬────────┬────────┐
- │ Badge1 │ Badge2 │ Badge3 │ Badge4 │
- └───┬────┴───┬────┴───┬────┴───┬────┘
-     │        restricted badge.radio
-     └──────────────┬─────────────────┘
-                    ▼
-          ┌─────────────────────┐
-          │ MASTER BADGE        │
-          │ Radio gateway       │
-          │ Permanently wired   │
-          │ to master Pi        │
-          └──────────┬──────────┘
-                     │ USB serial
-                     ▼
-       ┌──────────────────────────────┐
-       │ PI MASTER — QNX             │
-       │                              │
-       │ Authoritative game state     │
-       │ Badge event ingestion        │
-       │ Camera #1 + AI               │
-       │ Position fusion              │
-       │ Orders / timers / scoring    │
-       │ Health monitoring            │
-       │ UI server                    │
-       └──────────────┬───────────────┘
-                      │ local network
-              ┌───────┴────────┐
-              ▼                ▼
-       ┌─────────────┐   ┌─────────────┐
-       │ PI WORKER 2 │   │ PI WORKER 3 │
-       │ QNX         │   │ QNX         │
-       │ Camera #2   │   │ Camera #3   │
-       │ Local AI    │   │ Local AI    │
-       └─────────────┘   └─────────────┘
-```
+The accepted clarifications in [`updates/UPDATE_v1.1.md`](updates/UPDATE_v1.1.md) supersede conflicting earlier planning text.
 
-There are two completely separate uses of the word "master":
-
-* **Master badge** = USB-connected radio gateway.
-* **Master Pi** = authoritative game controller.
-
-Player badges are referred to as **slave badges** in this repository. Camera Pis are referred to as **slave/worker Pis**.
-
----
+This README records product intent and system ownership, while component READMEs retain implementation-specific contracts.
 
 ## Source-of-truth hierarchy
 
-Agents must follow these sources in this order:
+Use these sources in this order for new work.
 
-1. `badge/badge-app-guide.md` is the authoritative source for Hacker Badge capabilities and APIs.
-2. This README defines overall architecture and system ownership.
-3. Component READMEs define individual responsibilities and interfaces.
-4. Existing tests and code define implementation details.
+- [`updates/UPDATE_v1.1.md`](updates/UPDATE_v1.1.md) contains the accepted v1 clarifications and supersedes conflicting v1 planning details.
+- [`updates/UPDATE_v1.md`](updates/UPDATE_v1.md) contains the four-zone, one-Pi, phone-camera v1 plan.
+- [`README.md`](README.md) defines the current product intent, architecture, and ownership boundaries.
+- [`badge/badge-app-guide.md`](badge/badge-app-guide.md) is authoritative for Hacker Badge capabilities and APIs.
+- Component READMEs define implementation responsibilities and local validation.
+- Existing tests and code define implementation details within their component boundaries.
 
-If assumptions conflict with `badge/badge-app-guide.md`, the guide wins.
+Do not duplicate packet formats, badge APIs, or component state contracts in this file.
 
-Do not invent badge APIs.
+If a product summary here conflicts with a component implementation contract, keep the summary at the product level and update the owning component document only when implementation work requires it.
 
-In particular:
+## v1 setup
 
-* Do not assume custom badge apps have Wi-Fi.
-* Do not assume HTTP is available from badge Lua.
-* Do not assume arbitrary BLE/GATT access.
-* Do not assume USB serial input into a running badge Lua application exists.
-* Do not assume a Raspberry Pi can directly participate in `badge.radio`.
-* The supported design uses another badge as the radio gateway.
+1. Connect the phone camera to the Raspberry Pi and use it to photograph the play area.
+2. Run the setup inference on the Pi to propose a floor plan.
+3. Approve the proposed floor plan on the local UI.
+4. Generate the burger level and follow the placement instructions for the four NFC zones.
+5. Connect the host badge to the Pi and assign unique numbers to the three player badges.
+6. Select host mode on the host badge and player mode on the other badges.
+7. Start the round from the host badge.
 
----
+The setup photographs define the level layout only.
 
-## Core design principle
+The v1 product does not use the phone camera to maintain live player locations.
 
-Different sensors answer different questions.
+The UI keeps player icons at the bottom of the screen and reports each player's held item and action state instead of claiming live locations.
 
-### Badge / NFC
-
-Answers:
-
-> What action did the player intend to perform?
-
-Examples:
-
-* picked up meat
-* interacted with chopping board
-* interacted with stove
-* delivered a burger
-
-### Camera / AI
-
-Answers:
-
-> Where is the player physically located?
-
-Examples:
-
-* Player 2 is at chopping station 1
-* Player 4 is near stove 2
-* Player 1 has left a station
-
-### Master game engine
-
-Answers:
-
-> Is the requested action legal, and how should game state change?
-
-Example:
+## Hardware and ownership
 
 ```text
-Badge:
-Player 2 scanned CHOP1
-
-Vision:
-Player 2 is physically inside CHOP1 zone
-
-Game state:
-Player 2 is holding RAW_MEAT
-
-Result:
-Start chopping RAW_MEAT
+phone camera
+     |
+     v
+Raspberry Pi - setup inference, authoritative game state, timers, and UI transport
+     |
+     v
+host or gateway badge - radio and host controls
+     |
+     +-------------------+-------------------+
+     v                   v                   v
+player badge 1      player badge 2      player badge 3
 ```
 
-The camera system is not expected to visually recognize every ingredient.
+The host badge is the gateway between the player badges and the Pi.
 
----
+The Pi owns authoritative game state, timers, orders, score, and submission results.
 
-## Authoritative state
+Player badges read NFC and motion input, provide local feedback, and report player intent.
 
-Only the master Pi owns authoritative game state.
+The UI mirrors state from the Pi and does not become a second game authority.
 
-This includes:
+Badge API limits and gateway behavior belong to the badge guide and badge component READMEs.
 
-* player registration
-* badge MAC → player mapping
-* player inventory
-* player physical position
-* player current station
-* station contents
-* processing timers
-* recipes
-* active orders
-* scores
-* game clock
-* health of camera workers
+Pi engine and adapter boundaries belong to the [`pi/`](pi/README.md) component documentation.
 
-Slave badges may show optimistic/local feedback, but they must not be treated as authoritative.
+UI transport and rendering boundaries belong to the [`ui/`](ui/README.md) component documentation.
 
-Worker Pis never modify game state directly.
+## NFC zones and ingredient rules
 
-The UI never owns game state.
+The four NFC zones are pantry, fridge, cutting board, and stove.
 
----
+With an empty hand, the pantry provides buns on the right selection and lettuce on the left selection.
 
-## Badge message protocol
+With an empty hand, the fridge provides cheese on the right selection and raw meat on the left selection.
 
-All custom game radio messages use this format:
+A button and NFC combination that is not valid flashes red briefly and reports an unknown button combination.
 
-```text
-OC1|<sequence>|<type>|<value>
-```
+A player may hold an item indefinitely during the round unless a game action moves or discards it.
 
-Examples:
+Holding B while shaking discards the held item and reports the drop.
 
-```text
-OC1|0042|N|ING:TOM
-OC1|0043|N|STN:CHOP1
-OC1|0044|M|CHOP
-OC1|0045|B|A
-```
+At the cutting board, holding A while scanning the cutting-board zone starts the cutting action.
 
-Fields:
+The cutting feedback advances through six light steps.
 
-* `OC1` — protocol/version prefix
-* `sequence` — monotonically increasing per-badge sequence number
-* `type`
+Releasing A before cutting finishes loses the cutting progress and reports a failed cut.
 
-  * `N` = NFC event
-  * `M` = motion event
-  * `B` = button/game-control event
-  * `H` = heartbeat/status
-* `value` — compact payload
+Cheese, lettuce, and meat may be cut for burger assembly when the active order requires them.
 
-Keep the complete radio payload at or below the limit defined by `badge/badge-app-guide.md`.
+Raw meat must be cut before it can be placed on a stove.
 
-Player identity does not need to be placed in every radio packet. The gateway receives the sender MAC and the master Pi maps that MAC to a player.
+The stove zone provides two logical stove positions selected as left or right.
 
-Radio delivery is not assumed reliable.
+Selecting a stove shows its current contents and progress on the badge and UI where the owning component supports that display.
 
-Player badges should retransmit important events a small bounded number of times. The master Pi must deduplicate using:
+An empty hand can pick up finished cooked meat from a stove.
 
-```text
-(sender MAC, sequence number)
-```
+A held piece of raw cut meat can be placed on an empty stove.
 
-Never apply the same game event twice.
+Cooking takes 15 seconds.
 
----
+Cooked food remains in its done state for 2 seconds.
 
-## Gateway serial protocol
+The warning period flashes for 3 seconds before the food becomes burnt.
 
-The master badge forwards radio messages to the master Pi using serial logging.
+A player must pick up burnt food with an empty hand and then discard it.
 
-The logical forwarded message is:
+## Plate and badge-to-badge transfer rules
 
-```text
-HTN26|RX|<sender_mac>|<rssi>|<badge_payload>
-```
+A player can pick up a plate with an empty hand or while holding platable items.
 
-Example:
+Picking up a plate puts any platable item currently held onto that plate.
 
-```text
-HTN26|RX|AA:BB:CC:DD:EE:FF|-53|OC1|0042|N|ING:TOM
-```
+After a player has a plate, picking up another platable item adds it to the plate.
 
-The Hacker Badge runtime may add its own logging prefix/tag around output. The Pi parser should search for and parse the `HTN26|` portion rather than assuming the physical serial line starts exactly with `HTN26`.
+A player holding a plate cannot pick up a non-platable item.
 
-The initial architecture is intentionally one-way:
+The bun is one object that includes both the top and bottom buns.
 
-```text
-player badge
-    ↓
-badge radio
-    ↓
-gateway badge
-    ↓
-USB serial
-    ↓
-master Pi
-```
+An item cannot be duplicated on a plate.
 
-Do not make core gameplay depend on master Pi → player badge communication.
+For v1, platable items are the bun, cooked meat, sliced lettuce, and sliced cheese.
 
----
+When two badges touch, an item moves from a badge without a plate to a badge with a plate when the item is platable.
 
-## NFC representation
+When that item is not platable, the two badges switch their held items instead.
 
-Prefer NDEF text tags when convenient.
+When both badges have plates, their plate items are swapped.
 
-Suggested namespace:
+When neither badge has a plate, their held items are swapped.
 
-```text
-ING:BUN
-ING:MEAT
-ING:CHEESE
-ING:LETTUCE
+The owning badge component README defines the event representation for these interactions.
 
-STN:CHOP1
-STN:CHOP2
-STN:STOVE1
-STN:STOVE2
-STN:DELIVERY
-```
+## Host start and end lifecycle
 
-The badge application is a reader. Tag provisioning/writing occurs externally.
+Events received before the host starts the game are ignored.
 
-UID-based mappings may also be supported by the server, but avoid hard-coding physical UIDs throughout game logic.
+Pressing START on the host badge begins the round.
 
----
+The host start action broadcasts the start state to all badges and reaches the Pi and UI through the gateway serial path.
 
-## Vision architecture
+Starting a round clears prior badge and game state before play begins.
 
-Each Raspberry Pi processes its own camera locally.
+The host badge shows a countdown timer during the round.
 
-Do not stream all camera video to the master Pi for inference.
+A round lasts approximately two minutes.
 
-Each worker performs approximately:
+After the round duration, the host badge broadcasts game end to all badges and the Pi and UI.
 
-```text
-camera frame
-    ↓
-QNX camera pipeline
-    ↓
-qualifying on-device AI module
-    ↓
-person detection
-    ↓
-local tracking
-    ↓
-player identity association
-    ↓
-camera calibration / homography
-    ↓
-world-space player positions
-    ↓
-master Pi
-```
+Game end wipes held items, plates, timers, and other round state on every badge and in the authoritative game state.
 
-Target approximately 5–10 useful tracking updates per second. Smooth, stable tracking is more important than high FPS.
+The system should keep retrying a lost connection rather than treating a temporary reconnect as a product failure.
 
-Do not use facial recognition.
+Connection reliability beyond this v1 behavior remains an implementation concern owned by the relevant component.
 
-Prefer a deterministic visible player identifier such as an AprilTag/ArUco-style marker or other robust marker attached to the badge/lanyard. AI should detect/track people; deterministic identification may be layered on top.
+## Submission behavior
 
-All camera nodes must report positions in one shared world coordinate system.
+A player submits by holding A and shaking while holding a plate.
 
----
+The other two fixed players must also be shaking at the same time, but they do not need to hold A.
 
-## Reliability model
+A detected shaking state persists for one half second to cover the large change in g force during the gesture.
 
-This is a game, not a safety-critical medical or industrial controller. Do not claim otherwise.
+Submission consumes the plate whether the order succeeds or fails.
 
-However, design it using reliability principles relevant to embedded systems:
+A correct submission completes the matching order and reports its score.
 
-* local inference
-* bounded processing
-* no cloud dependency
-* heartbeats
-* stale-data detection
-* idempotent events
-* redundant camera coverage
-* explicit degraded state
-* process health monitoring
-* deterministic authority over game state
+A failed submission applies a penalty and has no retry.
 
-If one camera worker fails:
+The badges broadcast the submission result and drop any remaining held items as part of the submission transition.
 
-```text
-CAM 1: HEALTHY
-CAM 2: FAILED
-CAM 3: HEALTHY
+The UI displays orders, player icons, held items, chopping state, cooking progress, and the submission result.
 
-Tracking coverage: DEGRADED
-Game engine: RUNNING
-```
+The UI may apply the configured penalty, tip, or bonus-gold result for the submitted order, but it does not independently validate the plate.
 
-The master should continue running where sufficient observations remain.
+## v1 radio assumption
 
-A stale or unknown position should cause location-dependent actions to be rejected or deferred rather than guessed.
+For first playable validation, radio is deliberately treated as reliable enough for the expected local room and is not a product-level blocker.
 
----
+This assumption does not redefine the restricted badge API, packet size, gateway framing, or implementation-level retry and deduplication behavior.
 
-## MVP gameplay
+The actual radio and serial contracts remain owned by [`badge/badge-app-guide.md`](badge/badge-app-guide.md), [`badge/master/README.md`](badge/master/README.md), and [`badge/slave/README.md`](badge/slave/README.md).
 
-Start with exactly one complete recipe before expanding.
+The first playable acceptance test should therefore validate the full path before adding more recovery behavior.
 
-Suggested MVP:
+## Validation boundaries
 
-```text
-BURGER
+Run the badge tests from the repository root as documented by the badge component READMEs.
 
-1. scan bun, meat, cheese, or lettuce source
-2. go to a chopping board when the ingredient requires cutting
-3. perform the cutting action
-4. cook the meat at a stove
-5. assemble the burger to match the active toppings
-6. scan delivery
-7. receive score
-```
+Run `make -C pi/master test` for the portable master engine.
 
-First target:
+Run the worker CMake and CTest commands in [`pi/slave/README.md`](pi/slave/README.md) when changing the worker core.
 
-* 2 player badges
-* 1 gateway badge
-* 1 master Pi
-* 1 camera
-* one recipe
-* burger ingredients
-* one chopping station
-* one stove
-* one delivery station
+Run `npm test` in `ui/` for the offline UI.
 
-Only add all three cameras and four players after this loop works end-to-end.
+These commands validate host-side behavior and do not claim physical badge, phone-camera, or QNX hardware validation.
 
----
+## v1 success criteria
 
-## Recommended implementation order
-
-1. Prove player badge → master badge radio.
-2. Prove master badge → Pi USB serial.
-3. Send one NFC event end-to-end into a simple QNX process.
-4. Build authoritative game-state engine with no cameras.
-5. Add one QNX camera + AI process.
-6. Convert detections into world coordinates.
-7. Fuse location validation with badge events.
-8. Add Pi worker protocol.
-9. Add camera 2 and camera 3.
-10. Add offline-first UI MVP.
-11. Add failure injection and degraded-mode demo.
-12. Add more recipes/content.
-
-Do not start by implementing three-camera fusion.
-
----
+1. The host badge starts a clean round for three fixed players.
+2. The Pi receives player NFC and motion intent through the gateway path.
+3. The four NFC zones support the ingredient, cutting, and stove interactions above.
+4. Plate transfer and duplicate prevention follow the v1 rules.
+5. Cooking follows the 15-second, done, warning, and burnt timeline.
+6. All three players can perform the simultaneous shake submission.
+7. The Pi accepts or rejects the submission once and the UI shows the result.
+8. The host badge ends the round after approximately two minutes and all round state is wiped.
+9. The first playable run completes using the reliable-enough radio assumption without cloud services.
 
 ## Repository layout
 
 ```text
 badge/
   badge-app-guide.md
+  master/
+  native/
   nfc_display/
-    README.md
-    main.lua
-    manifest.cfg
-  master/
-    README.md
   slave/
-    README.md
-
+  tests/
 pi/
-  README.md
+  common/
   master/
-    README.md
   slave/
-    README.md
-
 ui/
-  index.html
-  package.json
-  README.md
-  server.mjs
-  src/
-    main.js
-    mock-transport.js
-    render.js
-    state.js
-    transport.js
-  styles.css
-  test/
-    ui.test.js
+updates/
+FLOW.md
 ```
 
-Current badge component implementation:
+Keep shared implementation protocols in their existing component owners.
 
-```text
-badge/master/
-  main.lua
-  manifest.cfg
-
-badge/slave/
-  main.lua
-  manifest.cfg
-
-badge/nfc_display/
-  README.md
-  main.lua
-  manifest.cfg
-
-pi/common/
-pi/master/src/
-pi/slave/src/
-
-ui/
-  src/
-```
-
-Keep shared protocols centralized when implementation begins. Do not independently redefine packet formats in several components.
-
----
-
-## Definition of success
-
-The MVP is successful when:
-
-1. A player taps an NFC ingredient tag.
-2. Their badge sends an event over badge radio.
-3. The wired gateway badge receives it.
-4. The gateway writes it to USB serial.
-5. The QNX master Pi receives and deduplicates it.
-6. The camera system reports the player's position.
-7. The master validates the physical action against game state.
-8. The authoritative state changes exactly once.
-9. The UI reflects the new state.
-10. Killing one camera worker produces a visible degraded state without crashing the game.
-
-# FILE: `/badge/master/README.md`
-
-The stationary gateway component contract, including its host-mode scan flow,
-radio/NFC protocols, bounded queues, health UI, and test coverage, lives in
-[`badge/master/README.md`](badge/master/README.md). That document is the sole
-owner of the gateway's implementation details; the badge API contract remains
-[`badge/badge-app-guide.md`](badge/badge-app-guide.md).
-
-## Player-badge app
-
-The implemented player-badge contract, supported semantic tags, compact `OC1`
-payloads, local-only feedback rules, gateway-owned delivery behavior, and
-physical verification status live in [`badge/slave/README.md`](badge/slave/README.md).
-That component document is authoritative; do not maintain a second protocol
-snapshot here.
+Do not introduce a second definition of a packet, badge API, or transport contract in the root README.

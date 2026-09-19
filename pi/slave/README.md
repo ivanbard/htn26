@@ -1,15 +1,13 @@
 # Camera Worker Pi
 
-This directory contains the portable worker core deployed to each non-master
-camera Pi. The physical deployment has three Raspberry Pis with cameras: the
-serving-area Pi is the master, and two field-coverage Pis run this worker with
-different `node_id` and `camera_id` values (for example `pi2/cam2` and
-`pi3/cam3`). The core does not run game rules, ingest badge events, or own
-authoritative state.
+This directory contains the portable worker core for a future multi-camera
+deployment. The current v1 uses one Raspberry Pi and an Apple phone camera for
+setup photographs, not live player-location tracking. The core does not run
+game rules, ingest badge events, or own authoritative state.
 
-## FLOW alignment: host room scan to live coordinates
+## Future multi-camera flow
 
-After the host starts a game, the master Pi owns the room-scan/floor-plan
+When multi-camera tracking is enabled, the master Pi owns the room-scan/floor-plan
 workflow. It captures the room, presents the floor plan for approval, and then
 provides each camera Pi with a camera-specific homography in one approved
 shared coordinate frame. The worker receives that result through
