@@ -1,5 +1,12 @@
 import { cloneState, GAME_ACTIONS, SETUP_PHASES } from "./state.js";
 
+export const BURGER_RECIPES = Object.freeze([
+  { id: "plain-meat", name: "PLAIN MEAT BURGER", ingredients: ["BUN", "MEAT"], toppings: [] },
+  { id: "cheeseburger", name: "CHEESEBURGER", ingredients: ["BUN", "MEAT", "CHEESE"], toppings: ["CHEESE"] },
+  { id: "lettuce-meat", name: "LETTUCE-MEAT BURGER", ingredients: ["BUN", "MEAT", "LETTUCE"], toppings: ["LETTUCE"] },
+  { id: "cheese-lettuce-meat", name: "CHEESE-LETTUCE-MEAT BURGER", ingredients: ["BUN", "MEAT", "CHEESE", "LETTUCE"], toppings: ["CHEESE", "LETTUCE"] },
+]);
+
 const PROPOSED_PLAN = {
   accepted: false,
   width: 100,
@@ -11,30 +18,18 @@ const PROPOSED_PLAN = {
     { x: 98, y: 0, width: 2, height: 68 },
   ],
   stations: [
-    { id: "cheese-source", label: "CHEESE", kind: "ingredient", x: 7, y: 12, width: 13, height: 9 },
-    { id: "lettuce-source", label: "LETTUCE", kind: "ingredient", x: 23, y: 12, width: 13, height: 9 },
-    { id: "meat-source", label: "MEAT", kind: "ingredient", x: 39, y: 12, width: 13, height: 9 },
-    { id: "buns-source", label: "BUNS", kind: "ingredient", x: 55, y: 12, width: 13, height: 9 },
-    { id: "chop1", label: "CHOP 1", kind: "chop", x: 16, y: 43, width: 15, height: 10 },
-    { id: "chop2", label: "CHOP 2", kind: "chop", x: 36, y: 43, width: 15, height: 10 },
-    { id: "chop3", label: "CHOP 3", kind: "chop", x: 56, y: 54, width: 15, height: 10 },
-    { id: "stove1", label: "STOVE 1", kind: "stove", x: 59, y: 40, width: 14, height: 12 },
-    { id: "stove2", label: "STOVE 2", kind: "stove", x: 76, y: 40, width: 14, height: 12 },
-    { id: "serving", label: "SERVING", kind: "delivery", x: 78, y: 12, width: 17, height: 11 },
+    { id: "pantry", label: "PANTRY", kind: "ingredient", x: 8, y: 13, width: 19, height: 13 },
+    { id: "fridge", label: "FRIDGE", kind: "ingredient", x: 31, y: 13, width: 19, height: 13 },
+    { id: "cutting-board", label: "CUTTING BOARD", kind: "chop", x: 14, y: 43, width: 28, height: 13 },
+    { id: "stove", label: "STOVE", kind: "stove", x: 58, y: 40, width: 28, height: 16 },
   ],
 };
 
 const PLACEMENT_INSTRUCTIONS = [
-  { id: "cheese-source", label: "CHEESE SOURCE", instruction: "Place printed cheese icon here", x: 7, y: 12 },
-  { id: "lettuce-source", label: "LETTUCE SOURCE", instruction: "Place printed lettuce icon here", x: 23, y: 12 },
-  { id: "meat-source", label: "MEAT SOURCE", instruction: "Place printed meat icon here", x: 39, y: 12 },
-  { id: "buns-source", label: "BUN SOURCE", instruction: "Place bun icons beside serving", x: 55, y: 12 },
-  { id: "chop1", label: "CHOPPING BOARD 1", instruction: "Keep stationary", x: 16, y: 43 },
-  { id: "chop2", label: "CHOPPING BOARD 2", instruction: "Keep stationary", x: 36, y: 43 },
-  { id: "chop3", label: "CHOPPING BOARD 3", instruction: "Keep stationary", x: 56, y: 54 },
-  { id: "stove1", label: "STOVE 1", instruction: "Place paper stove plate", x: 59, y: 40 },
-  { id: "stove2", label: "STOVE 2", instruction: "Place paper stove plate", x: 76, y: 40 },
-  { id: "serving", label: "SERVING / GEESE", instruction: "Master badge and goose queue", x: 78, y: 12 },
+  { id: "pantry", label: "PANTRY ZONE", instruction: "Place pantry NFC sticker for buns and lettuce", x: 8, y: 13 },
+  { id: "fridge", label: "FRIDGE ZONE", instruction: "Place fridge NFC sticker for cheese and meat", x: 31, y: 13 },
+  { id: "cutting-board", label: "CUTTING BOARD ZONE", instruction: "Keep cutting-board NFC sticker stationary", x: 14, y: 43 },
+  { id: "stove", label: "STOVE ZONE", instruction: "Place the two logical stove positions here", x: 58, y: 40 },
 ];
 
 function health(now) {
@@ -54,25 +49,34 @@ function burgerLevel(status = "not-generated") {
   return { status, recipe: "BURGER", placementInstructions: cloneState(PLACEMENT_INSTRUCTIONS) };
 }
 
+function initialOrder() {
+  return { id: "order-1", recipeId: "cheese-lettuce-meat", recipe: "CHEESE-LETTUCE-MEAT BURGER", dish: "BURGER", status: "active", remainingSeconds: 112, totalSeconds: 120, patienceSegments: ["full", "full", "full"], toppings: ["CHEESE", "LETTUCE"], components: ["BUN", "MEAT", "CHEESE", "LETTUCE"] };
+}
+
 export function createInitialMockState(now = Date.now()) {
+  const order = initialOrder();
   return {
     version: 2,
     source: "mock-master-pi",
-    setup: { phase: SETUP_PHASES.IDLE, message: "Host is idle. Start to scan the room and generate a floor plan.", updatedAt: now },
+    setup: { phase: SETUP_PHASES.IDLE, message: "Host is idle. Start to review the static floor plan.", updatedAt: now },
     floorPlan: cloneState(PROPOSED_PLAN),
     burgerLevel: burgerLevel(),
     players: [
-      { id: "p1", label: "P1", name: "PLAYER 1", color: "orange", position: { x: 24, y: 56 }, tracking: { status: "healthy", source: "camera-1", lastSeenAt: now, staleAfterMs: 2_000 }, inventory: ["BUN"] },
-      { id: "p2", label: "P2", name: "PLAYER 2", color: "cyan", position: { x: 56, y: 56 }, tracking: { status: "healthy", source: "camera-2", lastSeenAt: now, staleAfterMs: 2_000 }, inventory: ["RAW MEAT"] },
+      { id: "p1", label: "P1", name: "PLAYER 1", color: "orange", heldItem: "BUN", actionState: "READY", tracking: { status: "healthy", source: "gateway", lastSeenAt: now, staleAfterMs: 2_000 }, inventory: ["BUN"] },
+      { id: "p2", label: "P2", name: "PLAYER 2", color: "cyan", heldItem: "RAW MEAT", actionState: "CHOPPING", tracking: { status: "healthy", source: "gateway", lastSeenAt: now, staleAfterMs: 2_000 }, inventory: ["RAW MEAT"] },
+      { id: "p3", label: "P3", name: "PLAYER 3", color: "purple", heldItem: "EMPTY HANDS", actionState: "READY", tracking: { status: "healthy", source: "gateway", lastSeenAt: now, staleAfterMs: 2_000 }, inventory: [] },
     ],
-    order: { id: "order-1", dish: "BURGER", status: "active", remainingSeconds: 112, totalSeconds: 120, toppings: ["CHEESE", "LETTUCE"], components: ["BUN", "MEAT", "CHEESE", "LETTUCE"] },
+    recipes: cloneState(BURGER_RECIPES),
+    orders: [order],
+    order,
     stations: [
       { id: "stove1", label: "STOVE 1", kind: "stove", status: "cooking", progress: 0.62, remainingSeconds: 22, item: "MEAT PATTY" },
       { id: "chop1", label: "CHOP 1", kind: "chop", status: "ready", progress: 1, remainingSeconds: 0, item: "LETTUCE" },
       { id: "chop2", label: "CHOP 2", kind: "chop", status: "chopping", progress: 0.4, remainingSeconds: 9, item: "CHEESE" },
       { id: "chop3", label: "CHOP 3", kind: "chop", status: "chopping", progress: 0.25, remainingSeconds: 14, item: "MEAT" },
     ],
-    score: { value: 0, delivered: 0 },
+    score: { value: 0, delivered: 0, gold: 0, tips: 0, penalties: 0 },
+    submission: { status: "idle", message: "No submission yet", detail: "All three players shake together to submit a plate." },
     clock: { status: "ready", remainingSeconds: 112, totalSeconds: 120 },
     serving: { lastEvent: null, gooseQueue: 4, location: "SERVING" },
     health: health(now),
@@ -89,7 +93,7 @@ function startHost(state, now) {
 
 function scanRoom(state, now) {
   return withUpdate(state, {
-    setup: { phase: SETUP_PHASES.LAYOUT_PROPOSED, message: "Proposed floor plan ready. Approve it to generate burger-level placement instructions." },
+    setup: { phase: SETUP_PHASES.LAYOUT_PROPOSED, message: "Proposed floor plan ready. Review and approve it to generate burger-level placement instructions." },
     floorPlan: { ...state.floorPlan, accepted: false },
   }, now);
 }
@@ -112,9 +116,10 @@ function startGame(state, now) {
   if (state.floorPlan?.accepted !== true) return state;
   return withUpdate(state, {
     setup: { phase: SETUP_PHASES.RUNNING, message: "Burger game running. Live locations and orders come from the master Pi." },
-    score: { value: 0, delivered: 0 },
+    score: { value: 0, delivered: 0, gold: 0, tips: 0, penalties: 0 },
     clock: { ...state.clock, status: "running", remainingSeconds: state.clock.totalSeconds },
-    order: { ...state.order, status: "active", remainingSeconds: state.order.totalSeconds },
+    orders: (state.orders || [state.order]).map((order) => ({ ...order, status: "active", remainingSeconds: order.totalSeconds, patienceSegments: ["full", "full", "full"] })),
+    order: { ...state.order, status: "active", remainingSeconds: state.order.totalSeconds, patienceSegments: ["full", "full", "full"] },
     serving: { ...state.serving, lastEvent: null },
     burgerLevel: { ...state.burgerLevel, status: "in-play" },
   }, now);
@@ -127,11 +132,16 @@ function endGame(state, now) {
 
 function recordDelivery(state, success, now) {
   const amount = 100;
+  const tip = success ? 25 : 0;
   const event = success
-    ? { status: "success", message: "BURGER SERVED", detail: "Order matched at the serving badge", points: amount, at: now }
-    : { status: "failure", message: "WRONG BURGER", detail: "Serving badge rejected the topping combination", points: 0, at: now };
+    ? { status: "success", message: "BURGER SERVED", detail: "Order matched after the three-player shake", points: amount, gold: amount, tip, at: now }
+    : { status: "failure", message: "WRONG BURGER", detail: "The master Pi rejected the submitted plate", points: 0, gold: -25, tip: 0, at: now };
   return withUpdate(state, {
-    score: success ? { ...state.score, value: Number(state.score?.value || 0) + amount, delivered: Number(state.score?.delivered || 0) + 1 } : { ...state.score },
+    score: success
+      ? { ...state.score, value: Number(state.score?.value || 0) + amount, delivered: Number(state.score?.delivered || 0) + 1, gold: Number(state.score?.gold || 0) + amount, tips: Number(state.score?.tips || 0) + tip }
+      : { ...state.score, gold: Number(state.score?.gold || 0) - 25, penalties: Number(state.score?.penalties || 0) + 1 },
+    submission: { status: event.status, message: event.message, detail: event.detail, gold: event.gold, tip: event.tip, at: now },
+    orders: (state.orders || [state.order]).map((order, index) => index === 0 ? { ...order, status: success ? "completed" : "active" } : order),
     order: success ? { ...state.order, status: "completed" } : { ...state.order, status: "active" },
     serving: { ...state.serving, lastEvent: event },
   }, now);

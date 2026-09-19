@@ -1,5 +1,6 @@
 import { renderApp } from "./render.js";
 import { createBrowserTransport } from "./transport.js";
+import { adapterCommand } from "./contract.js";
 
 export function createApp({ root, transport, now = () => Date.now() }) {
   if (!root) throw new Error("A root element is required");
@@ -16,14 +17,12 @@ export function createApp({ root, transport, now = () => Date.now() }) {
     root.innerHTML = renderApp(state, now(), connectionError);
   };
 
-  const onCommand = async (event) => {
-    const button = event.target.closest("button[data-command]");
-    if (!button || button.disabled) return;
-    button.disabled = true;
+  const sendCommand = async (command, control) => {
+    if (control) control.disabled = true;
     connectionError = "";
     const stateAtCommandStart = state;
     try {
-      const nextState = await transport.command(button.dataset.command);
+      const nextState = await transport.command(command);
       // A live transport update wins over a delayed command response. This
       // prevents an older response from regressing the visible snapshot.
       if (state !== stateAtCommandStart) return;
@@ -32,6 +31,12 @@ export function createApp({ root, transport, now = () => Date.now() }) {
       connectionError = `COMMAND NOT SENT — ${error.message}`;
       render(state);
     }
+  };
+
+  const onCommand = (event) => {
+    const button = event.target.closest("button[data-command]");
+    if (!button || button.disabled) return;
+    void sendCommand(adapterCommand(button.dataset.command), button);
   };
 
   root.addEventListener("click", onCommand);

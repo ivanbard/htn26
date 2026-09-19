@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL(".", import.meta.url));
 const port = Number(process.env.PORT || 4173);
+const host = process.env.HOST || "127.0.0.1";
 const contentTypes = {
   ".css": "text/css; charset=utf-8",
   ".html": "text/html; charset=utf-8",
@@ -38,6 +39,6 @@ const server = createServer((request, response) => {
   createReadStream(file).pipe(response);
 });
 
-server.listen(port, "127.0.0.1", () => {
-  console.log(`HTN26 UI listening at http://127.0.0.1:${port}`);
+server.listen(port, host, () => {
+  console.log(`HTN26 UI listening at http://${host}:${port}`);
 });
