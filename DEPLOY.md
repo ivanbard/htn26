@@ -8,8 +8,9 @@ The first playable setup uses the deterministic static floorplan. Phone photos a
 
 - `pi/server/`: Node.js HTTP/SSE and host-badge USB-serial boundary.
 - `ui/`: browser UI with mock and HTTP transports.
-- `badge/master/`: stationary host badge and radio gateway.
-- `badge/slave/`: fixed player badge app, installed on three badges.
+- `badge/native/`: pinned low-memory firmware extension used by all four badges.
+- `badge/master/`: retained stationary-host Lua rollback profile.
+- `badge/slave/`: retained fixed-player Lua rollback profile.
 
 The Pi is authoritative for orders, cooking, scoring, gold, tips, and submissions. The host badge owns the two-minute round lifecycle. Player badges own local interaction feedback and send intent through the host.
 
@@ -23,6 +24,29 @@ The Pi is authoritative for orders, cooking, scoring, gold, tips, and submission
 - Optional Apple phone for future setup photographs.
 
 The current v1 does not require cloud services, camera tracking, or player-location inference.
+
+## Badge deployment profile
+
+Use the native profile for the current badges. The Lua host reaches NimBLE with
+only 26,124 free bytes / a 15,360-byte largest block and fails with
+`ESP_ERR_NO_MEM`; the player independently exceeds available Lua memory. Native
+clean-reboot measurements reached radio-ready state and are the evidence-backed
+low-memory path.
+
+Flash the pinned candidate to the host and all three players only after following
+[`badge/native/README.md`](badge/native/README.md) in full. That gate requires a
+fresh per-device backup, read-only security inspection, factory-only write and
+readback, and an explicit factory-only rollback. Never erase the device, write
+other partitions, alter security configuration, or change eFuses.
+
+Do not mix native and Lua badges. Their OC1 application bytes agree, but Lua's
+restricted radio API uses a private `LUA1` carrier wrapper and native mode uses
+the recovered HAL directly. The `badge/master/` and `badge/slave/` Lua apps are
+retained as a whole-fleet rollback for restored stock factory firmware.
+
+The current native role/payload changes have offline build/emulator coverage,
+not physical acceptance. Complete the four-badge hardware gate before calling
+the OOM resolved.
 
 ## Pi server
 
@@ -102,27 +126,13 @@ http://PI_ADDRESS:8080/?transport=http
 
 The UI displays authoritative timer, order patience, players, holdings, actions, submissions, gold, and tips. It does not move player icons from camera data or independently score plates.
 
-## Host badge installation
+## Host badge selection
 
-Install exactly these files from the Badge IDE:
-
-```text
-badge/master/manifest.cfg
-badge/master/main.lua
-```
-
-If the IDE has **Import app**, import the complete app package and choose **Replace editor files**. Otherwise, copy `manifest.cfg` and `main.lua` into the two matching editor files.
-
-Then:
-
-1. Save any existing badge app.
-2. Turn the badge off.
-3. Connect a USB data cable.
-4. Turn it on normally without holding START.
-5. Choose **USB JTAG/serial debug unit (Espressif)**.
-6. Click **Push**.
-7. Open **HTN26 Host** and leave it in the foreground.
-8. Connect the host badge USB cable to the Pi.
+After the native backup/factory-only flash/readback gate, boot the gateway,
+open **Overcooked**, and press START once to select host mode. Leave it in the
+foreground and connect its USB data cable to the Pi. Host mode starts the radio
+without NFC and logs `HTN26|GW|UP|0|0` on success; stop on `GW|DOWN` rather than
+starting a round.
 
 The host badge logs:
 
@@ -133,24 +143,19 @@ HTN26|GAME|GAME_END|3
 
 It forwards player radio events as records beginning with `HTN26|RX|...`. The Pi should search for that marker anywhere in a serial line because badge runtime logs may add prefix text.
 
-## Player badge installation
+## Player badge selection
 
-Install the same two files on each player badge:
+After applying and verifying the same native candidate on each player badge:
 
-```text
-badge/slave/manifest.cfg
-badge/slave/main.lua
-```
+1. Open **Overcooked** and press A for player mode.
+2. Use LEFT/RIGHT to select one unique number 1, 2, or 3.
+3. Press A again to confirm and start native radio plus NFC.
+4. Keep Overcooked in the foreground during the round.
 
-For each badge:
-
-1. Push the player app using the same IDE procedure.
-2. Open it from the launcher.
-3. Use LEFT/RIGHT to select player 1, 2, or 3.
-4. Press A to save the assignment.
-5. Keep the player app in the foreground during the round.
-
-There are exactly three fixed players and no late joins.
+Native selection is per app boot; repeat it after reopening. There are exactly
+three fixed players and no late joins. For rollback, restore the pre-write
+factory partition on all four badges, then follow `badge/master/README.md` and
+`badge/slave/README.md` to select the retained Lua apps.
 
 Player controls include NFC ingredient pickup, cutting, cooking, plate assembly, badge-to-badge transfer, dropping, and simultaneous-shake submission. The player app does not communicate directly with the Pi.
 
@@ -179,8 +184,8 @@ Cooking takes 15 seconds, followed by the documented done, warning, and burnt st
 
 1. Start the Pi server.
 2. Start the UI or reverse proxy.
-3. Connect the host badge and open its host app.
-4. Open the player app on all three player badges.
+3. Connect the host badge, open Overcooked, and select host mode.
+4. Open Overcooked on all three player badges and confirm unique player numbers.
 5. Review and approve the static four-station floorplan.
 6. Press START on the host badge.
 7. Test ingredient pickup, chopping, cooking, plate assembly, transfers, and simultaneous submission.
@@ -239,16 +244,23 @@ Protect the hostname with Cloudflare Access before sharing it outside the truste
 From the repository root:
 
 ```sh
-cd pi/server
-node --test test/*.test.mjs
+(cd pi/server && node --test test/*.test.mjs)
 
-cd ../../badge
 python -m pip install --target .tools/python lupa==2.8
-python -m unittest discover -s master/tests -p 'test_*.py' -v
-python -m unittest discover -s slave/tests -p 'test_*.py' -v
+python -m unittest discover -s badge/master/tests -p 'test_*.py' -v
+python -m unittest discover -s badge/slave/tests -p 'test_*.py' -v
 
-cd ../ui
-npm test
+python badge/native/build.py
+python badge/native/test_build.py
+python badge/native/test_payload.py
+python badge/native/ble_receiver.py --self-test
+
+(cd ui && npm test)
 ```
 
-These tests do not prove QNX serial enumeration, physical NFC, radio range, LED appearance, badge firmware behavior, phone capture, or OpenAI connectivity. Perform those checks during the first physical run.
+The native build requires the pinned Zig 0.14.1 compiler and the payload test's
+Unicorn dependency as documented in its README. These tests do not prove the
+OOM fixed on-device, QNX serial enumeration, physical NFC, four-badge radio and
+ACK behavior, LED appearance, timing, stock-app regressions, phone capture, or
+OpenAI connectivity. Perform the native physical acceptance gate and then the
+first playable run.

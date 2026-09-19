@@ -8,35 +8,52 @@ import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / ".tools/ble"))
 COMPANY = 0xFFFF  # Existing badge HAL's manufacturer ID; OC1 separates our packets.
-ACTIONS = {b"PICK:MEAT", b"PICK:BREAD", b"PICK:LETTUCE", b"PICK:CHEESE",
-           b"CUT:START", b"CUT:DONE", b"CUT:FAIL", b"PLATE", b"DISCARD", b"READY",
-           b"GAME:START", b"GAME:END",
-           b"STOVE1:PUT", b"STOVE1:TAKE", b"STOVE1:CHECK",
-           b"STOVE2:PUT", b"STOVE2:TAKE", b"STOVE2:CHECK"}
+ACTIONS = {b"READY", b"CH:S", b"CH:F", b"PL:NEW",
+           b"PU:B", b"PU:R", b"PU:Q", b"PU:K",
+           b"ST:L:P", b"ST:L:T", b"ST:L:X",
+           b"ST:R:P", b"ST:R:T", b"ST:R:X"}
+
+
+def valid_plate(value):
+    return len(value) == 4 and all(byte in (45, b"BMLC"[index])
+                                    for index, byte in enumerate(value))
+
+
+def valid_snapshot(value):
+    return ((len(value) == 5 and value[:1] == b"P" and valid_plate(value[1:])) or
+            value == b"E----" or
+            (len(value) == 2 and value[:1] == b"H" and value[1:] in
+             (b"B", b"R", b"M", b"X", b"Q", b"L", b"K", b"C")))
 
 
 def valid_action(action):
-    plate = len(action) == 11 and action[:7] in (b"SUBMIT:", b"BUMP:P:") and \
-        all(value in (45, b"BMLC"[index]) for index, value in enumerate(action[7:]))
-    hand = len(action) == 11 and action[:7] == b"BUMP:H:" and action[7:9] in \
-        (b"--", b"RM", b"CM", b"BM", b"BR", b"LT", b"SL", b"CH") and action[9:] == b"--"
-    return action in ACTIONS or plate or hand
+    plate = ((len(action) == 7 and action[:3] == b"PL:" and valid_plate(action[3:])) or
+             (len(action) == 8 and action[:4] == b"SUB:" and valid_plate(action[4:])))
+    chop = len(action) == 6 and action[:5] == b"CH:D:" and action[5:] in (b"M", b"L", b"C")
+    stove_check = action[:7] in (b"ST:L:C:", b"ST:R:C:") and action[7:] in \
+        (b"EMPTY", b"COOKING", b"DONE", b"WARNING", b"BURNT")
+    snapshot = ((action.startswith(b"DROP:") and valid_snapshot(action[5:])) or
+                (action.startswith(b"X:") and valid_snapshot(action[2:])))
+    return action in ACTIONS or plate or chop or stove_check or snapshot
 
 
 def decode(data):
-    if 18 <= len(data) < 45 and data[:4] == b"OC1|" and data[12:15] == b"|N|" and valid_action(data[15:]):
+    if (17 <= len(data) < 45 and data[:4] == b"OC1|" and data[10:14] == b"|E|P" and
+            data[14:15] in (b"1", b"2", b"3") and data[15:16] == b":" and valid_action(data[16:])):
         kind = "EVENT"
-    elif len(data) == 17 and data[:4] == b"OC1|" and data[12:] == b"|A|OK":
+    elif len(data) == 15 and data[:4] == b"OC1|" and data[10:] == b"|A|OK":
         kind = "ACK"
+    elif len(data) == 14 and data[:4] == b"OC1|" and data[10:13] == b"|G|" and data[13:] in (b"S", b"E"):
+        kind = "CONTROL"
     else:
         return None
-    if any(c not in b"0123456789" for c in data[4:12]):
+    if any(c not in b"0123456789" for c in data[4:10]):
         return None
-    return kind, data[4:12].decode()
+    return kind, data[4:10].decode()
 
 
 def packet(kind, sequence):
-    suffix = "|N|PICK:MEAT" if kind == "EVENT" else "|A|OK" if kind == "ACK" else ""
+    suffix = "|E|P1:PU:R" if kind == "EVENT" else "|A|OK" if kind == "ACK" else ""
     result = f"OC1|{sequence}{suffix}".encode("ascii")
     if decode(result) is None:
         raise ValueError("Invalid controller packet")
@@ -129,7 +146,7 @@ async def run(args):
         if args.count:
             successes = 0
             for index in range(args.count):
-                sequence = f"{secrets.randbelow(100000000):08d}"
+                sequence = f"{secrets.randbelow(900000) + 100000:06d}"
                 await advertise(packet("EVENT", sequence))
                 started = time.monotonic()
                 while True:
@@ -187,15 +204,16 @@ if __name__ == "__main__":
     parser.add_argument("--listen-only", action="store_true", help="Receive only when adapter publishing is unavailable")
     args = parser.parse_args()
     if args.self_test:
-        assert decode(packet("EVENT", "01234567")) == ("EVENT", "01234567")
-        assert decode(packet("ACK", "87654321")) == ("ACK", "87654321")
+        assert decode(packet("EVENT", "012345")) == ("EVENT", "012345")
+        assert decode(packet("ACK", "876543")) == ("ACK", "876543")
+        assert decode(b"OC1|000001|G|S") == ("CONTROL", "000001")
         for action in ACTIONS:
-            assert decode(b"OC1|01234567|N|" + action) == ("EVENT", "01234567")
-        assert decode(b"OC1|01234567|N|SUBMIT:BMLC") == ("EVENT", "01234567")
-        assert decode(b"OC1|01234567|N|BUMP:P:B-L-") == ("EVENT", "01234567")
-        assert decode(b"OC1|01234567|N|BUMP:H:RM--") == ("EVENT", "01234567")
-        for bad in (b"MEAT", b"OC1|01234567|N|PICK:BEEF", b"OC1|0123456x|A|OK",
-                    b"OC2|01234567|A|OK", bytes(225)):
+            assert decode(b"OC1|012345|E|P2:" + action) == ("EVENT", "012345")
+        assert decode(b"OC1|012345|E|P2:SUB:BMLC") == ("EVENT", "012345")
+        assert decode(b"OC1|012345|E|P2:X:PB-L-") == ("EVENT", "012345")
+        assert decode(b"OC1|012345|E|P2:X:HR") == ("EVENT", "012345")
+        for bad in (b"MEAT", b"OC1|012345|E|P2:PU:Z", b"OC1|01234x|A|OK",
+                    b"OC2|012345|A|OK", bytes(225)):
             assert decode(bad) is None
         print("PASS: packet format, strict length, namespace, and sequence validation")
     else:

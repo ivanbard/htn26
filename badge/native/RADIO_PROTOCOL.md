@@ -41,46 +41,57 @@ AD parser with the new invoker, rather than merely imitating that ABI.
 
 ## Controller application protocol
 
-Gameplay uses variable-length action events and one 17-byte acknowledgement:
+Native mode preserves the current player payload and host-control shapes:
 
 ```text
-OC1|01234567|N|PICK:MEAT
-OC1|01234567|A|OK
+OC1|012345|E|P2:PU:R
+OC1|000001|G|S
+OC1|012345|A|OK
 ```
 
-The eight decimal digits are a per-boot randomized, monotonically increasing
-sequence. The acknowledgement echoes it. The `OC1` prefix isolates game traffic
-from Share and other stock advertisements.
+The six decimal event digits are randomized at each native player-app boot and
+increase monotonically during that boot. Player numbers are explicitly selected
+as 1, 2, or 3 before radio starts. Host control sequences begin at one. The
+private 15-byte ACK echoes the event sequence; it is native reliability
+machinery and is never forwarded to the Pi.
 
-A station scan or gesture sends an action. Accepted values are `PICK:MEAT`,
-`PICK:BREAD`, `PICK:LETTUCE`, `PICK:CHEESE`, `CUT:START|DONE|FAIL`, `PLATE`,
-`DISCARD`, `READY`, `GAME:START|END`, `STOVE1:PUT|TAKE|CHECK`,
-`STOVE2:PUT|TAKE|CHECK`, the fixed-width plate summary `SUBMIT:BMLC`, and
-fixed-width bump state `BUMP:P:BMLC` or `BUMP:H:RM--` (`-` means absent).
-The badge waits 150 ticks (nominally three seconds) and makes
-at most three attempts using the exact same sequence and packet. Only a matching
-ACK completes the request. An idle peer advertises the ACK for 100 ticks
-(nominally two seconds). Repeated events are acknowledged again after that
-window but produce only one gateway serial frame:
+Application action values match `../slave/main.lua`: `PU:B|R|Q|K`,
+`PL:NEW` or `PL:<BMLC>`, `CH:S|F` and `CH:D:M|L|C`, `ST:L|R:P|T|X`,
+`ST:L|R:C:<phase>`, `DROP:<snapshot>`, `X:<snapshot>`, `READY`, and
+`SUB:<BMLC>`. A snapshot is `P` plus four fixed plate columns, `H` plus one
+item code, or `E----`; `-` means absent. Payload validation remains bounded to
+the documented 44-byte application limit.
+
+The application bytes match the Lua contract, but the physical profiles are
+not interoperable. `badge.radio` adds and filters a firmware-private `LUA1`
+carrier prefix. The native app calls the recovered HAL directly and therefore
+advertises `OC1` as the manufacturer payload. Deploy native mode to the host and
+all three players together, or roll all four back to Lua together.
+
+A player waits 150 ticks (nominally three seconds) and makes at most three
+attempts using the exact same sequence and packet. Only the badge in **host
+role** sends ACKs. This prevents another player from stopping a retry before
+the single Pi's gateway has observed and logged the event. An ACK is advertised
+for 100 ticks (nominally two seconds). A later duplicate is acknowledged again
+but produces only one gateway serial frame:
 
 ```text
-HTN26|RX|<sender_mac>|<rssi>|OC1|01234567|N|PICK:MEAT
+HTN26|RX|<sender_mac>|<rssi>|OC1|012345|E|P2:PU:R
 ```
 
-An ACK commits the sender's immediate local state. Peers also mirror stove
-put/take events so both stove displays advance, while the host badge logs every
-unique action for the single Pi. The Pi is authoritative for player inventory,
-orders, score, and whether `READY` events overlap a `SUBMIT` event.
+The host emits `HTN26|GW|UP|<forwarded>|<drops>` every 250 ticks and emits
+`HTN26|GW|DOWN|0|0` if its NVS preflight or radio initialization fails. START
+emits `HTN26|GAME|START_GAME|120|3` and `OC1|000001|G|S`; timeout emits
+`HTN26|GAME|GAME_END|3` and `OC1|000002|G|E`. Events are ignored before start.
+The Pi remains authoritative for inventory, orders, score, and submission
+results.
+
 Overcooked uses 30 ms minimum/maximum advertising intervals, matching Share's
-existing send setup. Scanning timing stays at the stock HAL default. Faster
-advertising costs radio airtime while sending; advertisements stop on timeout,
-matched reply, or expiry of the reply window.
-
-The receive callback validates and copies into one fixed slot. It never calls
-LVGL or transmits. The app tick consumes the slot and handles display/transmit.
-Aligned 32-bit loads/stores plus RISC-V acquire/release fences publish the slot;
-no unsupported RV32 atomic extension or libatomic is needed. A full slot drops
-new reports and increments a diagnostic counter. The app object is 300 bytes.
+existing send setup. Scanning timing stays at the stock HAL default. The receive
+callback validates and copies into one fixed slot and never calls LVGL or
+transmits. The app tick consumes that slot. Aligned 32-bit accesses plus RISC-V
+fences publish it without an atomic runtime. A full slot increments the drop
+counter. The app object remains 300 bytes.
 
 LED 0: green ready. LED 1: blue send. LED 2: yellow receive. LED 5: red error.
 Normal pulses last 25 ticks; invalid-combination red lasts 50 ticks. Inputs

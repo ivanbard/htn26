@@ -37,7 +37,7 @@ export function parseGatewayRxLine(line) {
   if (fields[4] !== "OC1") return { ok: false, error: "unsupported badge protocol" };
   const sequence = parseInteger(fields[5], 0, 0xffffffff);
   if (sequence == null) return { ok: false, error: "invalid badge sequence" };
-  if (!/^[NMBH]$/.test(fields[6])) return { ok: false, error: "invalid badge event type" };
+  if (!/^[NMBHE]$/.test(fields[6])) return { ok: false, error: "invalid badge event type" };
   if (!isPrintableValue(fields[7])) return { ok: false, error: "invalid badge value" };
   const payload = `${fields[4]}|${fields[5]}|${fields[6]}|${fields[7]}`;
   if (Buffer.byteLength(payload, "utf8") > MAX_PAYLOAD_BYTES) {

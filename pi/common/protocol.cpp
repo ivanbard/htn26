@@ -176,7 +176,8 @@ ParseResult parse_gateway_rx_line(std::string_view line) {
     return result;
   }
   if (fields[6].size() != 1 || (fields[6][0] != 'N' && fields[6][0] != 'M' &&
-                                fields[6][0] != 'B' && fields[6][0] != 'H')) {
+                                fields[6][0] != 'B' && fields[6][0] != 'H' &&
+                                fields[6][0] != 'E')) {
     result.error = "invalid badge event type";
     return result;
   }

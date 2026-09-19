@@ -10,7 +10,8 @@ from unicorn import Uc, UC_ARCH_RISCV, UC_MODE_RISCV32, UC_HOOK_CODE
 from unicorn.riscv_const import UC_RISCV_REG_A0, UC_RISCV_REG_A1, UC_RISCV_REG_RA, UC_RISCV_REG_SP, UC_RISCV_REG_PC
 
 
-def scenario(nvs_error=0, radio_error=0, nfc_error=0, allocation_failure=False, send_error=0):
+def scenario(nvs_error=0, radio_error=0, nfc_error=0, allocation_failure=False,
+             send_error=0, role="player"):
     cpu = Uc(UC_ARCH_RISCV, UC_MODE_RISCV32)
     for base, size in [(0x3C000000, 0x300000), (0x3FC80000, 0x80000),
                        (0x40380000, 0x20000), (0x42000000, 0x140000), (0x50000000, 0x1000)]:
@@ -82,7 +83,7 @@ def scenario(nvs_error=0, radio_error=0, nfc_error=0, allocation_failure=False, 
         elif address == 0x42010FC2:
             cpu.mem_write(a0, bytes.fromhex('e83dc12986d0'))
         elif address == 0x42010C54:
-            assert 17 <= a1 < 45
+            assert 14 <= a1 < 45
             packets.append(bytes(cpu.mem_read(a0, a1)))
             result = send_error
         elif address == 0x4200FF2E:
@@ -168,8 +169,8 @@ def scenario(nvs_error=0, radio_error=0, nfc_error=0, allocation_failure=False, 
 
     def acknowledge(expected):
         packet = packets[-1]
-        assert packet.endswith(b'|N|' + expected.encode()), packet
-        incoming(b'OC1|' + packet[4:12] + b'|A|OK'); invoke(0x5c)
+        assert packet.endswith(b':' + expected.encode()), packet
+        incoming(b'OC1|' + packet[4:10] + b'|A|OK'); invoke(0x5c)
 
     assert string(invoke(0x08)) == "Overcooked"
     assert string(invoke(0x10)) == "overcooked"
@@ -178,109 +179,149 @@ def scenario(nvs_error=0, radio_error=0, nfc_error=0, allocation_failure=False, 
     invoke(0x54, 0x3FCC2000)
     assert stages == ["entry"] and 0x420109C6 not in calls
     invoke(0x5C)
+    assert stages == ["entry"]  # Role selection precedes every radio allocation.
+    if role == "host":
+        invoke(0x60, 8)
+        assert "HOST STARTING RADIO" in texts
+    else:
+        invoke(0x60, 0)
+        assert any("CHOOSE PLAYER 1" in text for text in texts)
+        invoke(0x60, 5)  # Player 2 proves explicit fixed-number selection.
+        assert any("CHOOSE PLAYER 2" in text for text in texts)
+        invoke(0x60, 0)
+        assert "PLAYER STARTING RADIO" in texts
+    invoke(0x5C)
     assert stages[:2] == ["entry", "before_radio"]
     if nvs_error:
         assert 0x420109C6 not in calls and "NVS ERROR / RADIO NOT STARTED" in texts
     else:
         assert calls.index(0x42101718) < calls.index(0x420109C6)
         assert stages[2] == "after_radio"
-        assert ("RADIO ERROR / SEE SERIAL" if radio_error else
-                ("RADIO READY / NFC ERROR" if nfc_error else "CHOOSE ROLE: A PLAYER / START HOST")) in texts
-    if not nvs_error and not radio_error:
-        invoke(0x60, 0)  # Select player role.
-        invoke(0x60, 0x100)
-        incoming(b'OC1|11111111|N|GAME:START'); invoke(0x5c)
-        assert packets[-1] == b'OC1|11111111|A|OK'
-        packets.clear()
+        expected = "RADIO ERROR / SEE SERIAL" if radio_error else (
+            "HOST READY - PRESS START" if role == "host" else
+            ("RADIO READY / NFC ERROR" if nfc_error else "PLAYER READY - WAIT FOR START"))
+        assert expected in texts
+    if role == "host":
+        assert 0x4200FF2E not in calls  # The stationary gateway does not allocate/enable NFC.
+        if nvs_error or radio_error:
+            assert "HTN26|GW|DOWN|0|0\n" in prints
+        else:
+            assert "HTN26|GW|UP|0|0\n" in prints
+            invoke(0x60, 8)
+            assert packets[-1] == b'OC1|000001|G|S'
+            assert "HTN26|GAME|START_GAME|120|3\n" in prints
+            forwarded = 'HTN26|RX|%02x:%02x:%02x:%02x:%02x:%02x|%d|%s\n'
+            incoming(b'OC1|876543|E|P2:ST:L:P'); invoke(0x5c)
+            assert packets[-1] == b'OC1|876543|A|OK'
+            assert prints.count(forwarded) == 1
+            sent = len(packets)
+            incoming(b'OC1|876543|E|P2:ST:L:P'); invoke(0x5c)
+            assert len(packets) == sent and prints.count(forwarded) == 1
+            for _ in range(100): invoke(0x5c)
+            incoming(b'OC1|876543|E|P2:ST:L:P'); invoke(0x5c)
+            assert len(packets) == sent + 1 and prints.count(forwarded) == 1
+            cpu.mem_write(app + 288, struct.pack('<I', 1)); invoke(0x5c)
+            assert packets[-1] == b'OC1|000002|G|E'
+            assert "HTN26|GAME|GAME_END|3\n" in prints
+    elif not nvs_error and not radio_error:
+        incoming(b'OC1|000001|G|S'); invoke(0x5c)
+        assert packets == []  # Only the gateway acknowledges; player peers never stop retries.
         invoke(0x60, 4)  # LEFT, packed press event; upper bits are ignored.
         if not nfc_error:
             scan('pantry')
         else:
-            incoming(b'OC1|87654321|N|READY'); invoke(0x5c)
-        assert packets == ([b'OC1|45441741|N|PICK:LETTUCE'] if not nfc_error
-                           else [b'OC1|87654321|A|OK'])
+            incoming(b'OC1|876543|E|P3:READY'); invoke(0x5c)
+        assert packets == ([b'OC1|441741|E|P2:PU:Q'] if not nfc_error else []), packets
         if send_error:
             assert 'RADIO SEND ERROR' in texts
         else:
-            for bad in (b'MEAT', b'OC1|45441741|A|NO', b'OC1|4544174x|A|OK',
-                        b'OC1|45441741|N|PICK:BEEF'):
+            for bad in (b'MEAT', b'OC1|441741|A|NO', b'OC1|44174x|A|OK',
+                        b'OC1|441741|E|P2:PU:Z'):
                 incoming(bad); invoke(0x5c)
             if not nfc_error:
                 assert 'ACTION ACKNOWLEDGED' not in texts
-                acknowledge('PICK:LETTUCE')
+                acknowledge('PU:Q')
                 assert any('HELD: LETTUCE' in text for text in texts)
 
                 invoke(0x60, 0)  # Hold A, then scan cutting board.
-                scan('cutting board'); acknowledge('CUT:START')
+                scan('cutting board'); acknowledge('CH:S')
                 assert 'CUTTING - KEEP HOLDING A' in texts
                 invoke(0x60, 0x100)  # Early release loses all progress.
                 assert 'CUT RESET - A RELEASED' in texts
                 assert any('HELD: LETTUCE' in text for text in texts)
-                acknowledge('CUT:FAIL')
+                acknowledge('CH:F')
 
-                invoke(0x60, 0); scan('cutting board'); acknowledge('CUT:START')
+                invoke(0x60, 0); scan('cutting board'); acknowledge('CH:S')
                 for _ in range(150): invoke(0x5c)
-                acknowledge('CUT:DONE')
+                acknowledge('CH:D:L')
                 invoke(0x60, 0x100)
                 assert any('HELD: SLICED LETTUCE' in text for text in texts)
-                invoke(0x60, 3); scan('pantry'); acknowledge('PLATE')
+                invoke(0x60, 3); scan('pantry'); acknowledge('PL:--L-')
                 assert any('PLATE: YES B- M- L+ C-' in text for text in texts)
 
                 invoke(0x60, 4); before = len(packets); scan('fridge')
                 assert len(packets) == before and 'UNKNOWN BUTTON COMBO' in texts
-                invoke(0x60, 5); scan('fridge'); acknowledge('PICK:CHEESE')
-                assert any('PLATE: YES B- M- L+ C+' in text for text in texts)
+                invoke(0x60, 5); before = len(packets); scan('fridge')
+                assert len(packets) == before and 'UNKNOWN BUTTON COMBO' in texts
 
                 # A + shake submits a fixed plate summary; Pi validates consensus/order.
                 cpu.mem_write(app + 229, b'\x0f\x01')
                 for _ in range(50): invoke(0x5c)
                 invoke(0x60, 0); hardware["motion"] = "shake"; invoke(0x5c); hardware["motion"] = "rest"
-                acknowledge('SUBMIT:BMLC'); invoke(0x60, 0x100)
+                assert cpu.mem_read(app + 229, 2) == b'\0\0'  # Submission consumes immediately.
+                acknowledge('SUB:BMLC'); invoke(0x60, 0x100)
                 assert 'PLATE SUBMITTED TO PI' in texts
 
                 for _ in range(25): invoke(0x5c)
-                invoke(0x60, 4); scan('fridge'); acknowledge('PICK:MEAT')
+                invoke(0x60, 5); scan('fridge'); acknowledge('PU:K')
+                invoke(0x60, 0); scan('cutting board'); acknowledge('CH:S')
+                for _ in range(150): invoke(0x5c)
+                acknowledge('CH:D:C'); invoke(0x60, 0x100)
+                assert any('HELD: SLICED CHEESE' in text for text in texts)
+                invoke(0x60, 1); hardware["motion"] = "shake"; invoke(0x5c); hardware["motion"] = "rest"
+                acknowledge('DROP:HC'); invoke(0x60, 0x101)
+                for _ in range(25): invoke(0x5c)
+
+                invoke(0x60, 4); scan('fridge'); acknowledge('PU:R')
                 invoke(0x60, 1)  # Hold B and shake to discard.
                 hardware["motion"] = "shake"; invoke(0x5c); hardware["motion"] = "rest"
-                acknowledge('DISCARD'); invoke(0x60, 0x101)
+                acknowledge('DROP:HR'); invoke(0x60, 0x101)
                 assert 'ITEM DROPPED' in texts
 
-                incoming(b'OC1|22222222|N|BUMP:P:B---'); invoke(0x5c)
-                assert cpu.mem_read(app + 229, 2) == b'\x01\x01'
-                cpu.mem_write(app + 229, b'\0\0')
+                for _ in range(25): invoke(0x5c)
+                cpu.mem_write(app + 228, b'\x01')
+                incoming(b'OC1|333331|E|P1:READY'); invoke(0x5c)
+                incoming(b'OC1|333333|E|P3:READY'); invoke(0x5c)
+                hardware["motion"] = "shake"; invoke(0x5c); hardware["motion"] = "rest"
+                assert cpu.mem_read(app + 228, 1) == b'\0'
+                assert 'THREE READY - HELD STATE CLEARED' in texts
+                acknowledge('READY')
 
-            incoming(b'OC1|76543210|N|PICK:MEAT'); invoke(0x5c)
+                before = len(packets)
+                incoming(b'OC1|222222|E|P1:X:PB---'); invoke(0x5c)
+                assert len(packets) == before  # A player applies peer state but never ACKs it.
+                assert cpu.mem_read(app + 229, 2) == b'\0\0'  # Empty hand cannot take a peer plate.
+
+            incoming(b'OC1|765432|E|P1:PU:R'); invoke(0x5c)
             assert cpu.mem_read(app + 228, 1) == b'\0'  # Peer inventory never overwrites ours.
             count = len(packets)
-            log_count = prints.count('HTN26|RX|%02x:%02x:%02x:%02x:%02x:%02x|%d|%s\n')
-            incoming(b'OC1|87654321|N|STOVE1:PUT');invoke(0x5c)
-            assert packets[-1] == b'OC1|87654321|A|OK' and len(packets) == count+1
-            assert any(line.startswith('HTN26|RX|') for line in prints)
-            incoming(b'OC1|87654321|N|STOVE1:PUT');invoke(0x5c)
-            assert len(packets) == count+1  # Current ACK advertisement covers duplicates.
-            for _ in range(100):invoke(0x5c)
-            incoming(b'OC1|87654321|N|STOVE1:PUT');invoke(0x5c)
-            assert len(packets) == count+2  # A later retry receives another ACK, not another log.
-            assert prints.count('HTN26|RX|%02x:%02x:%02x:%02x:%02x:%02x|%d|%s\n') == log_count + 1
+            incoming(b'OC1|876543|E|P1:ST:L:P'); invoke(0x5c)
+            incoming(b'OC1|876543|E|P1:ST:L:P'); invoke(0x5c)
+            for _ in range(100): invoke(0x5c)
+            incoming(b'OC1|876543|E|P1:ST:L:P'); invoke(0x5c)
+            assert len(packets) == count
+            assert not any(line.startswith('HTN26|RX|') for line in prints)
             for _ in range(1000): invoke(0x5c)
             assert any('STOVES: L BURNT' in text for text in texts)
             if not nfc_error:
                 invoke(0x60, 5); scan('fridge')
                 pending = packets[-1]
-                assert pending.endswith(b'|N|PICK:CHEESE')
-                incoming(b'OC1|00000001|A|OK');invoke(0x5c)
+                assert pending.endswith(b':PU:K')
+                incoming(b'OC1|000001|A|OK'); invoke(0x5c)
                 before = len(texts); sent = len(packets)
-                for _ in range(451):invoke(0x5c)
+                for _ in range(451): invoke(0x5c)
                 assert packets[sent:] == [pending, pending]
                 assert 'ACTION TIMEOUT / SCAN AGAIN' in texts[before:]
-        if not nfc_error and not send_error:
-            cpu.mem_write(app + 235, b'\0\0')  # Return to role selection for host lifecycle check.
-            invoke(0x60, 8); invoke(0x60, 8)
-            assert packets[-1].endswith(b'|N|GAME:START')
-            assert 'HTN26|GAME|START|120\n' in prints
-            cpu.mem_write(app + 288, struct.pack('<I', 1)); invoke(0x5c)
-            assert packets[-1].endswith(b'|N|GAME:END')
-            assert 'HTN26|GAME|END\n' in prints
     for _ in range(250):
         invoke(0x5C)
     assert ("idle" in stages) == (not nvs_error and not radio_error)
@@ -290,16 +331,18 @@ def scenario(nvs_error=0, radio_error=0, nfc_error=0, allocation_failure=False, 
     assert cpu.mem_read(app + 4, 24) == bytes(24)
     if handler:
         before = len(packets)
-        incoming(b'OC1|00000001|N|READY');invoke(0x5c)
+        incoming(b'OC1|000001|E|P1:READY');invoke(0x5c)
         assert len(packets) == before
 
 
 if __name__ == "__main__":
     scenario()
+    scenario(role="host")
     scenario(nvs_error=0x110D)
-    scenario(nvs_error=0x1110)
+    scenario(nvs_error=0x1110, role="host")
     scenario(radio_error=-1)
+    scenario(radio_error=-1, role="host")
     scenario(nfc_error=-1)
     scenario(allocation_failure=True)
     scenario(send_error=-1)
-    print("PASS: native NFC controls, cut reset/progress, shake discard/submit, shared stove events, retries, cleanup")
+    print("PASS: native player/host roles, gateway-only ACK/serial, lifecycle, retries, cleanup")

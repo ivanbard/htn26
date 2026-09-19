@@ -5,6 +5,28 @@ single QNX Raspberry Pi. It is the host's round-lifecycle controller and radio
 gateway; it is not a camera controller, a multi-Pi coordinator, or a second
 source of authoritative order and score state.
 
+## Supported deployment profiles
+
+For the observed host OOM (`free heap 26124`, largest block `15360`, followed
+by NimBLE `ESP_ERR_NO_MEM`), the v1 low-memory deployment is the pinned native
+factory extension in [`../native/README.md`](../native/README.md). Flash that
+same candidate to the host and all three players using its backup/factory-only
+write gate. Open **Overcooked** on the USB-connected badge and press START to
+select host mode; radio starts through the proven clean-reboot native runtime
+without enabling host NFC.
+
+`manifest.cfg` plus `main.lua` remain the supported Lua compatibility/rollback
+profile for unmodified stock firmware. They are intentionally retained and
+tested, but the supplied host has not started BLE successfully with that
+profile. Do not mix a Lua host with native players or a native host with Lua
+players: Lua radio uses a private `LUA1` carrier wrapper while native mode calls
+the recovered HAL directly. Profile selection is whole-fleet and rollback is
+explicit in the native guide.
+
+The packet bytes, USB serial framing, one-Pi ownership, and lifecycle records
+below apply to both profiles. Native mode additionally uses private player-to-
+host ACK packets, which the host never forwards to the Pi.
+
 ## Host lifecycle
 
 The host app stays in the foreground and shows status plus a `MM:SS` countdown.
@@ -45,9 +67,11 @@ HTN26|RX|AA:BB:CC:DD:EE:FF|-48|OC1|0042|N|ING:TOM
 `sender_mac` is the radio sender identity and `rssi` is the received signal
 strength. Payloads are limited to 44 bytes, use `OC1|<sequence>|<type>|<value>`,
 and reject control characters and `|` in the value so the Pi can split fields.
-The app accepts the event types currently understood by the Pi parser (`N`,
-`M`, `B`, and `H`). The receive callback only validates and copies to an
-8-entry FIFO; normal ticks flush at most four records.
+The Lua app accepts `N`, `M`, `B`, `H`, and the fixed-player `E` events emitted
+by the current player app. Native mode emits the same compact `E` payload bytes
+and forwards them unchanged. The Lua receive callback copies to an 8-entry
+FIFO; the native callback uses its documented single fixed slot to avoid the
+Lua/system-heap failure.
 
 The Pi parser should search each physical serial line for `HTN26|` because the
 badge runtime may add logging text around the application record. It should
@@ -55,9 +79,10 @@ then parse the marker and fields rather than assuming the marker is at column
 zero. `HTN26|GW|UP|<forwarded>|<drops>` health lines are also emitted. There is
 no serial-input API and no Pi-to-badge API in this app.
 
-## Install and wire the host
+## Install and wire the Lua rollback profile
 
-The app consists only of these two upload files:
+These instructions are for the unmodified-firmware Lua profile, not the native
+OOM path. The app consists only of these two upload files:
 
 ```text
 badge/master/manifest.cfg
@@ -103,7 +128,8 @@ python -m unittest discover -s badge/master/tests -p 'test_*.py' -v
 ```
 
 These checks cover payload validation, sender/RSSI framing, lifecycle records,
-44-byte bounds, the bounded FIFO, and the three-player reset shape. They do not
-prove USB serial, radio range, timer accuracy, LED appearance, or badge
-firmware behavior. Physical host-badge, three-player radio, and QNX validation
-still require the IDE Push and a real connected hardware run.
+44-byte bounds, the bounded FIFO, and the three-player reset shape. Native
+build/emulator checks are separate in `../native/README.md`. Neither suite
+proves USB serial, radio range, timer accuracy, LED appearance, or badge
+firmware behavior. The current native contract changes and the Lua OOM both
+still require a real four-badge, USB-connected Pi run.

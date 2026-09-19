@@ -27,8 +27,11 @@ The MVP implements one deterministic `TOMATO_SOUP` order:
 
 The serial parser searches for `HTN26|` inside noisy lines, validates the MAC,
 RSSI, `OC1` payload, sequence, type, value, and payload length, then the engine
-maps the normalized MAC to a player. A bounded `(sender MAC, sequence)` cache
-suppresses retransmissions before game rules run.
+maps the normalized MAC to a player. It retains the current fixed-player `E`
+event type at this transport boundary. The portable tomato-soup fixture does
+not claim to apply the burger action vocabulary (`P2:PU:R`, etc.); that semantic
+adapter remains an explicit integration boundary. A bounded `(sender MAC,
+sequence)` cache suppresses retransmissions before game rules run.
 
 Every location-sensitive intent requires a current observation from a healthy
 worker, within configured age and confidence bounds. Worker observations are
