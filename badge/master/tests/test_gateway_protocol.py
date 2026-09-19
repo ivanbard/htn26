@@ -44,7 +44,6 @@ class GatewayProtocolTests(unittest.TestCase):
             "", "HELLO1:hi", "OC1|", "OC1|42|N|", "OC1|x|N|ING:TOM",
             "OC1|42|X|ING:TOM", "OC1|H|42|P", "OC1|0001|H|P|extra",
             "OC1|42|N|ING|TOM", "OC1|42|N|ING:TOM\n",
-            "OC1|42|N|ING:\x00TOM",
         )
         for payload in payloads:
             with self.subTest(payload=payload):
@@ -52,6 +51,10 @@ class GatewayProtocolTests(unittest.TestCase):
                     "assert(not gateway_test.valid_player_packet(%s))"
                     % json.dumps(payload)
                 )
+        self.run_lua(
+            'assert(not gateway_test.valid_player_packet('
+            '"OC1|42|N|ING:" .. string.char(0) .. "TOM"))'
+        )
         self.run_lua("assert(not gateway_test.valid_player_packet(nil))")
 
     def test_enforces_radio_size_boundaries(self):
