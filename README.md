@@ -412,6 +412,10 @@ Do not start by implementing three-camera fusion.
 ```text
 badge/
   badge-app-guide.md
+  nfc_display/
+    README.md
+    main.lua
+    manifest.cfg
   master/
     README.md
   slave/
@@ -448,6 +452,11 @@ badge/master/
   manifest.cfg
 
 badge/slave/
+  main.lua
+  manifest.cfg
+
+badge/nfc_display/
+  README.md
   main.lua
   manifest.cfg
 
