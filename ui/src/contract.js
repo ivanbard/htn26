@@ -6,12 +6,6 @@
  * @property {string} type
  * @property {Object} [payload]
  *
- * @typedef {Object} RoomPhotoUpload
- * @property {string} name
- * @property {string} mimeType
- * @property {number} size
- * @property {string} [contentBase64]
- *
  * @typedef {Object} Adapter
  * @property {(onState: (state: Object) => void) => (void|(() => void)|Promise<void|(() => void)>)} connect
  * @property {(command: AdapterCommand) => Promise<Object>} command
@@ -34,9 +28,15 @@ export function adapterCommand(type, payload) {
  * @typedef {Object} MasterSnapshot
  * @property {Object} setup
  * @property {Object} floorPlan
+ * @property {Object} burgerLevel
  * @property {Array<Object>} players
- * @property {Object} order
+ * @property {Array<Object>} recipes
+ * @property {Array<Object>} orders
+ * @property {Object} [order] Legacy single-order alias accepted by the renderer.
+ * @property {Array<Object>} stations
  * @property {Object} clock
  * @property {Object} score
  * @property {Object} submission
+ * @property {Object} serving
+ * @property {Object} health
  */
