@@ -13,14 +13,7 @@ export function createApp({ root, transport, now = () => Date.now() }) {
   const render = (nextState) => {
     if (destroyed) return;
     state = nextState;
-    root.innerHTML = renderApp(state, now());
-    if (connectionError) {
-      const error = root.querySelector("#ui-error");
-      if (error) {
-        error.hidden = false;
-        error.textContent = connectionError;
-      }
-    }
+    root.innerHTML = renderApp(state, now(), connectionError);
   };
 
   const onCommand = async (event) => {

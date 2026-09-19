@@ -221,16 +221,16 @@ function renderHealth(state, now) {
   </section>`;
 }
 
-export function renderApp(state, now = Date.now()) {
+export function renderApp(state, now = Date.now(), connectionError = "") {
   if (!state) {
-    return `<section class="loading-card"><p class="eyebrow">HTN26 / OVERCOOKED IRL</p><h1>Waiting for authoritative state…</h1><p class="muted">No game state has been received from the local transport.</p></section>`;
+    return `<section class="loading-card"><p class="eyebrow">HTN26 / OVERCOOKED IRL</p><h1>Waiting for authoritative state…</h1><p class="muted">No game state has been received from the local transport.</p>${connectionError ? `<div id="ui-error" class="ui-error" role="alert">${escapeHtml(connectionError)}</div>` : ""}</section>`;
   }
   return `<div class="app-shell">
     <header class="topbar">
       <div><p class="eyebrow">HTN26 / OVERCOOKED IRL</p><h1>Kitchen Control</h1></div>
       <div class="connection-summary" role="status"><span class="connection-light"></span><span>LOCAL MASTER PI</span><small>${escapeHtml(state.source || "authoritative state")}</small></div>
     </header>
-    <div id="ui-error" class="ui-error" hidden></div>
+    ${connectionError ? `<div id="ui-error" class="ui-error" role="alert">${escapeHtml(connectionError)}</div>` : ""}
     ${renderHostPanel(state)}
     <div class="primary-grid">
       ${renderFloorPlan(state, now)}

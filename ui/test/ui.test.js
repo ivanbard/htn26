@@ -18,6 +18,13 @@ test("renders the authoritative accepted floor plan and live game snapshot", () 
   assert.match(html, /TRACKING COVERAGE HEALTHY/);
 });
 
+test("shows a connection error while waiting for authoritative state", () => {
+  const html = renderApp(null, 1_000, "MASTER PI UNAVAILABLE — offline");
+
+  assert.match(html, /id="ui-error" class="ui-error" role="alert"/);
+  assert.match(html, /MASTER PI UNAVAILABLE — offline/);
+});
+
 test("marks an old player position and worker heartbeat stale", () => {
   const state = createInitialMockState(1_000);
   state.players[1].tracking.lastSeenAt = 0;
