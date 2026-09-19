@@ -401,7 +401,7 @@ Only add all three cameras and four players after this loop works end-to-end.
 7. Fuse location validation with badge events.
 8. Add Pi worker protocol.
 9. Add camera 2 and camera 3.
-10. Add UI.
+10. Add offline-first UI MVP.
 11. Add failure injection and degraded-mode demo.
 12. Add more recipes/content.
 
@@ -427,7 +427,19 @@ pi/
     README.md
 
 ui/
+  index.html
+  package.json
   README.md
+  server.mjs
+  src/
+    main.js
+    mock-transport.js
+    render.js
+    state.js
+    transport.js
+  styles.css
+  test/
+    ui.test.js
 ```
 
 Expected later:
@@ -852,4 +864,3 @@ A slave badge is working when:
 6. the same sequence-numbered event is retransmitted a bounded number of times
 7. gateway badge receives at least one copy
 8. master Pi deduplicates it into one action
-
