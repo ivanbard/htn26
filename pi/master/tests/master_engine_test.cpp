@@ -12,6 +12,7 @@ namespace {
 
 using htn26::master::ActionCode;
 using htn26::master::GamePhase;
+using htn26::master::GameState;
 using htn26::master::HealthState;
 using htn26::master::Item;
 using htn26::master::MasterConfig;
@@ -208,6 +209,53 @@ void test_location_bounds_and_worker_failure() {
           "gateway must become stale when status/RX disappears");
 }
 
+void test_tracking_rejection_and_health_publication() {
+  MasterEngine engine(test_config());
+  require(engine.receive_heartbeat(
+              WorkerHeartbeat{"cam1", 1, 0, true, true, 8.0}, 0)
+              .accepted,
+          "worker should become healthy");
+
+  const auto unknown = engine.receive_tracking(
+      WorkerObservation{"cam1", 7, 1, {{99, 0.5, 0.5, 0.95, 1}}}, 1);
+  require(unknown.code == ActionCode::InvalidObservation,
+          "unknown-player tracking should be rejected");
+  require(engine.register_badge("AA:BB:CC:DD:EE:FF", 1),
+          "badge should register after unknown tracking");
+  require(engine.receive_tracking(
+              WorkerObservation{"cam1", 7, 2, {{1, 0.5, 0.5, 0.95, 2}}}, 2)
+              .accepted,
+          "the same sequence should remain available to a newly registered player");
+
+  GameState published;
+  engine.set_state_listener([&](const auto& snapshot) { published = snapshot; });
+  const auto invalid = engine.receive_tracking(
+      WorkerObservation{"cam1", 8, 1001, {}}, 1001);
+  require(invalid.code == ActionCode::InvalidObservation,
+          "empty tracking should be rejected");
+  require(engine.worker_state("cam1") == HealthState::Stale &&
+              published.workers.at("cam1").state == HealthState::Stale,
+          "health transitions must be published with rejected input");
+}
+
+void test_default_station_boundaries_do_not_overlap() {
+  MasterEngine engine(test_config());
+  require(engine.register_badge("AA:BB:CC:DD:EE:FF", 1), "badge should register");
+  engine.start_game(0);
+  require(engine.receive_heartbeat(
+              WorkerHeartbeat{"cam1", 1, 0, true, true, 8.0}, 0)
+              .accepted,
+          "worker should become healthy");
+  require(engine.receive_tracking(
+              WorkerObservation{"cam1", 1, 0, {{1, 1.0, 0.5, 0.95, 0}}}, 0)
+              .accepted,
+          "boundary observation should be accepted");
+  require(!engine.player_is_at(1, StationKind::TomatoSource, 0),
+          "left station must not include its upper boundary");
+  require(engine.player_is_at(1, StationKind::Chopping, 0),
+          "right station must own its lower boundary");
+}
+
 void test_order_timer_and_invalid_inputs() {
   MasterConfig config = test_config();
   config.order_duration_ms = 10;
@@ -233,6 +281,8 @@ int main() {
     test_protocol_validation();
     test_complete_tomato_soup_flow_and_dedup();
     test_location_bounds_and_worker_failure();
+    test_tracking_rejection_and_health_publication();
+    test_default_station_boundaries_do_not_overlap();
     test_order_timer_and_invalid_inputs();
   } catch (const std::exception& error) {
     std::cerr << "FAIL: " << error.what() << '\n';

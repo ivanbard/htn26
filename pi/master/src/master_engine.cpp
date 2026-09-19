@@ -42,7 +42,7 @@ StationKind zone_for(const MasterConfig& config, double x, double y) {
 }  // namespace
 
 bool Zone::contains(double x, double y) const {
-  return x >= min_x && x <= max_x && y >= min_y && y <= max_y;
+  return x >= min_x && x < max_x && y >= min_y && y < max_y;
 }
 
 MasterConfig MasterConfig::defaults() {
@@ -479,15 +479,25 @@ ActionResult MasterEngine::ingest_serial_line(std::string_view line,
 ActionResult MasterEngine::receive_tracking(
     const protocol::WorkerObservation& observation, std::uint64_t now_ms) {
   state_.now_ms = now_ms;
-  set_health_for_time(now_ms);
+  bool time_state_changed = set_health_for_time(now_ms);
+  time_state_changed = update_fused_positions(now_ms) || time_state_changed;
+  auto reject_with_time_update = [&](ActionResult result) {
+    if (time_state_changed) {
+      publish();
+      result.state_version = state_.version;
+    }
+    return result;
+  };
   if (observation.node.empty() || observation.players.empty()) {
-    return reject(ActionCode::InvalidObservation, "tracking packet has no node or players");
+    return reject_with_time_update(
+        reject(ActionCode::InvalidObservation, "tracking packet has no node or players"));
   }
   const auto previous_sequence = latest_observation_sequence_.find(observation.node);
   if (previous_sequence != latest_observation_sequence_.end() &&
       observation.sequence <= previous_sequence->second) {
-    return reject(ActionCode::StaleObservation,
-                  "older tracking sequence cannot replace current telemetry");
+    return reject_with_time_update(
+        reject(ActionCode::StaleObservation,
+               "older tracking sequence cannot replace current telemetry"));
   }
 
   bool has_known_player = false;
@@ -503,6 +513,11 @@ ActionResult MasterEngine::receive_tracking(
       has_known_player = true;
     }
   }
+  if (!has_known_player) {
+    return reject_with_time_update(
+        reject(ActionCode::InvalidObservation,
+               "tracking packet contains no registered player"));
+  }
   if (state_.workers.find(observation.node) == state_.workers.end()) {
     state_.workers.emplace(observation.node, WorkerHealth{});
   }
@@ -512,10 +527,6 @@ ActionResult MasterEngine::receive_tracking(
       observations_[observation.node][player.player_id] =
           StoredObservation{player, observation.sequence};
     }
-  }
-  if (!has_known_player) {
-    return reject(ActionCode::InvalidObservation,
-                  "tracking packet contains no registered player");
   }
 
   update_fused_positions(now_ms);
@@ -528,10 +539,19 @@ ActionResult MasterEngine::receive_tracking(
 ActionResult MasterEngine::receive_heartbeat(
     const protocol::WorkerHeartbeat& heartbeat, std::uint64_t now_ms) {
   state_.now_ms = now_ms;
-  set_health_for_time(now_ms);
+  bool time_state_changed = set_health_for_time(now_ms);
+  time_state_changed = update_fused_positions(now_ms) || time_state_changed;
+  auto reject_with_time_update = [&](ActionResult result) {
+    if (time_state_changed) {
+      publish();
+      result.state_version = state_.version;
+    }
+    return result;
+  };
   if (heartbeat.node.empty() || !std::isfinite(heartbeat.fps) ||
       heartbeat.fps < 0.0 || heartbeat.fps > 1000.0) {
-    return reject(ActionCode::InvalidHeartbeat, "invalid worker heartbeat");
+    return reject_with_time_update(
+        reject(ActionCode::InvalidHeartbeat, "invalid worker heartbeat"));
   }
   auto health_it = state_.workers.find(heartbeat.node);
   if (health_it == state_.workers.end()) {
@@ -539,8 +559,9 @@ ActionResult MasterEngine::receive_heartbeat(
   }
   if (health_it->second.has_heartbeat &&
       heartbeat.sequence <= health_it->second.last_heartbeat_sequence) {
-    return reject(ActionCode::StaleObservation,
-                  "older worker heartbeat cannot replace current health");
+    return reject_with_time_update(
+        reject(ActionCode::StaleObservation,
+               "older worker heartbeat cannot replace current health"));
   }
 
   WorkerHealth& health = health_it->second;
