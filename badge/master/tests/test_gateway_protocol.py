@@ -120,6 +120,21 @@ class GatewayProtocolTests(LuaTestMixin, unittest.TestCase):
             "assert(gateway_test.player_count() == 3)"
         )
 
+    def test_last_event_display_is_bounded_and_keeps_metadata(self):
+        self.run_lua(
+            'local text = gateway_test.format_last_event()\n'
+            'assert(text == "Last: none")\n'
+            'local sender = "AA:BB:CC:DD:EE:FF"\n'
+            'local rssi = -48\n'
+            'local payload = "OC1|0042|N|" .. string.rep("X", 36)\n'
+            'text = gateway_test.format_last_event(sender, rssi, payload)\n'
+            'assert(string.find(text, "AA:BB:CC:DD:EE:FF", 1, true) ~= nil)\n'
+            'assert(string.find(text, "RSSI -48 dBm", 1, true) ~= nil)\n'
+            'assert(string.find(text, "...", 1, true) ~= nil)\n'
+            'local payload_line = string.match(text, "[^\\n]+$")\n'
+            'assert(#payload_line == gateway_test.event_max_payload_chars())'
+        )
+
 
 class HostLifecycleTests(LuaTestMixin, unittest.TestCase):
     def test_start_and_timeout_emit_lifecycle_records(self):
@@ -162,6 +177,13 @@ class HostLifecycleTests(LuaTestMixin, unittest.TestCase):
 
 
 class HostAppStaticChecks(unittest.TestCase):
+    def test_event_region_is_below_status_and_bounded(self):
+        source = (ROOT / "master" / "main.lua").read_text()
+        self.assertIn("local EVENT_TOP_Y = 154", source)
+        self.assertIn('event_label:align("top_mid", 0, EVENT_TOP_Y)', source)
+        self.assertIn("local EVENT_MAX_PAYLOAD_CHARS = 32", source)
+        self.assertNotIn('event_label:align("center", 0, 18)', source)
+
     def test_app_is_self_contained_and_uses_documented_boundary(self):
         source = (ROOT / "master" / "main.lua").read_text()
         manifest = (ROOT / "master" / "manifest.cfg").read_text()

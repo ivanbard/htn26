@@ -14,6 +14,8 @@ local MAX_COUNTER = 999999
 local DISPLAY_INTERVAL_MS = 100
 local LED_INTERVAL_MS = 100
 local STATUS_INTERVAL_MS = 5000
+local EVENT_TOP_Y = 154
+local EVENT_MAX_PAYLOAD_CHARS = 32
 
 local game_active = false
 local game_ends_at = 0
@@ -260,6 +262,20 @@ local function format_clock(seconds)
   return tostring(minutes) .. ":" .. second_text
 end
 
+local function truncate_text(value, max_length)
+  if #value <= max_length then return value end
+  if max_length <= 3 then return string.sub(value, 1, max_length) end
+  return string.sub(value, 1, max_length - 3) .. "..."
+end
+
+local function format_last_event(sender_value, rssi_value, payload_value)
+  if not payload_value then return "Last: none" end
+  local sender = truncate_text(sender_value or "?", 17)
+  local rssi = tostring(rssi_value or "?")
+  local payload = truncate_text(payload_value, EVENT_MAX_PAYLOAD_CHARS)
+  return "Last event\n" .. sender .. "  RSSI " .. rssi .. " dBm\n" .. payload
+end
+
 local function current_status()
   if game_active then return "GAME ACTIVE" end
   if session_number == 0 then return "HOST READY - PRESS START" end
@@ -299,10 +315,8 @@ local function update_display(force)
     shown_counters = counters
   end
 
-  local event = "Last: none"
-  if last_payload then
-    event = "Last " .. last_sender .. " " .. tostring(last_rssi) .. " dBm\n" .. last_payload
-  elseif not game_active and session_number > 0 then
+  local event = format_last_event(last_sender, last_rssi, last_payload)
+  if not last_payload and not game_active and session_number > 0 then
     event = "Round reset - player state cleared"
   end
   if force or shown_event ~= event then
@@ -409,8 +423,10 @@ function on_enter(root)
   counters_label:align("top_mid", 0, 126)
 
   event_label = badge.ui.label(root, "Last: none")
+  -- Keep this three-line, bounded event block below the counters. The old
+  -- centered placement put "Last: none" over the title/status region.
   event_label:style({text_font = 14, text_align = "center"})
-  event_label:align("center", 0, 18)
+  event_label:align("top_mid", 0, EVENT_TOP_Y)
 
   local hint_label = badge.ui.label(root, "START new round   HOME exits")
   hint_label:style({text_font = 14, text_align = "center"})
@@ -477,6 +493,9 @@ if badge == nil then
     serial_start_frame = serial_start_frame,
     serial_end_frame = serial_end_frame,
     lifecycle_radio_frame = lifecycle_radio_frame,
+    format_last_event = format_last_event,
+    event_top_y = function() return EVENT_TOP_Y end,
+    event_max_payload_chars = function() return EVENT_MAX_PAYLOAD_CHARS end,
     reset_queue = reset_queue,
     enqueue_packet = enqueue_packet,
     dequeue_packet = dequeue_packet,
