@@ -91,6 +91,23 @@ class GatewayProtocolTests(unittest.TestCase):
             '"HTN26|RX|AA:BB:CC:DD:EE:FF|-48|OC1|0042|N|ING:TOM")'
         )
 
+    def test_burger_plate_and_host_scan_protocol(self):
+        self.run_lua(
+            'assert(gateway_test.valid_player_packet("OC1|E|0001|I:CHEESE"))\n'
+            'assert(gateway_test.valid_player_packet("OC1|E|0002|I:LETTUCE"))\n'
+            'assert(gateway_test.valid_player_packet("OC1|E|0003|I:MEAT"))\n'
+            'assert(gateway_test.valid_player_packet("OC1|E|0004|I:BUNS"))\n'
+            'assert(gateway_test.valid_player_packet("OC1|E|0005|S:CHOP1"))\n'
+            'assert(gateway_test.valid_player_packet("OC1|E|0006|S:STOVE2"))\n'
+            'assert(gateway_test.valid_player_packet("OC1|E|0007|P:03"))\n'
+            'assert(gateway_test.valid_plate_tag("P:01"))\n'
+            'assert(gateway_test.valid_plate_tag("P:03"))\n'
+            'assert(not gateway_test.valid_plate_tag("P:04"))\n'
+            'assert(not gateway_test.valid_plate_tag("I:MEAT"))\n'
+            'assert(gateway_test.plate_frame("P:02") == "HTN26|PLATE|P:02")\n'
+            'assert(gateway_test.host_scan_frame() == "HTN26|HOST|SCAN|3PI|BURGER")'
+        )
+
     def test_queue_is_bounded_and_preserves_order(self):
         self.run_lua(
             "gateway_test.reset_queue()\n"
