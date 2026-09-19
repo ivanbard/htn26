@@ -211,6 +211,33 @@ void test_failure_recovery() {
           "camera recovery returns to running state");
 }
 
+void test_calibration_reset_clears_track_diagnostics() {
+  WorkerCore core(config());
+  require(core.process_detections(
+              at_ms(0), {detection(1, 1.0, 1.0, 0.8, true, 42),
+                         detection(2, 2.0, 2.0, 0.8)},
+              1ms)
+              .has_value(),
+          "calibrated worker records track diagnostics");
+  require(core.diagnostics().known_tracks == 1 &&
+              core.diagnostics().unknown_tracks == 1,
+          "track diagnostics reflect the latest observation");
+
+  core.set_calibration(std::nullopt);
+  require(core.diagnostics().known_tracks == 0 &&
+              core.diagnostics().unknown_tracks == 0,
+          "clearing calibration clears stale track diagnostics");
+
+  core.set_calibration(unit_calibration());
+  require(core.process_detections(
+              at_ms(10), {detection(3, 3.0, 3.0, 0.8)}, 1ms)
+              .has_value(),
+          "replacement calibration accepts new observations");
+  require(core.diagnostics().known_tracks == 0 &&
+              core.diagnostics().unknown_tracks == 1,
+          "replacement calibration reports only current tracks");
+}
+
 struct FakeCamera final : CameraAdapter {
   bool initialize_ok = true;
   bool capture_ok = true;
@@ -319,6 +346,7 @@ int main() {
   test_unknown_identity_and_bounded_hold();
   test_heartbeat_scheduler();
   test_failure_recovery();
+  test_calibration_reset_clears_track_diagnostics();
   test_runtime_adapter_failure_recovery();
   test_runtime_cleans_up_partial_startup();
   test_inference_failure_is_not_cleared_by_core_processing();

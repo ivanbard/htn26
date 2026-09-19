@@ -185,6 +185,8 @@ void WorkerCore::set_calibration(std::optional<Calibration> calibration) {
   latest_observation_.reset();
   last_inference_timestamp_.reset();
   diagnostics_.effective_fps = 0.0;
+  diagnostics_.known_tracks = 0;
+  diagnostics_.unknown_tracks = 0;
   identities_.clear();
   outgoing_.clear();
   recompute_state();
