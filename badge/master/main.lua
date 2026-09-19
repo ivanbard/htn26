@@ -72,7 +72,7 @@ local function total_drop_count()
 end
 
 -- Keep this filter deliberately stricter than a prefix-only check. It accepts
--- the documented OC1|sequence|type|value packet and no serial-control bytes.
+-- both supported OC1 field orders and no serial-control bytes.
 local function valid_player_packet(payload)
   if type(payload) ~= "string" then return false end
   local length = #payload
@@ -81,8 +81,12 @@ local function valid_player_packet(payload)
   if string.find(payload, string.char(0), 1, true) ~= nil then return false end
   if string.find(payload, "\r", 1, true) ~= nil then return false end
   if string.find(payload, "\n", 1, true) ~= nil then return false end
-  local sequence, kind, value = string.match(payload,
-    "^OC1|([0-9]+)|([NMBH])|([^|]+)$")
+  local kind, sequence, value = string.match(payload,
+    "^OC1|([NMBHEV])|(%d%d%d%d)|([^|]+)$")
+  if kind == nil then
+    sequence, kind, value = string.match(payload,
+      "^OC1|([0-9]+)|([NMBHEV])|([^|]+)$")
+  end
   return sequence ~= nil and kind ~= nil and value ~= nil
 end
 

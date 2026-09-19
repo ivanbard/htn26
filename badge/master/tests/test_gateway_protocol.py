@@ -26,12 +26,13 @@ def valid_player_packet(payload):
     fields = payload.split("|")
     if len(fields) != 4 or fields[0] != "OC1":
         return False
-    sequence, kind, value = fields[1:]
-    if not sequence or any(char < "0" or char > "9" for char in sequence):
-        return False
-    if kind not in "NMBH" or not value:
-        return False
-    return True
+    first, second, value = fields[1:]
+    if (len(first) == 1 and first in "NMBHEV" and len(second) == 4
+            and all("0" <= char <= "9" for char in second)):
+        return bool(value)
+    if first.isdigit() and len(second) == 1 and second in "NMBHEV":
+        return bool(value)
+    return False
 
 
 def serial_frame(mac, rssi, payload):
@@ -73,6 +74,10 @@ class GatewayProtocolTests(unittest.TestCase):
         self.assertTrue(valid_player_packet("OC1|0042|N|ING:TOM"))
         self.assertTrue(valid_player_packet("OC1|7|M|CHOP"))
 
+    def test_accepts_player_sender_order(self):
+        self.assertTrue(valid_player_packet("OC1|H|0001|P"))
+        self.assertTrue(valid_player_packet("OC1|E|0042|P:01"))
+
     def test_rejects_malformed_or_unrelated_input(self):
         malformed = (
             None,
@@ -82,6 +87,8 @@ class GatewayProtocolTests(unittest.TestCase):
             "OC1|42|N|",
             "OC1|x|N|ING:TOM",
             "OC1|42|X|ING:TOM",
+            "OC1|H|42|P",
+            "OC1|0001|H|P|extra",
             "OC1|42|N|ING|TOM",
             "OC1|42|N|ING:TOM\n",
             "OC1|42|N|ING:\x00TOM",
