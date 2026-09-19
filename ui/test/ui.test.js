@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createApp } from "../src/main.js";
 import { createInitialMockState, createMockTransport } from "../src/mock-transport.js";
 import { renderApp } from "../src/render.js";
 import { GAME_ACTIONS, SETUP_PHASES } from "../src/state.js";
@@ -117,4 +118,29 @@ test("shows a connection error while waiting for authoritative state", () => {
   const html = renderApp(null, 1_000, "MASTER PI UNAVAILABLE — offline");
   assert.match(html, /id="ui-error" class="ui-error" role="alert"/);
   assert.match(html, /MASTER PI UNAVAILABLE — offline/);
+});
+
+test("cleans up a connection that resolves after app destruction", async () => {
+  let resolveConnection;
+  let cleanupCount = 0;
+  let closeCount = 0;
+  const root = {
+    innerHTML: "",
+    addEventListener() {},
+    removeEventListener() {},
+  };
+  const transport = {
+    connect() {
+      return new Promise((resolve) => { resolveConnection = resolve; });
+    },
+    close() { closeCount += 1; },
+  };
+
+  const app = createApp({ root, transport });
+  app.destroy();
+  resolveConnection(() => { cleanupCount += 1; });
+  await Promise.resolve();
+
+  assert.equal(cleanupCount, 1);
+  assert.equal(closeCount, 1);
 });

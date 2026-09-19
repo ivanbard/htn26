@@ -37,7 +37,12 @@ export function createApp({ root, transport, now = () => Date.now() }) {
   root.addEventListener("click", onCommand);
   const connection = transport.connect(render);
   Promise.resolve(connection).then((cleanup) => {
-    unsubscribe = typeof cleanup === "function" ? cleanup : undefined;
+    const resolvedCleanup = typeof cleanup === "function" ? cleanup : undefined;
+    if (destroyed) {
+      resolvedCleanup?.();
+      return;
+    }
+    unsubscribe = resolvedCleanup;
   }).catch((error) => {
     connectionError = `MASTER PI UNAVAILABLE — ${error.message}`;
     render(state);
