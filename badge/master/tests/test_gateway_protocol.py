@@ -1,143 +1,99 @@
-"""Host-side checks for the gateway's documented packet contract.
+"""Host checks that execute the gateway's Lua protocol helpers."""
 
-The badge runtime has no host test runner in this repository, so these tests
-exercise the same pure filtering/framing and bounded-queue rules used by the
-Lua gateway. They intentionally do not inspect source text.
-"""
-
+import json
+import shutil
+import subprocess
 import unittest
+from pathlib import Path
 
 
-MAX_RADIO_PAYLOAD = 44
-MIN_PACKET_LENGTH = 9
-MAX_COUNTER = 999999
+ROOT = Path(__file__).resolve().parents[2]
+LUA = next(
+    (candidate for candidate in ("lua", "lua5.4", "lua5.3", "luajit")
+     if shutil.which(candidate)),
+    None,
+)
 
 
-def valid_player_packet(payload):
-    """Return whether payload is a well-formed, bounded OC1 event."""
-    if not isinstance(payload, str):
-        return False
-    if not MIN_PACKET_LENGTH <= len(payload) <= MAX_RADIO_PAYLOAD:
-        return False
-    if not payload.startswith("OC1|"):
-        return False
-    if any(char in payload for char in ("\x00", "\r", "\n")):
-        return False
-    fields = payload.split("|")
-    if len(fields) != 4 or fields[0] != "OC1":
-        return False
-    first, second, value = fields[1:]
-    if (len(first) == 1 and first in "NMBHEV" and len(second) == 4
-            and all("0" <= char <= "9" for char in second)):
-        return bool(value)
-    if first.isdigit() and len(second) == 1 and second in "NMBHEV":
-        return bool(value)
-    return False
-
-
-def serial_frame(mac, rssi, payload):
-    """Build the exact logical line sent to badge.sys.log()."""
-    return f"HTN26|RX|{mac}|{rssi}|{payload}"
-
-
-def increment_counter(value, amount=1):
-    """Model the app's saturating display counters."""
-    return min(MAX_COUNTER, value + amount)
-
-
-class BoundedPacketQueue:
-    """Small FIFO model of the gateway queue."""
-
-    def __init__(self, capacity):
-        self._items = []
-        self.capacity = capacity
-        self.drops = 0
-
-    def enqueue(self, item):
-        if len(self._items) >= self.capacity:
-            self.drops += 1
-            return False
-        self._items.append(item)
-        return True
-
-    def dequeue(self):
-        if not self._items:
-            return None
-        return self._items.pop(0)
-
-    def __len__(self):
-        return len(self._items)
-
-
+@unittest.skipUnless(LUA, "Lua runtime is not installed")
 class GatewayProtocolTests(unittest.TestCase):
+    def run_lua(self, expression):
+        script = "dofile(%s)\n%s\n" % (
+            json.dumps(str(ROOT / "master" / "main.lua")), expression
+        )
+        result = subprocess.run(
+            [LUA, "-"], input=script, text=True, capture_output=True,
+            cwd=ROOT,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_accepts_documented_event(self):
-        self.assertTrue(valid_player_packet("OC1|0042|N|ING:TOM"))
-        self.assertTrue(valid_player_packet("OC1|7|M|CHOP"))
+        self.run_lua(
+            'assert(gateway_test.valid_player_packet("OC1|0042|N|ING:TOM"))\n'
+            'assert(gateway_test.valid_player_packet("OC1|7|M|CHOP"))'
+        )
 
     def test_accepts_player_sender_order(self):
-        self.assertTrue(valid_player_packet("OC1|H|0001|P"))
-        self.assertTrue(valid_player_packet("OC1|E|0042|P:01"))
+        self.run_lua(
+            'assert(gateway_test.valid_player_packet("OC1|H|0001|P"))\n'
+            'assert(gateway_test.valid_player_packet("OC1|E|0042|P:01"))'
+        )
 
     def test_rejects_malformed_or_unrelated_input(self):
-        malformed = (
-            None,
-            "",
-            "HELLO1:hi",
-            "OC1|",
-            "OC1|42|N|",
-            "OC1|x|N|ING:TOM",
-            "OC1|42|X|ING:TOM",
-            "OC1|H|42|P",
-            "OC1|0001|H|P|extra",
-            "OC1|42|N|ING|TOM",
-            "OC1|42|N|ING:TOM\n",
+        payloads = (
+            "", "HELLO1:hi", "OC1|", "OC1|42|N|", "OC1|x|N|ING:TOM",
+            "OC1|42|X|ING:TOM", "OC1|H|42|P", "OC1|0001|H|P|extra",
+            "OC1|42|N|ING|TOM", "OC1|42|N|ING:TOM\n",
             "OC1|42|N|ING:\x00TOM",
         )
-        for payload in malformed:
+        for payload in payloads:
             with self.subTest(payload=payload):
-                self.assertFalse(valid_player_packet(payload))
+                self.run_lua(
+                    "assert(not gateway_test.valid_player_packet(%s))"
+                    % json.dumps(payload)
+                )
+        self.run_lua("assert(not gateway_test.valid_player_packet(nil))")
 
     def test_enforces_radio_size_boundaries(self):
-        value_at_limit = "X" * (MAX_RADIO_PAYLOAD - len("OC1|1|N|"))
-        self.assertEqual(len("OC1|1|N|" + value_at_limit), MAX_RADIO_PAYLOAD)
-        self.assertTrue(valid_player_packet("OC1|1|N|" + value_at_limit))
-        self.assertFalse(valid_player_packet("OC1|1|N|" + value_at_limit + "X"))
+        self.run_lua(
+            'local payload = "OC1|1|N|" .. string.rep("X", 36)\n'
+            'assert(#payload == 44)\n'
+            'assert(gateway_test.valid_player_packet(payload))\n'
+            'assert(not gateway_test.valid_player_packet(payload .. "X"))'
+        )
 
     def test_serial_frame_preserves_payload_and_sender_metadata(self):
-        payload = "OC1|0042|N|ING:TOM"
-        self.assertEqual(
-            serial_frame("AA:BB:CC:DD:EE:FF", -48, payload),
-            "HTN26|RX|AA:BB:CC:DD:EE:FF|-48|OC1|0042|N|ING:TOM",
-        )
-        self.assertEqual(
-            serial_frame("AA:BB:CC:DD:EE:FF", -48, payload),
-            serial_frame("AA:BB:CC:DD:EE:FF", -48, payload),
+        self.run_lua(
+            'local payload = "OC1|0042|N|ING:TOM"\n'
+            'assert(gateway_test.serial_frame("AA:BB:CC:DD:EE:FF", -48, payload) == '
+            '"HTN26|RX|AA:BB:CC:DD:EE:FF|-48|OC1|0042|N|ING:TOM")'
         )
 
     def test_queue_is_bounded_and_preserves_order(self):
-        queue = BoundedPacketQueue(capacity=2)
-        self.assertTrue(queue.enqueue("first"))
-        self.assertTrue(queue.enqueue("second"))
-        self.assertFalse(queue.enqueue("third"))
-        self.assertEqual(len(queue), 2)
-        self.assertEqual(queue.drops, 1)
-        self.assertEqual(queue.dequeue(), "first")
-        self.assertTrue(queue.enqueue("third"))
-        self.assertEqual(queue.dequeue(), "second")
-        self.assertEqual(queue.dequeue(), "third")
-        self.assertIsNone(queue.dequeue())
+        self.run_lua(
+            'gateway_test.reset_queue()\n'
+            'for number = 1, 8 do gateway_test.enqueue_packet("m", -1, tostring(number)) end\n'
+            'assert(not gateway_test.enqueue_packet("m", -1, "overflow"))\n'
+            'assert(gateway_test.queue_size() == 8)\n'
+            'assert(gateway_test.queue_drops() == 1)\n'
+            'local _, _, first = gateway_test.dequeue_packet()\n'
+            'assert(first == "1")'
+        )
 
     def test_queue_stays_bounded_under_burst(self):
-        queue = BoundedPacketQueue(capacity=8)
-        for number in range(1000):
-            queue.enqueue(number)
-        self.assertLessEqual(len(queue), 8)
-        self.assertEqual(queue.drops, 992)
+        self.run_lua(
+            'gateway_test.reset_queue()\n'
+            'for number = 1, 1000 do gateway_test.enqueue_packet("m", -1, tostring(number)) end\n'
+            'assert(gateway_test.queue_size() == 8)\n'
+            'assert(gateway_test.queue_drops() == 992)'
+        )
 
     def test_display_counters_saturate(self):
-        self.assertEqual(increment_counter(MAX_COUNTER - 1), MAX_COUNTER)
-        self.assertEqual(increment_counter(MAX_COUNTER), MAX_COUNTER)
-        self.assertEqual(increment_counter(MAX_COUNTER - 2, 10), MAX_COUNTER)
+        self.run_lua(
+            'assert(gateway_test.increment_counter(999998) == 999999)\n'
+            'assert(gateway_test.increment_counter(999999) == 999999)\n'
+            'assert(gateway_test.increment_counter(999997, 10) == 999999)'
+        )
 
 
 if __name__ == "__main__":

@@ -280,3 +280,26 @@ function on_exit()
   badge.led.clear()
   badge.led.show()
 end
+
+if badge == nil then
+  gateway_test = {
+    valid_player_packet = valid_player_packet,
+    serial_frame = serial_frame,
+    increment_counter = increment_counter,
+    reset_queue = function()
+      for index = 1, QUEUE_CAPACITY do
+        queue_mac[index] = nil
+        queue_rssi[index] = nil
+        queue_payload[index] = nil
+      end
+      queue_head = 1
+      queue_tail = 1
+      queue_count = 0
+      queue_drop_count = 0
+    end,
+    enqueue_packet = enqueue_packet,
+    dequeue_packet = dequeue_packet,
+    queue_size = function() return queue_count end,
+    queue_drops = function() return queue_drop_count end
+  }
+end
