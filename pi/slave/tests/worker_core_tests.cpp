@@ -152,6 +152,15 @@ void test_unknown_identity_and_bounded_hold() {
           "visible unprovisioned marker remains explicitly unknown");
   require(unknown_marker->players[0].position.x == 1.0,
           "unknown tracks still carry calibrated position");
+
+  auto invalid_identified = core.process_detections(
+      at_ms(170), {detection(-1, 1.0, 2.0, 0.8, true, 42)}, 1ms);
+  require(invalid_identified && !invalid_identified->players[0].player_id,
+          "invalid tracker IDs remain unknown even with a known marker");
+  auto invalid_hidden = core.process_detections(
+      at_ms(180), {detection(-1, 1.0, 2.0, 0.8)}, 1ms);
+  require(invalid_hidden && !invalid_hidden->players[0].player_id,
+          "invalid tracker IDs do not retain identity across detections");
 }
 
 void test_heartbeat_scheduler() {

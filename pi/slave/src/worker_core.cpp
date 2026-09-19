@@ -117,6 +117,8 @@ void IdentityAssociator::prune(TimePoint now) {
 std::optional<PlayerId> IdentityAssociator::associate(const Detection& detection,
                                                        TimePoint now) {
   prune(now);
+  if (detection.track_id < 0) return std::nullopt;
+
   auto& track = tracks_[detection.track_id];
   track.last_seen = now;
 
