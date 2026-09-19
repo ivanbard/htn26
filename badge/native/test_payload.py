@@ -24,7 +24,8 @@ def scenario(nvs_error=0, radio_error=0, nfc_error=0, allocation_failure=False,
     app, old_app = 0x3FCC0000, 0x3FC9AB00
     label_count = 0
     handler, packets = [], []
-    hardware = {"tag": None, "uid": b"\x04\xa1", "motion": "rest"}
+    hardware = {"tag": None, "uid": b"\x04\xa1", "motion": "rest", "nfc_text_error": 0,
+                "nfc_text_calls": 0}
 
     def string(address):
         result = bytearray()
@@ -96,8 +97,11 @@ def scenario(nvs_error=0, radio_error=0, nfc_error=0, allocation_failure=False,
                 cpu.mem_write(a0, bytes(card))
                 result = 1
         elif address == 0x42010138:
-            data = hardware["tag"].encode() if hardware["tag"] is not None else b""
-            cpu.mem_write(a0, data[:a1-1] + b'\0')
+            hardware["nfc_text_calls"] += 1
+            result = hardware["nfc_text_error"]
+            if not result:
+                data = hardware["tag"].encode() if hardware["tag"] is not None else b""
+                cpu.mem_write(a0, data[:a1-1] + b'\0')
         elif address == 0x4200AED4:
             value = {"rest": 0x447A0000, "tap": 0x44A00000, "shake": 0x44FA0000}[hardware["motion"]]
             cpu.mem_write(a0, struct.pack('<3I', 0, 0, value))
@@ -228,7 +232,15 @@ def scenario(nvs_error=0, radio_error=0, nfc_error=0, allocation_failure=False,
         assert packets == []  # Only the gateway acknowledges; player peers never stop retries.
         invoke(0x60, 4)  # LEFT, packed press event; upper bits are ignored.
         if not nfc_error:
+            hardware["nfc_text_error"] = 0x105; scan('pantry')
+            assert not packets and 'NFC TEXT ERROR 261 - RETRY' in texts
+            hardware["nfc_text_error"] = 0
             scan('pantry')
+            calls_after_scan = hardware["nfc_text_calls"]
+            hardware["tag"] = 'pantry'
+            for _ in range(100): invoke(0x5c)
+            assert hardware["nfc_text_calls"] == calls_after_scan, "held tag must not be reread"
+            hardware["tag"] = None
         else:
             incoming(b'OC1|876543|E|P3:READY'); invoke(0x5c)
         assert packets == ([b'OC1|441741|E|P2:PU:Q'] if not nfc_error else []), packets

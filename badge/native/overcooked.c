@@ -501,20 +501,31 @@ static void poll_nfc(App *self) {
         NFC_CLEAR(); self->nfc_rearm = 1; return;
     }
     if (!present) {
-        if (self->nfc_rearm) { self->nfc_rearm = 0; self->nfc_seen_size = 0; }
+        if (self->nfc_rearm && ++self->nfc_rearm >= 6) {
+            self->nfc_rearm = 0; self->nfc_seen_size = 0;
+        }
         return;
     }
     if (!card.uid_size || card.uid_size > 10) return;
-    if (self->nfc_rearm && same_uid(&card, self)) return;
-    if (self->nfc_rearm) { self->nfc_rearm = 0; self->nfc_seen_size = 0; }
-    if (same_uid(&card, self)) return;
-    copy(self->nfc_seen, card.uid, card.uid_size); self->nfc_seen_size = (u8)card.uid_size;
-    self->nfc_clear_ticks = 5;
-    char text[32];
-    if (NFC_TEXT(text, sizeof(text))) {
-        if (self->status) LABEL_TEXT(self->status, "NFC TEXT READ FAILED");
+    if (self->nfc_rearm && same_uid(&card, self)) {
+        self->nfc_rearm = 1;
+        if (!self->nfc_clear_ticks) self->nfc_clear_ticks = 5;
         return;
     }
+    if (self->nfc_rearm) { self->nfc_rearm = 0; self->nfc_seen_size = 0; }
+    if (same_uid(&card, self)) return;
+    /* Match the stock Lua read_text binding's 256-byte NDEF output buffer. */
+    char text[256];
+    int error = NFC_TEXT(text, sizeof(text));
+    if (error) {
+        char message[40];
+        FORMAT(message, sizeof(message), "NFC TEXT ERROR %u - RETRY", (u32)error);
+        if (self->status) LABEL_TEXT(self->status, message);
+        PRINT("OC_NATIVE|nfc_text_error=%u|uid_size=%u\n", (u32)error, card.uid_size);
+        return;
+    }
+    copy(self->nfc_seen, card.uid, card.uid_size); self->nfc_seen_size = (u8)card.uid_size;
+    self->nfc_clear_ticks = 5;
     text[sizeof(text) - 1] = 0;
     PRINT("OC_NATIVE|nfc=%s\n", text);
     station_scan(self, text);
