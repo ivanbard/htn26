@@ -30,6 +30,8 @@ suppresses retransmissions before game rules run.
 
 Every location-sensitive intent requires a current observation from a healthy
 worker, within configured age and confidence bounds. Worker observations are
+accepted only from `MasterConfig::worker_nodes`; inputs cannot enroll a node.
+Observations are
 replaceable telemetry; per-node sequence numbers prevent old telemetry from
 replacing newer telemetry. Heartbeats independently drive `HEALTHY`, `FAILED`,
 and `STALE` worker states. Gateway RX/status lines drive gateway health. The
@@ -52,6 +54,11 @@ sockets, cloud services, or hardware assumptions are present in the core.
 The qualifying QNX AI module required by the overall project has not been
 selected or hardware-validated by this MVP. Do not claim QNX device/runtime or
 AI validation from the local tests.
+
+This is a standalone tomato-soup core, not the three-badge host implementation.
+The physical gateway plate events, worker types, and UI still need adapters;
+see [integration boundaries](../../badge/LOCAL_TESTING.md). In particular, the
+test `STN:DELIVERY` intent does not make delivery a player-badge responsibility.
 
 ## Local validation
 

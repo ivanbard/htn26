@@ -506,6 +506,10 @@ MasterEngine::receive_tracking(const protocol::WorkerObservation &observation,
         reject(ActionCode::InvalidObservation,
                "tracking packet has no node or players"));
   }
+  if (state_.workers.find(observation.node) == state_.workers.end()) {
+    return reject_with_time_update(
+        reject(ActionCode::InvalidObservation, "worker is not configured"));
+  }
   const auto previous_sequence =
       latest_observation_sequence_.find(observation.node);
   if (previous_sequence != latest_observation_sequence_.end() &&
@@ -533,9 +537,6 @@ MasterEngine::receive_tracking(const protocol::WorkerObservation &observation,
     return reject_with_time_update(
         reject(ActionCode::InvalidObservation,
                "tracking packet contains no registered player"));
-  }
-  if (state_.workers.find(observation.node) == state_.workers.end()) {
-    state_.workers.emplace(observation.node, WorkerHealth{});
   }
   latest_observation_sequence_[observation.node] = observation.sequence;
   for (const auto &player : observation.players) {
@@ -573,7 +574,8 @@ MasterEngine::receive_heartbeat(const protocol::WorkerHeartbeat &heartbeat,
   }
   auto health_it = state_.workers.find(heartbeat.node);
   if (health_it == state_.workers.end()) {
-    health_it = state_.workers.emplace(heartbeat.node, WorkerHealth{}).first;
+    return reject_with_time_update(
+        reject(ActionCode::InvalidHeartbeat, "worker is not configured"));
   }
   if (health_it->second.has_heartbeat &&
       heartbeat.sequence <= health_it->second.last_heartbeat_sequence) {

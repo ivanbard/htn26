@@ -1,3 +1,5 @@
+local transport = badge and require("transport")
+
 -- HTN26 Overcooked IRL serving-area master badge.
 -- START requests the three-Pi burger room scan. The badge has serial output
 -- only, so the Pi owns floor-plan capture and approval after that log line.
@@ -109,6 +111,11 @@ local function valid_player_packet(payload)
   local kind, sequence, value = string.match(payload,
     "^OC1|([A-Z])|(%d%d%d%d)|([^|]+)$")
   if kind == nil then
+    -- Targeted three-badge replies carry an additional MAC field.
+    kind, sequence, value = string.match(payload,
+      "^OC1|([AUR])|(%d%d%d%d)|(%x%x%x%x%x%x%x%x%x%x%x%x|[^|]+)$")
+  end
+  if kind == nil then
     sequence, kind, value = string.match(payload,
       "^OC1|([0-9]+)|([A-Z])|([^|]+)$")
   end
@@ -172,7 +179,7 @@ local function receive_packet(mac, rssi, payload)
 end
 
 local function update_radio_drops()
-  local observed = badge.radio.dropped()
+  local observed = transport.dropped()
   if type(observed) == "number" then
     radio_drop_count = bounded_counter(observed)
   end
@@ -334,8 +341,8 @@ function on_enter(root)
   footer:style({ text_font = 14, text_align = "center" })
   footer:align("bottom_mid", 0, -10)
 
-  radio_enabled = badge.radio.enable() == true
-  if radio_enabled then badge.radio.on_recv(receive_packet) end
+  radio_enabled = transport.enable() == true
+  if radio_enabled then transport.on_recv(receive_packet) end
   nfc_enabled = badge.nfc.enable() == true
   if nfc_enabled then badge.nfc.clear() end
 
@@ -377,8 +384,8 @@ function on_exit()
     nfc_enabled = false
   end
   if radio_enabled then
-    badge.radio.on_recv(nil)
-    badge.radio.disable()
+    transport.on_recv(nil)
+    transport.disable()
     radio_enabled = false
   end
   badge.led.clear()

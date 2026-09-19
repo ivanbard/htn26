@@ -333,6 +333,22 @@ void test_order_timer_and_invalid_inputs() {
           "malformed serial input must not crash or mutate gameplay");
 }
 
+void test_unknown_worker_cannot_supply_authoritative_positions() {
+  MasterEngine engine(test_config());
+  require(engine.register_badge("AA:BB:CC:DD:EE:FF", 1), "badge registers");
+  engine.start_game(0);
+  require(engine.receive_heartbeat(
+      WorkerHeartbeat{"rogue", 1, 0, true, true, 8.0}, 0).code ==
+      ActionCode::InvalidHeartbeat, "unknown heartbeat must be rejected");
+  require(engine.receive_tracking(
+      WorkerObservation{"rogue", 1, 0, {{1, 0.5, 0.5, 0.95, 0}}}, 0).code ==
+      ActionCode::InvalidObservation, "unknown tracking must be rejected");
+  require(engine.state().workers.count("rogue") == 0,
+          "input must not enroll workers");
+  require(engine.ingest_serial_line(rx(1, 'N', "ING:TOM"), 0).code ==
+      ActionCode::StaleOrLowConfidence, "unknown worker cannot authorize pickup");
+}
+
 } // namespace
 
 int main() {
@@ -344,6 +360,7 @@ int main() {
     test_rejected_intent_can_be_retried();
     test_default_station_boundaries_do_not_overlap();
     test_order_timer_and_invalid_inputs();
+    test_unknown_worker_cannot_supply_authoritative_positions();
   } catch (const std::exception &error) {
     std::cerr << "FAIL: " << error.what() << '\n';
     return 1;

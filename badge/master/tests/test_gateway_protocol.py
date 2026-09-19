@@ -1,38 +1,23 @@
 """Host checks that execute the gateway's Lua protocol helpers."""
 
 import json
-import shutil
-import subprocess
+import sys
 import unittest
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[2]
-LUA = next(
-    (
-        candidate
-        for candidate in ("lua", "lua5.4", "lua5.3", "luajit")
-        if shutil.which(candidate)
-    ),
-    None,
-)
+sys.path.insert(0, str(ROOT.parent / ".tools" / "python"))
+from lupa.lua54 import LuaRuntime
 
 
-@unittest.skipUnless(LUA, "Lua runtime is not installed")
 class GatewayProtocolTests(unittest.TestCase):
     def run_lua(self, expression):
         script = "dofile(%s)\n%s\n" % (
             json.dumps(str(ROOT / "master" / "main.lua")),
             expression,
         )
-        result = subprocess.run(
-            [LUA, "-"],
-            input=script,
-            text=True,
-            capture_output=True,
-            cwd=ROOT,
-        )
-        self.assertEqual(result.returncode, 0, result.stderr)
+        LuaRuntime().execute(script)
 
     def test_accepts_documented_event(self):
         self.run_lua(

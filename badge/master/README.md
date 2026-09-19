@@ -1,5 +1,10 @@
 # HTN26 stationary gateway / serving-area master
 
+Radio is currently blocked by firmware memory pressure. The app uses the shared
+transport boundary; upload `badge/transport.lua` and `badge/radio_transport.lua`
+beside `main.lua`. See [local testing](../LOCAL_TESTING.md) for runnable NFC and
+forwarding checks without hardware radio. The hardware adapter is opt-in.
+
 This is the serving-area master badge for the burger level. It stays in the
 foreground beside the master Raspberry Pi and has two bounded data paths:
 
@@ -70,8 +75,9 @@ scan request (orange), radio reception (blue), plate delivery (green), drops
 (orange), and healthy idle (slow green pulse). HOME exits; exit cleanup
 unregisters the radio callback, disables radio and NFC, and clears the LEDs.
 
-`tests/test_gateway_protocol.py` executes the pure Lua helpers when a host Lua
-runtime is available, covering filtering, both packet orders, serial framing,
+`tests/test_gateway_protocol.py` executes the production Lua helpers using
+`lupa==2.8` (installation in the local-testing guide), covering filtering,
+both packet orders, targeted replies, serial framing,
 malformed input, burger plate/scan framing, counter saturation, and bounded FIFO
 behavior. Physical badge NFC/radio and USB validation require hardware and
 remain pending unless performed separately.

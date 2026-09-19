@@ -1,8 +1,10 @@
 # HTN26 Player Badge
 
 This directory contains the first player-side Hacker Badge app for Overcooked
-IRL. `manifest.cfg` and `main.lua` are self-contained and use only the API in
-`badge/badge-app-guide.md`.
+IRL. Upload `manifest.cfg`, `main.lua`, and the shared `badge/transport.lua`
+and `badge/radio_transport.lua` modules together. Hardware radio is disabled
+pending the firmware fix. See [local testing](../LOCAL_TESTING.md) for the
+executable mock transport and the documented badge API boundary.
 
 ## Local tag contract
 
@@ -12,11 +14,10 @@ The app accepts these NFC NDEF Text values:
 - `STATION:CHOP1`
 - `STATION:POT1`
 - `PLATE:1`
-- `STATION:DELIVERY`
 
 A valid read emits an NFC event as
 `OC1|<sequence>|N|<canonical-value>`, mapping the player tag text to
-`ING:TOM`, `STN:CHOP1`, `STN:POT1`, `STN:PLATE`, or `STN:DELIVERY`. Values are
+`ING:TOM`, `STN:CHOP1`, `STN:POT1`, or `STN:PLATE`. Values are
 printable ASCII, and the complete payload is limited to the documented 44-byte
 restricted-radio limit. Repeated reads of the same card UID are ignored until
 a bounded post-capture re-arm schedule calls `badge.nfc.clear()`; the same UID
@@ -41,7 +42,9 @@ this player app does not pretend to confirm delivery.
 Run the host-side protocol tests from the repository root:
 
 ```text
-python3 -m unittest discover -s badge/slave/tests -p 'test_*.py'
+python -m pip install --target .tools/python lupa==2.8
+python -m unittest discover -s badge/slave/tests -p 'test_*.py'
+python badge/run_local.py
 ```
 
 The app has not been verified on a physical Hacker Badge in this worktree.

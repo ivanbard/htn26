@@ -1,3 +1,5 @@
+local transport = badge and require("transport")
+
 -- HTN26 Overcooked IRL player badge.
 -- NFC text tags are local observations. Radio queueing is not server confirmation.
 
@@ -17,7 +19,6 @@ local SUPPORTED_TAGS = {
 	["STATION:CHOP1"] = "STN:CHOP1",
 	["STATION:POT1"] = "STN:POT1",
 	["PLATE:1"] = "STN:PLATE",
-	["STATION:DELIVERY"] = "STN:DELIVERY",
 }
 
 -- Pure protocol helpers. They have no badge or UI dependencies.
@@ -199,7 +200,7 @@ local function service_radio(now)
 
 	local entry = tx_current
 	entry.attempts = entry.attempts + 1
-	local queued = badge.radio.send(entry.payload)
+	local queued = transport.send(entry.payload)
 	if queued then
 		entry.queued = entry.queued + 1
 		set_led_mode("queued", now + 160)
@@ -390,9 +391,9 @@ function on_enter(root)
 		badge.nfc.clear()
 	end
 
-	radio_enabled = badge.radio.enable()
+	radio_enabled = transport.enable()
 	if radio_enabled then
-		badge.radio.on_recv(nil)
+		transport.on_recv(nil)
 	end
 
 	show_ready()
@@ -424,12 +425,18 @@ end
 
 function on_exit()
 	if radio_enabled then
-		badge.radio.on_recv(nil)
-		badge.radio.disable()
+		transport.on_recv(nil)
+		transport.disable()
 	end
 	if nfc_enabled then
 		badge.nfc.disable()
 	end
 	badge.led.clear()
 	badge.led.show()
+end
+
+-- Host tests execute the production helpers, not a second protocol model.
+if badge == nil then
+  player_test = { parse_tag = parse_tag, format_event = format_event,
+    next_sequence_after = next_sequence_after, same_tag = same_tag }
 end
