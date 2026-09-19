@@ -118,11 +118,15 @@ local function poll_nfc(now)
   next_poll = now + NFC_POLL_MS
 
   local card = badge.nfc.card()
-  if clear_at ~= 0 and now >= clear_at then
+  if clear_at ~= 0 and now >= clear_at and
+      (not card or card.uid == seen_uid) then
     badge.nfc.clear()
     rearm_uid = seen_uid
     clear_at = 0
     return
+  end
+  if clear_at ~= 0 and now >= clear_at then
+    clear_at = 0
   end
 
   if not card then

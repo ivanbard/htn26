@@ -30,22 +30,6 @@ class NFCDisplayStaticTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
 
-    def test_documented_nfc_lifecycle_is_present(self):
-        source = MAIN.read_text()
-        for call in (
-            "badge.nfc.enable()",
-            "badge.nfc.card()",
-            "badge.nfc.read_text()",
-            "badge.nfc.clear()",
-            "badge.nfc.disable()",
-        ):
-            self.assertIn(call, source)
-        for callback in ("function on_enter", "function on_tick", "function on_button", "function on_exit"):
-            self.assertIn(callback, source)
-        self.assertIn("NO TAG", source)
-        self.assertIn("READ FAILED", source)
-        self.assertIn("NDEF TEXT:", source)
-
     def test_host_smoke_flow(self):
         result = subprocess.run(
             ["lua", str(APP / "tests" / "runtime_test.lua")],

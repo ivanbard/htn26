@@ -46,23 +46,31 @@ on_tick()
 assert(shown("TAG READ"), "successful tag state is visible")
 assert(shown("ING:TOMATO"), "record text is visible")
 
-state.now = 1200
+state.card = { uid = "04B2" }
+state.text = "NEW:PEPPER"
+state.now = 1000
 on_tick()
-state.now = 1400
+assert(shown("UID: 04B2"), "replacement tag survives rearm")
+assert(shown("NEW:PEPPER"), "replacement record is visible")
+
+state.card = nil
+state.now = 2000
+on_tick()
+state.now = 2200
 on_tick()
 assert(shown("NO TAG"), "removed tag returns to no-tag state")
 
 state.card = { uid = "04B2" }
 state.text = ""
 state.error_text = nil
-state.now = 1600
+state.now = 2400
 on_tick()
 assert(shown("EMPTY TAG"), "empty tag is handled")
 
 state.card = { uid = "04C3" }
 state.text = nil
 state.error_text = "bad NDEF"
-state.now = 1800
+state.now = 2600
 on_tick()
 assert(shown("READ FAILED"), "read failure is handled")
 
