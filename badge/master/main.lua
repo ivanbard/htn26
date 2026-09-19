@@ -21,6 +21,7 @@ local remaining_seconds = 0
 local session_number = 0
 local session_received = 0
 local session_forwarded = 0
+local control_sequence = 0
 
 local radio_enabled = false
 local queue_mac = {}
@@ -155,7 +156,7 @@ local function valid_player_packet(payload)
   if string.find(payload, "\n", 1, true) ~= nil then return false end
 
   local sequence, event_type, value = string.match(payload,
-    "^OC1|([^|]+)|([NMBH])|([^|]+)$")
+    "^OC1|([^|]+)|([NMBHE])|([^|]+)$")
   if sequence == nil or not valid_sequence(sequence) or
       not printable_value(value) then
     return false
@@ -176,10 +177,9 @@ local function serial_end_frame()
 end
 
 local function lifecycle_radio_frame(kind)
-  if kind == "START_GAME" then
-    return "HTN26|GAME|START_GAME|120|3"
-  end
-  return "HTN26|GAME|GAME_END|3"
+  control_sequence = control_sequence + 1
+  local code = kind == "START_GAME" and "S" or "E"
+  return string.format("OC1|%06d|G|%s", control_sequence, code)
 end
 
 local function enqueue_packet(mac, rssi, payload)
@@ -345,7 +345,11 @@ local function emit_lifecycle(kind)
   badge.sys.log(serial_frame)
   local broadcast_queued = false
   if radio_enabled then
-    broadcast_queued = badge.radio.send(lifecycle_radio_frame(kind)) == true
+    local payload = lifecycle_radio_frame(kind)
+    broadcast_queued = badge.radio.send(payload) == true
+    if broadcast_queued then
+      badge.sys.log("HTN26|HOST|CONTROL|" .. payload)
+    end
   end
   return broadcast_queued
 end
