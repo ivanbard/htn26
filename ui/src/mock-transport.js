@@ -45,7 +45,7 @@ function health(now) {
   };
 }
 
-function burgerLevel(status = "not-generated") {
+function burgerLevel(status = "not-ready") {
   return { status, recipe: "BURGER", placementInstructions: cloneState(PLACEMENT_INSTRUCTIONS) };
 }
 
@@ -88,12 +88,12 @@ function withUpdate(state, changes, now) {
 }
 
 function startHost(state, now) {
-  return withUpdate(state, { setup: { phase: SETUP_PHASES.SCANNING, message: "Host started. Cameras are scanning the room for a proposed floor plan." } }, now);
+  return withUpdate(state, { setup: { phase: SETUP_PHASES.SCANNING, message: "Host started. Review the static four-station floor plan fixture." } }, now);
 }
 
 function scanRoom(state, now) {
   return withUpdate(state, {
-    setup: { phase: SETUP_PHASES.LAYOUT_PROPOSED, message: "Proposed floor plan ready. Review and approve it to generate burger-level placement instructions." },
+    setup: { phase: SETUP_PHASES.LAYOUT_PROPOSED, message: "Static floor plan ready. Approve it to show burger-level placement instructions." },
     floorPlan: { ...state.floorPlan, accepted: false },
   }, now);
 }
@@ -106,7 +106,7 @@ function rescanRoom(state, now) {
 function approveLayout(state, now) {
   if (state.setup.phase !== SETUP_PHASES.LAYOUT_PROPOSED) return state;
   return withUpdate(state, {
-    setup: { phase: SETUP_PHASES.BURGER_PLACEMENT, message: "Burger level generated. Place the ingredients, chopping boards, stoves, and serving badge as shown." },
+    setup: { phase: SETUP_PHASES.BURGER_PLACEMENT, message: "Static burger level fixture approved. Place the ingredients, chopping boards, stoves, and serving badge as shown." },
     floorPlan: { ...state.floorPlan, accepted: true },
     burgerLevel: { ...state.burgerLevel, status: "placement-ready" },
   }, now);

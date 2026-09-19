@@ -15,8 +15,8 @@ npm run dev
 Open <http://127.0.0.1:4173>. The development page uses a typed mock master-Pi adapter and a static floorplan fixture. Try the host flow:
 
 1. `Start` host mode.
-2. `Scan Room` to review the assumed four-station floorplan (pantry, fridge, cutting board, and stove).
-3. `Approve Layout` to accept the plan and generate burger-level placement instructions.
+2. `Review Fixture` to review the static four-station floorplan (pantry, fridge, cutting board, and stove).
+3. `Approve Layout` to accept the fixture and show burger-level placement instructions.
 4. Start the roughly two-minute round and mirror the three fixed players, orders, and submissions.
 
 For a laptop on the same local network as the Pi, run `HOST=0.0.0.0 npm run dev` on the host machine and open `http://<PI_OR_LAPTOP_IP>:4173/?transport=http` from the laptop. The expected Pi server contract is same-origin `GET /api/state`, `POST /api/command`, and `GET /api/events`; this UI does not implement those endpoints.
