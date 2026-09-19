@@ -430,7 +430,7 @@ ui/
   README.md
 ```
 
-Expected later:
+Current badge component implementation:
 
 ```text
 badge/master/
@@ -470,168 +470,11 @@ The MVP is successful when:
 
 # FILE: `/badge/master/README.md`
 
-# Master Badge — Radio/USB Gateway
-
-## Purpose
-
-This badge is not a player.
-
-It is a dedicated embedded gateway permanently connected by USB to the master QNX Raspberry Pi.
-
-Its only critical responsibility is:
-
-```text
-player badges
-    ↓ badge.radio
-MASTER BADGE
-    ↓ badge.sys.log / USB serial
-master Pi
-```
-
-Read `../badge-app-guide.md` before modifying this component.
-
-That document is the source of truth for every badge API used here.
-
-Do not use undocumented functionality.
-
----
-
-## Responsibilities
-
-The master badge must:
-
-1. start the badge radio
-2. register a short receive callback
-3. receive packets from player badges
-4. obtain sender MAC and RSSI
-5. validate basic packet size/prefix
-6. forward valid packets to serial
-7. count received/dropped packets
-8. show gateway health on its screen
-9. remain in the foreground for the entire game
-10. disable/clean up radio and LEDs on exit
-
-It does **not** own game logic.
-
-It does **not** decide whether actions are valid.
-
-It does **not** track player inventory.
-
----
-
-## Serial output
-
-Forward received messages in logical form:
-
-```text
-HTN26|RX|<mac>|<rssi>|<payload>
-```
-
-Example:
-
-```text
-HTN26|RX|AA:BB:CC:DD:EE:FF|-48|OC1|0023|N|ING:TOM
-```
-
-Use `badge.sys.log()`.
-
-The Pi should search incoming serial output for `HTN26|` because firmware logging may add an app/console prefix.
-
-Also emit periodic gateway status, for example:
-
-```text
-HTN26|GW|UP|1842|0
-```
-
-where the final fields may represent packet count and dropped-frame count.
-
-Status format may evolve, but radio-forwarding format should remain stable.
-
----
-
-## Radio rules
-
-Player messages must begin:
-
-```text
-OC1|
-```
-
-Reject unrelated Lua radio messages.
-
-Keep receive callbacks short.
-
-Do not:
-
-* perform game-state calculations
-* perform expensive UI work in the receive callback
-* write files for every packet
-* block or sleep
-* assume queued radio packets were reliably delivered
-
-If serial logging becomes too slow, queue a small bounded number of events in memory and flush them from normal ticks.
-
-Never allow an unbounded queue.
-
----
-
-## UI
-
-Keep the gateway UI simple.
-
-Suggested screen:
-
-```text
-OVERCOOKED GATEWAY
-
-Radio: ONLINE
-Packets: 1842
-Dropped: 0
-
-Last:
-AA:BB:... ING:TOM
-
-USB -> MASTER PI
-```
-
-LED behaviour may indicate:
-
-* green slow pulse = healthy
-* blue pulse = packet received
-* red = radio startup failure
-* orange/red = dropped radio frames observed
-
-The UI is diagnostic only.
-
----
-
-## Important constraints
-
-Do not assume arbitrary Bluetooth/GATT.
-
-Do not assume Wi-Fi or HTTP.
-
-Do not assume serial input is available to this Lua app.
-
-The architecture only relies on serial output.
-
-Do not build required gameplay around Pi → master badge → player badge commands unless a separately verified supported mechanism is added later.
-
----
-
-## Testing
-
-At minimum test:
-
-* radio enable succeeds
-* one slave badge packet reaches serial
-* two slave badges interleave correctly
-* duplicate payloads are forwarded unchanged
-* malformed/non-`OC1` traffic is ignored
-* high-rate input does not crash UI
-* `badge.radio.dropped()` is surfaced
-* exiting clears LEDs and disables radio
-* reopening creates a clean gateway session
+The stationary gateway component contract, including its host-mode scan flow,
+radio/NFC protocols, bounded queues, health UI, and test coverage, lives in
+[`badge/master/README.md`](badge/master/README.md). That document is the sole
+owner of the gateway's implementation details; the badge API contract remains
+[`badge/badge-app-guide.md`](badge/badge-app-guide.md).
 
 # FILE: `/badge/slave/README.md`
 
@@ -852,4 +695,3 @@ A slave badge is working when:
 6. the same sequence-numbered event is retransmitted a bounded number of times
 7. gateway badge receives at least one copy
 8. master Pi deduplicates it into one action
-
