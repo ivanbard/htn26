@@ -19,9 +19,10 @@ A valid read emits an NFC event as
 `ING:TOM`, `STN:CHOP1`, `STN:POT1`, `STN:PLATE`, or `STN:DELIVERY`. Values are
 printable ASCII, and the complete payload is limited to the documented 44-byte
 restricted-radio limit. Repeated reads of the same card UID are ignored until
-two bounded removal polls trigger `badge.nfc.clear()`, or **A** is pressed for
-manual re-arm. Invalid, unsupported, and oversized text is reported locally
-and is not transmitted.
+a bounded post-capture re-arm schedule calls `badge.nfc.clear()`; the same UID
+remains suppressed while it is still present and is accepted again after
+removal. **A** also calls `clear()` for manual re-arm. Invalid, unsupported,
+and oversized text is reported locally and is not transmitted.
 
 Each accepted event reserves one monotonically increasing sequence number;
 the current number is saved in the app's `seq` store key so reopening does not

@@ -64,7 +64,8 @@ class Debouncer:
 
     def __init__(self):
         self.seen_uid = None
-        self.missing_polls = 0
+        self.rearm_uid = None
+        self.rearm_due = False
 
     def accept(self, uid):
         if not uid or uid == self.seen_uid:
@@ -74,12 +75,27 @@ class Debouncer:
 
     def clear(self):
         self.seen_uid = None
-        self.missing_polls = 0
+        self.rearm_uid = None
+        self.rearm_due = False
 
-    def observe_removal(self):
-        self.missing_polls += 1
-        if self.missing_polls >= 2:
-            self.clear()
+    def schedule_rearm(self):
+        self.rearm_due = True
+
+    def poll(self, uid):
+        if self.rearm_due and self.seen_uid:
+            self.rearm_uid = self.seen_uid
+            self.rearm_due = False
+            return False
+        if not uid:
+            if self.rearm_uid:
+                self.clear()
+            return False
+        if self.rearm_uid:
+            if uid == self.rearm_uid:
+                return False
+            self.rearm_uid = None
+            self.seen_uid = None
+        return self.accept(uid)
 
 
 class RetryPlan:
@@ -128,10 +144,11 @@ class ProtocolTests(unittest.TestCase):
         debouncer = Debouncer()
         self.assertTrue(debouncer.accept("04A1"))
         self.assertFalse(debouncer.accept("04A1"))
-        debouncer.observe_removal()
-        self.assertFalse(debouncer.accept("04A1"))
-        debouncer.observe_removal()
-        self.assertTrue(debouncer.accept("04A1"))
+        debouncer.schedule_rearm()
+        self.assertFalse(debouncer.poll("04A1"))
+        self.assertFalse(debouncer.poll("04A1"))
+        self.assertFalse(debouncer.poll(None))
+        self.assertTrue(debouncer.poll("04A1"))
 
     def test_retry_plan_is_bounded_and_reuses_exact_payload_and_sequence(self):
         payload = format_event(7, "N", "ING:TOMATO")

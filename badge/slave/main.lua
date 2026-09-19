@@ -8,7 +8,7 @@ local MAX_ATTEMPTS = 3
 local RETRY_DELAY_MS = 300
 local MAX_PENDING = 4
 local NFC_POLL_MS = 180
-local NFC_REMOVAL_POLLS = 2
+local NFC_REARM_DELAY_MS = 900
 
 -- These are the semantic NDEF Text values supported by this player app.
 -- Delivery remains a gateway-badge action: the player brings the plate to it.
@@ -79,7 +79,8 @@ end
 local nfc_enabled = false
 local radio_enabled = false
 local seen_uid = nil
-local missing_card_polls = 0
+local rearm_uid = nil
+local rearm_at = 0
 local next_nfc_poll = 0
 local sequence = 0
 
@@ -313,23 +314,37 @@ local function poll_nfc(now)
 	next_nfc_poll = now + NFC_POLL_MS
 
 	local card = badge.nfc.card()
+	if seen_uid and rearm_at ~= 0 and now >= rearm_at then
+		badge.nfc.clear()
+		rearm_uid = seen_uid
+		rearm_at = 0
+		return
+	end
 	if not card then
-		missing_card_polls = missing_card_polls + 1
-		if missing_card_polls >= NFC_REMOVAL_POLLS then
-			badge.nfc.clear()
+		if rearm_uid then
+			rearm_uid = nil
 			seen_uid = nil
-			missing_card_polls = 0
 		end
 		return
 	end
-	missing_card_polls = 0
 	local uid = card.uid
-	if not uid or uid == "" or same_tag(uid, seen_uid) then
+	if not uid or uid == "" then
+		return
+	end
+	if rearm_uid then
+		if uid == rearm_uid then
+			return
+		end
+		rearm_uid = nil
+		seen_uid = nil
+	end
+	if same_tag(uid, seen_uid) then
 		return
 	end
 
 	-- Mark the UID before reading so a malformed tag is debounced too.
 	seen_uid = uid
+	rearm_at = now + NFC_REARM_DELAY_MS
 	local text = badge.nfc.read_text()
 	capture_tag(text)
 end
@@ -401,7 +416,8 @@ function on_button(button, kind)
 	if nfc_enabled then
 		badge.nfc.clear()
 		seen_uid = nil
-		missing_card_polls = 0
+		rearm_uid = nil
+		rearm_at = 0
 	end
 	show_ready()
 end
