@@ -1,0 +1,80 @@
+# Master Pi
+
+## Role
+
+The master Pi is the single authoritative controller for the game. It combines
+badge intent, fresh camera observations, and deterministic game rules. Worker
+Pis and badges never mutate authoritative state directly.
+
+This directory contains a portable C++ MVP core. QNX device and network code
+belongs behind the interfaces in `src/platform_adapters.hpp`.
+
+## MVP implementation
+
+The authoritative engine is in `src/master_engine.*`. The shared wire
+contract and gateway parser are in `../common/protocol.*`, so gateway, worker,
+and master implementations have one definition of the packet fields.
+
+The MVP implements one deterministic `TOMATO_SOUP` order:
+
+1. `N|ING:TOM` at the tomato source.
+2. `N|STN:CHOP1` and `M|CHOP` at the chopping zone.
+3. Chopping completes, then `N|STN:POT1` starts cooking.
+4. Cooking completes, then `N|STN:PLATE` plates the soup.
+5. `N|STN:DELIVERY` delivers it and awards the score.
+
+The serial parser searches for `HTN26|` inside noisy lines, validates the MAC,
+RSSI, `OC1` payload, sequence, type, value, and payload length, then the engine
+maps the normalized MAC to a player. A bounded `(sender MAC, sequence)` cache
+suppresses retransmissions before game rules run.
+
+Every location-sensitive intent requires a current observation from a healthy
+worker, within configured age and confidence bounds. Worker observations are
+replaceable telemetry; per-node sequence numbers prevent old telemetry from
+replacing newer telemetry. Heartbeats independently drive `HEALTHY`, `FAILED`,
+and `STALE` worker states. Gateway RX/status lines drive gateway health. The
+engine publishes versioned, coherent `GameState` snapshots through a callback
+after inputs and timer transitions.
+
+## Adapter boundary
+
+`src/platform_adapters.hpp` defines small interfaces for:
+
+* a monotonic clock;
+* gateway USB-serial lines;
+* worker tracking/heartbeat inputs; and
+* state publication to a UI or diagnostic transport.
+
+A QNX runtime adapter can implement these using `/dev/ser*`, local camera and
+network APIs, and the QNX monotonic clock, then feed the core. No QNX headers,
+sockets, cloud services, or hardware assumptions are present in the core.
+
+The qualifying QNX AI module required by the overall project has not been
+selected or hardware-validated by this MVP. Do not claim QNX device/runtime or
+AI validation from the local tests.
+
+## Local validation
+
+The test executable covers noisy and malformed serial parsing, badge mapping,
+location/confidence rejection, the complete badge-intent to soup-delivery
+flow, `(MAC, sequence)` duplicate suppression, chopping/cooking/order timers,
+state publication, and worker failure/stale tracking behavior.
+
+```sh
+make -C pi/master test
+```
+
+`CMakeLists.txt` also defines the same C++17 test target for environments with
+CMake and CTest. The local tests use workstation C++ only.
+
+## Non-goals
+
+Do not initially implement:
+
+* cloud synchronization;
+* facial recognition;
+* voice control;
+* complex physics;
+* distributed consensus between Pis;
+* master-Pi failover; or
+* direct Pi-to-player-badge commands.
