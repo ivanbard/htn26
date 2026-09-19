@@ -191,7 +191,7 @@ The badges broadcast the submission result and drop any remaining held items as 
 
 The UI displays orders, player icons, held items, chopping state, cooking progress, and the submission result.
 
-The UI may apply the configured penalty, tip, or bonus-gold result for the submitted order, but it does not independently validate the plate.
+The authoritative Pi projection applies the configured penalty, tip, or bonus-gold result for the submitted order; the UI displays that result and does not independently validate or score the plate.
 
 ## v1 radio assumption
 

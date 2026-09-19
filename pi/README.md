@@ -9,7 +9,8 @@ The current v1 Pi layer owns:
 * embedded AI inference
 * phone-camera setup processing
 * authoritative game-state execution
-* host-badge and UI transport
+* host-badge and UI transport, with the local web/serial boundary documented in
+  [`server/README.md`](server/README.md)
 
 The current v1 deployment uses one Raspberry Pi and an Apple phone camera.
 The worker and multi-camera responsibilities below remain implementation seams
@@ -36,6 +37,17 @@ Owns:
 * scoring
 * health monitoring
 * UI API
+
+### Pi server slice
+
+`pi/server/`
+
+The server slice is the locally runnable HTTP/SSE and USB-serial boundary for
+the QNX deployment. It owns protocol adaptation, browser projections, photo
+upload/review plumbing, and deterministic workstation fixtures; it does not
+replace the master engine as the authoritative game-state owner. Its routes,
+serial setup, provider boundary, and QNX validation limits are documented in
+[`server/README.md`](server/README.md).
 
 ### Worker Pi
 

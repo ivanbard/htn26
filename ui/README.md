@@ -55,7 +55,7 @@ A burger uses buns, meat, cheese, and lettuce. Cheese, lettuce, and meat can be 
 ```
 
 - `src/mock-transport.js` is the required offline development transport. It owns a fixture state and applies host commands as a stand-in for the master Pi.
-- `src/transport.js` includes a local HTTP/SSE transport for integration with a master Pi. It expects `GET /api/state`, `POST /api/command`, and `GET /api/events`; those endpoints remain outside this UI task.
+- `src/transport.js` includes a local HTTP/SSE transport for integration with the Pi server slice. It expects `GET /api/state`, `POST /api/command`, and `GET /api/events`; the endpoint owner and local server setup are [`pi/server/README.md`](../pi/server/README.md).
 - Use `http://127.0.0.1:4173/?transport=http` to select the HTTP seam. A supplied `window.__HTN26_TRANSPORT__` takes precedence for integration tests.
 - `src/render.js` is a pure renderer. It does not create timers, move players, score deliveries, or infer station/order state.
 
