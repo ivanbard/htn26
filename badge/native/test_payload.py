@@ -19,7 +19,7 @@ def scenario(nvs_error=0, radio_error=0, allocation_failure=False, send_error=0)
     for address, data in segments:
         cpu.mem_write(address, data)
     cpu.reg_write(UC_RISCV_REG_SP, 0x3FCDF000)
-    calls, registrations, texts, stages = [], [], [], []
+    calls, registrations, texts, stages, prints = [], [], [], [], []
     app, old_app = 0x3FCC0000, 0x3FC9AB00
     label_count = 0
     handler, packets = [], []
@@ -55,10 +55,11 @@ def scenario(nvs_error=0, radio_error=0, allocation_failure=False, send_error=0)
         elif address == 0x4203AACE:
             registrations.append(a0)
         elif address == 0x40397474:
-            assert (a0, a1) == (1, 128)
+            assert (a0, a1) == (1, 148)
             result = 0 if allocation_failure else app
         elif address == 0x4211B726:
             text = string(a0)
+            prints.append(text)
             if "internal8_free" in text:
                 stages.append(string(a1))
         elif address in (0x420023A6, 0x420024AC):
@@ -80,7 +81,7 @@ def scenario(nvs_error=0, radio_error=0, allocation_failure=False, send_error=0)
         elif address == 0x42010FC2:
             cpu.mem_write(a0, bytes.fromhex('e83dc12986d0'))
         elif address == 0x42010C54:
-            assert a1 == 17
+            assert a1 in (17, 21)
             packets.append(bytes(cpu.mem_read(a0, a1)))
             result = send_error
         elif address == 0x4211BC16:
@@ -157,25 +158,35 @@ def scenario(nvs_error=0, radio_error=0, allocation_failure=False, send_error=0)
         invoke(0x60, 0x100)  # A release does not send.
         assert not packets
         invoke(0x60, 0xa5a50000)  # Packed two-byte ABI leaves upper bits unspecified.
-        assert packets == [b'OC1|PING|1234abcd']
+        assert packets == [b'OC1|45441741|N|I:MEAT']
         if send_error:
             assert 'Send error' in texts
         else:
-            for bad in (b'PING', b'OC1|PONG|1234abcg', b'OC1|PONG|1234abcd\0'):
+            for bad in (b'MEAT', b'OC1|45441741|A|NO', b'OC1|4544174x|A|OK',
+                        b'OC1|45441741|N|I:BEEF'):
                 incoming(bad); invoke(0x5c)
-            assert 'PONG received' not in texts
-            incoming(b'OC1|PONG|1234abcd');invoke(0x5c)
-            assert 'PONG received' in texts
+            assert 'Event acknowledged' not in texts
+            incoming(b'OC1|45441741|A|OK');invoke(0x5c)
+            assert 'Event acknowledged' in texts
             count = len(packets)
-            incoming(b'OC1|PING|87654321');invoke(0x5c)
-            assert packets[-1] == b'OC1|PONG|87654321' and len(packets) == count+1
-            incoming(b'OC1|PING|87654321');invoke(0x5c)
-            assert len(packets) == count+1  # Duplicate advertisement.
+            incoming(b'OC1|87654321|N|I:MEAT');invoke(0x5c)
+            assert packets[-1] == b'OC1|87654321|A|OK' and len(packets) == count+1
+            assert any(line.startswith('HTN26|RX|') for line in prints)
+            incoming(b'OC1|87654321|N|I:MEAT');invoke(0x5c)
+            assert len(packets) == count+1  # Current ACK advertisement covers duplicates.
+            for _ in range(100):invoke(0x5c)
+            incoming(b'OC1|87654321|N|I:MEAT');invoke(0x5c)
+            assert len(packets) == count+2  # A later retry receives another ACK, not another log.
+            assert prints.count('HTN26|RX|%02x:%02x:%02x:%02x:%02x:%02x|%d|%s\n') == 1
             invoke(0x60, 0)
-            incoming(b'OC1|PONG|deadbeef');invoke(0x5c)
+            pending = packets[-1]
+            assert pending.endswith(b'|N|I:MEAT')
+            incoming(b'OC1|00000001|A|OK');invoke(0x5c)
             before = len(texts)
-            for _ in range(251):invoke(0x5c)
-            assert 'PONG timeout / A retries' in texts[before:]
+            sent = len(packets)
+            for _ in range(451):invoke(0x5c)
+            assert packets[sent:] == [pending, pending]
+            assert 'Event timeout / A retries' in texts[before:]
     for _ in range(250):
         invoke(0x5C)
     assert "idle" in stages
@@ -185,7 +196,7 @@ def scenario(nvs_error=0, radio_error=0, allocation_failure=False, send_error=0)
     assert cpu.mem_read(app + 4, 24) == bytes(24)
     if handler:
         before = len(packets)
-        incoming(b'OC1|PING|00000001');invoke(0x5c)
+        incoming(b'OC1|00000001|N|I:MEAT');invoke(0x5c)
         assert len(packets) == before
 
 
@@ -196,4 +207,4 @@ if __name__ == "__main__":
     scenario(radio_error=-1)
     scenario(allocation_failure=True)
     scenario(send_error=-1)
-    print("PASS: compiled native ABI, NVS guard, packet validation, PING/PONG, deduplication, timeout, send failure, cleanup")
+    print("PASS: compiled native ABI, NVS guard, gameplay event/ACK, serial framing, deduplication, retries, send failure, cleanup")

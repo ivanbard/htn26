@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.16)
 project(htn26_master LANGUAGES CXX)
 
+find_package(Threads REQUIRED)
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -30,3 +32,9 @@ add_executable(htn26_master_tests
 target_link_libraries(htn26_master_tests PRIVATE htn26_master_core)
 target_compile_options(htn26_master_tests PRIVATE -Wall -Wextra -Wpedantic)
 add_test(NAME htn26_master_tests COMMAND htn26_master_tests)
+
+add_executable(htn26_master_server
+  src/server_main.cpp
+)
+target_link_libraries(htn26_master_server PRIVATE htn26_master_core Threads::Threads)
+target_compile_options(htn26_master_server PRIVATE -Wall -Wextra -Wpedantic)

@@ -9,14 +9,21 @@ typedef struct App {
     u32 ticks;
     void *info;
     u32 active, inbox_full;
-    char inbox[18];
+    char inbox[22];
     u8 peer[6];
     int rssi;
     u32 dropped, sent, received, errors, wait_ticks, advertise_ticks, pulse_ticks;
-    char pending[18], last[18];
+    u32 attempts, sequence;
+    char pending[22], last[22];
     u8 last_peer[6];
 } App;
-_Static_assert(sizeof(App) == 128, "Update heap report when app size changes");
+_Static_assert(sizeof(App) == 148, "Update heap report when app size changes");
+
+#define EVENT_BYTES 21
+#define ACK_BYTES 17
+#define WAIT_TICKS 150
+#define ACK_TICKS 100
+#define MAX_ATTEMPTS 3
 
 #define FN(address, result, ...) ((result (*)(__VA_ARGS__))(address))
 #define PRINT FN(0x4211b726, int, const char *, ...)
@@ -71,19 +78,27 @@ static void copy(void *target, const void *source, usize size) {
     for (usize i = 0; i < size; ++i) a[i] = b[i];
 }
 
+static int sequence(const u8 *value) {
+    for (int i = 0; i < 8; ++i) if (value[i] < '0' || value[i] > '9') return 0;
+    return 1;
+}
+
 /* NimBLE task: copy only. UI and transmission stay on the app task.
  * ponytail: one pending receive slot; add a bounded queue only if measured drops
  * justify it. Repeated advertising supplies another chance after a full slot. */
 static void receive(const usize *capture, const u8 **peer, const signed char *rssi,
                     const u8 **data, const usize *size) {
     App *self = (App *)capture[0];
-    if (!acquire(&self->active) || *size != 17) return;
+    if (!acquire(&self->active)) return;
     const u8 *p = *data;
-    if (!equal(p, "OC1|PING|", 9) && !equal(p, "OC1|PONG|", 9)) return;
-    for (int i = 9; i < 17; ++i)
-        if (!((p[i] >= '0' && p[i] <= '9') || (p[i] >= 'a' && p[i] <= 'f'))) return;
+    int event = *size == EVENT_BYTES && equal(p, "OC1|", 4) && sequence(p + 4) &&
+                equal(p + 12, "|N|I:MEAT", 9);
+    int ack = *size == ACK_BYTES && equal(p, "OC1|", 4) && sequence(p + 4) &&
+              equal(p + 12, "|A|OK", 5);
+    if (!event && !ack) return;
     if (acquire(&self->inbox_full)) { ++self->dropped; return; }
-    copy(self->inbox, p, 17); self->inbox[17] = 0;
+    for (int i = 0; i < 22; ++i) self->inbox[i] = 0;
+    copy(self->inbox, p, *size);
     copy(self->peer, *peer, 6); self->rssi = *rssi;
     release(&self->inbox_full, 1);
 }
@@ -96,8 +111,8 @@ static void signal(App *self, int error, int sending) {
     LED_SHOW(); self->pulse_ticks = 25;
 }
 
-static int transmit(App *self, const char *packet) {
-    int error = RADIO_SEND(packet, 17);
+static int transmit(App *self, const char *packet, usize size) {
+    int error = RADIO_SEND(packet, size);
     if (!error) error = RADIO_RESUME();
     if (error) ++self->errors; else ++self->sent;
     PRINT("OC_NATIVE|tx=%s|result=%d\n", packet, error);
@@ -109,15 +124,17 @@ static void button(App *self, u32 event) {
     /* Stock stores a two-byte event then loads a whole register. Upper bits
      * are unspecified. Low byte button A=0, next byte press=0. */
     if ((event & 0xffff) != 0 || self->phase != 2 || self->wait_ticks) return;
-    u32 token = FN(0x40389792, u32, void)(); /* Existing esp_random, BLE active. */
-    FORMAT(self->pending, sizeof(self->pending), "OC1|PING|%08x", token);
+    u32 current = self->sequence++;
+    if (self->sequence > 99999999) self->sequence = 1;
+    FORMAT(self->pending, sizeof(self->pending), "OC1|%08u|N|I:MEAT", current);
     self->advertise_ticks = 0;
-    self->wait_ticks = 250;
-    if (transmit(self, self->pending)) {
+    self->attempts = 1;
+    self->wait_ticks = WAIT_TICKS;
+    if (transmit(self, self->pending, EVENT_BYTES)) {
         self->wait_ticks = 0;
         RADIO_PAUSE();
         if (self->status) LABEL_TEXT(self->status, "Send error");
-    } else if (self->status) LABEL_TEXT(self->status, "Waiting for PONG...");
+    } else if (self->status) LABEL_TEXT(self->status, "Event sent - waiting for ACK");
 }
 
 static void *label(void *screen, const char *text, int y) {
@@ -142,12 +159,13 @@ static void enter(App *self, void *screen) {
     self->active = self->inbox_full = self->dropped = 0;
     self->sent = self->received = self->errors = self->wait_ticks = 0;
     self->advertise_ticks = self->pulse_ticks = 0;
+    self->attempts = self->sequence = 0;
     self->last[0] = 0;
     LED_CLEAR(); LED_SHOW();
     label(screen, "OVERCOOKED", 8);
     self->status = label(screen, "Starting radio...", 42);
     self->info = label(screen, "RX: none\nPeer: none", 83);
-    label(screen, "A: PING    HOME: Apps", 204);
+    label(screen, "A: send MEAT    HOME: Apps", 204);
 }
 
 static void tick(App *self) {
@@ -178,6 +196,7 @@ static void tick(App *self) {
             FN(0x42010fc2, void, u8 *)(mac);
             PRINT("OC_NATIVE|advertising_mac=%02x:%02x:%02x:%02x:%02x:%02x\n",
                   mac[5], mac[4], mac[3], mac[2], mac[1], mac[0]);
+            self->sequence = FN(0x40389792, u32, void)() % 90000000u + 10000000u;
             /* Same trivial pointer-capture manager used by stock Lua radio,
              * but the invoker below never enters Lua or allocates memory. */
             const usize handler[4] = {(usize)self, 0, 0x4205e52a, (usize)receive};
@@ -188,37 +207,57 @@ static void tick(App *self) {
         }
     }
     if (self->phase == 2 && acquire(&self->inbox_full)) {
-        char packet[18]; u8 peer[6];
+        char packet[22]; u8 peer[6];
         copy(packet, self->inbox, sizeof(packet)); copy(peer, self->peer, sizeof(peer));
         int rssi = self->rssi;
         release(&self->inbox_full, 0);
-        if (!equal(packet, self->last, 18) || !equal(peer, self->last_peer, 6)) {
-            copy(self->last, packet, 18); copy(self->last_peer, peer, 6);
+        int duplicate = equal(packet, self->last, 22) && equal(peer, self->last_peer, 6);
+        int event = packet[13] == 'N';
+        int ack = packet[13] == 'A';
+        if (!duplicate) {
+            copy(self->last, packet, 22); copy(self->last_peer, peer, 6);
             ++self->received;
             PRINT("OC_NATIVE|rx=%s|peer=%02x:%02x:%02x:%02x:%02x:%02x|rssi=%d\n",
                   packet, peer[5], peer[4], peer[3], peer[2], peer[1], peer[0], rssi);
             signal(self, 0, 0);
-            if (packet[5] == 'O' && self->wait_ticks && equal(packet + 9, self->pending + 9, 8)) {
+            if (event) PRINT("HTN26|RX|%02x:%02x:%02x:%02x:%02x:%02x|%d|%s\n",
+                             peer[5], peer[4], peer[3], peer[2], peer[1], peer[0], rssi, packet);
+            if (ack && self->wait_ticks && equal(packet + 4, self->pending + 4, 8)) {
                 self->wait_ticks = self->advertise_ticks = 0; RADIO_PAUSE();
-                if (self->status) LABEL_TEXT(self->status, "PONG received");
-                PRINT("OC_NATIVE|pong_matched=%s\n", packet + 9);
-            } else if (packet[5] == 'I' && !self->wait_ticks) {
-                packet[5] = 'O';
-                int error = transmit(self, packet);
-                if (!error) self->advertise_ticks = 100;
-                if (self->status) LABEL_TEXT(self->status, error ? "PONG send error" : "PING received / PONG sent");
+                if (self->status) LABEL_TEXT(self->status, "Event acknowledged");
+                PRINT("OC_NATIVE|ack_matched=%.8s\n", packet + 4);
             }
             char text[112];
-            FORMAT(text, sizeof(text), "RX: %.13s\nPeer: %02x:%02x:%02x:%02x:%02x:%02x\nTX %u  RX %u  ERR %u",
+            FORMAT(text, sizeof(text), "RX: %.17s\nPeer: %02x:%02x:%02x:%02x:%02x:%02x\nTX %u  RX %u  ERR %u",
                    self->last + 4, peer[5], peer[4], peer[3], peer[2], peer[1], peer[0],
                    self->sent, self->received, self->errors);
             if (self->info) LABEL_TEXT(self->info, text);
         }
+        /* ponytail: one outstanding sender at a time; add arbitration only when
+         * simultaneous player traffic is exercised with a third badge. */
+        if (event && !self->wait_ticks && (!duplicate || !self->advertise_ticks)) {
+            char reply[18];
+            FORMAT(reply, sizeof(reply), "OC1|%.8s|A|OK", packet + 4);
+            int error = transmit(self, reply, ACK_BYTES);
+            if (!error) self->advertise_ticks = ACK_TICKS;
+            if (self->status) LABEL_TEXT(self->status, error ? "ACK send error" : "Event received / ACK sent");
+        }
     }
     if (self->wait_ticks && --self->wait_ticks == 0) {
-        RADIO_PAUSE(); ++self->errors; signal(self, 1, 0);
-        if (self->status) LABEL_TEXT(self->status, "PONG timeout / A retries");
-        PRINT("OC_NATIVE|timeout=%s\n", self->pending + 9);
+        RADIO_PAUSE();
+        if (self->attempts < MAX_ATTEMPTS) {
+            ++self->attempts;
+            self->wait_ticks = WAIT_TICKS;
+            if (transmit(self, self->pending, EVENT_BYTES)) {
+                self->wait_ticks = 0;
+                RADIO_PAUSE();
+            }
+            if (self->status) LABEL_TEXT(self->status, self->wait_ticks ? "Retrying event..." : "Retry send error");
+        } else {
+            ++self->errors; signal(self, 1, 0);
+            if (self->status) LABEL_TEXT(self->status, "Event timeout / A retries");
+            PRINT("OC_NATIVE|timeout=%.8s|attempts=%u\n", self->pending + 4, self->attempts);
+        }
     }
     if (self->advertise_ticks && --self->advertise_ticks == 0) RADIO_PAUSE();
     if (self->pulse_ticks && --self->pulse_ticks == 0) {
@@ -242,6 +281,7 @@ static void leave(App *self) {
     self->ticks = 0;
     self->info = 0;
     self->inbox_full = self->wait_ticks = self->advertise_ticks = self->pulse_ticks = 0;
+    self->attempts = 0;
     /* The registry remembers radio activity before this callback, cleans the
      * screen, releases its UI lock, and reboots with focus=overcooked. */
 }
@@ -268,5 +308,5 @@ void register_overcooked(void) {
     }
     app->vtable = vtable;
     FN(0x4203aace, void, void *)(app);
-    PRINT("OC_NATIVE|registered|build=milestone2|object_bytes=%u\n", (u32)sizeof(App));
+    PRINT("OC_NATIVE|registered|build=controller1|object_bytes=%u\n", (u32)sizeof(App));
 }

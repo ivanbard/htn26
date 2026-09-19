@@ -71,6 +71,24 @@ state publication, and worker failure/stale tracking behavior.
 make -C pi/master test
 ```
 
+Build the minimal QNX runtime and test it with a simulated gateway status line:
+
+```sh
+make -C pi/master smoke
+```
+
+Run it with newline-delimited gateway output on stdin, or pass the gateway's
+serial device as the second argument:
+
+```sh
+/tmp/htn26-master-build/htn26_master_server AA:BB:CC:DD:EE:FF
+/tmp/htn26-master-build/htn26_master_server AA:BB:CC:DD:EE:FF /dev/ser1
+```
+
+The runtime currently registers one badge and prints event results and state
+snapshots. Camera/worker input and UI publication remain outside this first
+deployment slice.
+
 `CMakeLists.txt` also defines the same C++17 test target for environments with
 CMake and CTest. The local tests use workstation C++ only.
 

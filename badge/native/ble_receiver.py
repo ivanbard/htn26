@@ -1,4 +1,4 @@
-"""Windows BLE PING/PONG test peer. No serial connection or game state."""
+"""Windows BLE gameplay-event/ACK test peer. No serial connection or game state."""
 import argparse
 import asyncio
 from pathlib import Path
@@ -11,17 +11,22 @@ COMPANY = 0xFFFF  # Existing badge HAL's manufacturer ID; OC1 separates our pack
 
 
 def decode(data):
-    if len(data) != 17 or data[:9] not in (b"OC1|PING|", b"OC1|PONG|"):
+    if len(data) == 21 and data[:4] == b"OC1|" and data[12:] == b"|N|I:MEAT":
+        kind = "EVENT"
+    elif len(data) == 17 and data[:4] == b"OC1|" and data[12:] == b"|A|OK":
+        kind = "ACK"
+    else:
         return None
-    if any(c not in b"0123456789abcdef" for c in data[9:]):
+    if any(c not in b"0123456789" for c in data[4:12]):
         return None
-    return data[4:8].decode(), data[9:].decode()
+    return kind, data[4:12].decode()
 
 
-def packet(kind, token):
-    result = f"OC1|{kind}|{token}".encode("ascii")
+def packet(kind, sequence):
+    suffix = "|N|I:MEAT" if kind == "EVENT" else "|A|OK" if kind == "ACK" else ""
+    result = f"OC1|{sequence}{suffix}".encode("ascii")
     if decode(result) is None:
-        raise ValueError("Invalid diagnostic packet")
+        raise ValueError("Invalid controller packet")
     return result
 
 
@@ -111,17 +116,17 @@ async def run(args):
         if args.count:
             successes = 0
             for index in range(args.count):
-                token = secrets.token_hex(4)
-                await advertise(packet("PING", token))
+                sequence = f"{secrets.randbelow(100000000):08d}"
+                await advertise(packet("EVENT", sequence))
                 started = time.monotonic()
                 while True:
                     remaining = args.timeout - (time.monotonic() - started)
                     try:
                         data, rssi = await asyncio.wait_for(queue.get(), max(0, remaining))
                     except asyncio.TimeoutError:
-                        print(f"TIMEOUT token={token}", flush=True)
+                        print(f"TIMEOUT sequence={sequence}", flush=True)
                         break
-                    if decode(data) == ("PONG", token):
+                    if decode(data) == ("ACK", sequence):
                         successes += 1
                         print(f"RX {data.decode()} rssi={rssi} latency_ms={(time.monotonic()-started)*1000:.0f}", flush=True)
                         break
@@ -129,7 +134,7 @@ async def run(args):
                 await asyncio.sleep(.3)
             print(f"RESULT matched={successes}/{args.count} queue_drops={drops}", flush=True)
             if successes != args.count:
-                raise RuntimeError("Not every PING received a matching PONG")
+                raise RuntimeError("Not every event received a matching ACK")
         else:
             end = time.monotonic() + args.seconds
             last = None
@@ -142,14 +147,14 @@ async def run(args):
                     if publisher and time.monotonic() >= advertised_until:
                         await stop_publisher()
                     continue
-                kind, token = decode(data)
+                kind, sequence = decode(data)
                 if data != last:
                     print(f"RX {data.decode()} rssi={rssi}", flush=True)
                     last = data
-                if (kind == "PING" and not args.listen_only
-                        and (token != last_reply or time.monotonic() >= advertised_until)):
-                    await advertise(packet("PONG", token))
-                    last_reply = token
+                if (kind == "EVENT" and not args.listen_only
+                        and (sequence != last_reply or time.monotonic() >= advertised_until)):
+                    await advertise(packet("ACK", sequence))
+                    last_reply = sequence
                     advertised_until = time.monotonic() + 2
             mode = 'listener' if args.listen_only else 'responder'
             print(f"RESULT {mode} finished queue_drops={drops}", flush=True)
@@ -162,23 +167,24 @@ async def run(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--peer", help="Badge address from OC_NATIVE advertising_mac log")
-    parser.add_argument("--count", type=int, default=0, help="Send this many PINGs; default responds to badge PINGs")
+    parser.add_argument("--count", type=int, default=0, help="Send this many events; default acknowledges badge events")
     parser.add_argument("--seconds", type=float, default=60, help="Responder lifetime")
     parser.add_argument("--timeout", type=float, default=5)
     parser.add_argument("--self-test", action="store_true")
     parser.add_argument("--listen-only", action="store_true", help="Receive only when adapter publishing is unavailable")
     args = parser.parse_args()
     if args.self_test:
-        assert decode(packet("PING", "0123abcd")) == ("PING", "0123abcd")
-        assert decode(packet("PONG", "fedcba98")) == ("PONG", "fedcba98")
-        for bad in (b"PING", b"OC1|PING|0123ABCD", b"OC1|PING|0123abcd\0", b"OC2|PING|0123abcd", bytes(225)):
+        assert decode(packet("EVENT", "01234567")) == ("EVENT", "01234567")
+        assert decode(packet("ACK", "87654321")) == ("ACK", "87654321")
+        for bad in (b"MEAT", b"OC1|01234567|N|I:BEEF", b"OC1|0123456x|A|OK",
+                    b"OC2|01234567|A|OK", bytes(225)):
             assert decode(bad) is None
-        print("PASS: packet format, strict length, namespace, and token validation")
+        print("PASS: packet format, strict length, namespace, and sequence validation")
     else:
         if not args.peer or args.count < 0 or args.seconds <= 0 or args.timeout <= 0:
             parser.error("Provide --peer and positive durations, nonnegative count")
         if args.listen_only and args.count:
-            parser.error("--listen-only cannot send --count PINGs")
+            parser.error("--listen-only cannot send --count events")
         try:
             if len(args.peer.replace(":", "")) != 12:
                 raise ValueError()

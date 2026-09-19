@@ -1,4 +1,4 @@
-# Native diagnostic transport
+# Native controller transport
 
 This documents the private ABI recovered from stock `v0.1.2-392-gd3089c4`.
 These addresses must not be used with other firmware images. The builder pins
@@ -39,25 +39,30 @@ The HAL copies the handler under a mutex before invoking it from the NimBLE
 task. The compiled tests execute the actual stock move/copy/destructor and
 AD parser with the new invoker, rather than merely imitating that ABI.
 
-## Diagnostic application protocol
+## Controller application protocol
 
-Exactly 17 ASCII bytes:
+The first controller slice uses one 21-byte event and one 17-byte acknowledgement:
 
 ```text
-OC1|PING|0123abcd
-OC1|PONG|0123abcd
+OC1|01234567|N|I:MEAT
+OC1|01234567|A|OK
 ```
 
-The eight lowercase hexadecimal characters are a random 32-bit challenge,
-fresh per button press. PONG echoes the challenge. The prefix isolates this
-diagnostic from Share and other stock traffic. This is an unauthenticated
-local radio test, not the final gameplay protocol.
+The eight decimal digits are a per-boot randomized, monotonically increasing
+sequence. The acknowledgement echoes it. The `OC1` prefix isolates game traffic
+from Share and other stock advertisements.
 
-A sends PING. The badge advertises it while waiting, for at most 250 app ticks
-(nominally five seconds). Only a matching PONG completes the request. An idle
-badge receiving PING advertises PONG for 100 ticks (nominally two seconds).
-Repeated identical packets from the same peer are ignored. No reliable-delivery
-layer, automatic retry, game server, or authoritative game state is added.
+A sends `I:MEAT`. The badge waits 150 ticks (nominally three seconds) and makes
+at most three attempts using the exact same sequence and packet. Only a matching
+ACK completes the request. An idle peer advertises the ACK for 100 ticks
+(nominally two seconds). Repeated events are acknowledged again after that
+window but produce only one gateway serial frame:
+
+```text
+HTN26|RX|<sender_mac>|<rssi>|OC1|01234567|N|I:MEAT
+```
+
+No NFC, game server, or authoritative game state is added yet.
 Overcooked uses 30 ms minimum/maximum advertising intervals, matching Share's
 existing send setup. Scanning timing stays at the stock HAL default. Faster
 advertising costs radio airtime while sending; advertisements stop on timeout,
@@ -67,7 +72,7 @@ The receive callback validates and copies into one fixed slot. It never calls
 LVGL or transmits. The app tick consumes the slot and handles display/transmit.
 Aligned 32-bit loads/stores plus RISC-V acquire/release fences publish the slot;
 no unsupported RV32 atomic extension or libatomic is needed. A full slot drops
-new reports and increments a diagnostic counter. The app object is 128 bytes.
+new reports and increments a diagnostic counter. The app object is 148 bytes.
 
 LED 0: green ready. LED 1: blue send. LED 2: yellow receive. LED 5: red error.
 Pulses last 25 ticks. Inputs account for the stock HAL's brightness curve.
@@ -90,7 +95,7 @@ For this badge the derived address is `d0:86:29:c1:3d:e8`:
 ```powershell
 # Answer badge button presses for one minute.
 python badge/native/ble_receiver.py --peer d0:86:29:c1:3d:e8 --seconds 60
-# Initiate repeated PINGs and require matching responses.
+# Initiate repeated gameplay events and require matching ACKs.
 python badge/native/ble_receiver.py --peer d0:86:29:c1:3d:e8 --count 20
 # Capture badge transmissions when Windows cannot advertise.
 python badge/native/ble_receiver.py --peer d0:86:29:c1:3d:e8 --listen-only --seconds 60
