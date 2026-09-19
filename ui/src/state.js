@@ -2,14 +2,18 @@ export const SETUP_PHASES = Object.freeze({
   IDLE: "idle",
   SCANNING: "scanning",
   LAYOUT_PROPOSED: "layout-proposed",
+  BURGER_PLACEMENT: "burger-placement",
   LAYOUT_ACCEPTED: "layout-accepted",
   RUNNING: "running",
   ENDED: "ended",
 });
 
 export const GAME_ACTIONS = Object.freeze({
+  START_HOST: "START_HOST",
   SCAN_ROOM: "SCAN_ROOM",
-  ACCEPT_LAYOUT: "ACCEPT_LAYOUT",
+  APPROVE_LAYOUT: "APPROVE_LAYOUT",
+  // Kept as a protocol alias for existing master-Pi adapters.
+  ACCEPT_LAYOUT: "APPROVE_LAYOUT",
   RESCAN: "RESCAN",
   START_GAME: "START_GAME",
   END_GAME: "END_GAME",
@@ -32,7 +36,7 @@ export function timestampMs(value) {
 }
 
 export function staleAfterMs(item, fallback = 2_000) {
-  const value = Number(item?.staleAfterMs);
+  const value = Number(item?.staleAfterMs ?? item?.tracking?.staleAfterMs);
   return Number.isFinite(value) && value >= 0 ? value : fallback;
 }
 
@@ -83,13 +87,16 @@ export function progressPercent(value) {
 export function canRunAction(state, action) {
   const phase = state?.setup?.phase;
   switch (action) {
+    case GAME_ACTIONS.START_HOST:
+      return phase === SETUP_PHASES.IDLE || phase === SETUP_PHASES.ENDED;
     case GAME_ACTIONS.SCAN_ROOM:
+      return phase === SETUP_PHASES.SCANNING;
+    case GAME_ACTIONS.APPROVE_LAYOUT:
+      return phase === SETUP_PHASES.LAYOUT_PROPOSED && state?.floorPlan?.accepted !== true;
     case GAME_ACTIONS.RESCAN:
       return phase !== SETUP_PHASES.RUNNING;
-    case GAME_ACTIONS.ACCEPT_LAYOUT:
-      return phase === SETUP_PHASES.LAYOUT_PROPOSED && state?.floorPlan?.accepted !== true;
     case GAME_ACTIONS.START_GAME:
-      return state?.floorPlan?.accepted === true && phase !== SETUP_PHASES.RUNNING;
+      return state?.floorPlan?.accepted === true && phase === SETUP_PHASES.LAYOUT_ACCEPTED;
     case GAME_ACTIONS.END_GAME:
       return phase === SETUP_PHASES.RUNNING;
     case GAME_ACTIONS.RESET_GAME:

@@ -21,8 +21,12 @@ export function createApp({ root, transport, now = () => Date.now() }) {
     if (!button || button.disabled) return;
     button.disabled = true;
     connectionError = "";
+    const stateAtCommandStart = state;
     try {
       const nextState = await transport.command(button.dataset.command);
+      // A live transport update wins over a delayed command response. This
+      // prevents an older response from regressing the visible snapshot.
+      if (state !== stateAtCommandStart) return;
       render(nextState);
     } catch (error) {
       connectionError = `COMMAND NOT SENT — ${error.message}`;

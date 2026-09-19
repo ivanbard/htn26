@@ -68,8 +68,16 @@ h3 { margin: 0; font-size: 1.05rem; }
 .map-station { position: absolute; z-index: 2; display: flex; align-items: center; justify-content: center; padding: 4px; border: 2px solid var(--purple); border-radius: 8px; color: #f7f2ff; background: #312957; text-align: center; font-size: clamp(0.62rem, 1vw, 0.86rem); letter-spacing: 0.05em; }
 .station-ingredient { border-color: var(--orange); background: #55341f; }
 .station-chop { border-color: var(--cyan); background: #16404d; }
-.station-pot { border-color: var(--yellow); background: #4b3b1d; }
+.station-pot, .station-stove { border-color: var(--yellow); background: #4b3b1d; }
 .station-delivery { border-color: var(--green); background: #1b4b35; }
+.topping-list { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 15px; }
+.topping-chip { padding: 8px 10px; border: 1px solid var(--orange); border-radius: 6px; color: var(--orange); background: #55341f; font-size: 0.76rem; font-weight: 850; }
+.placement-panel { margin-top: 20px; padding: 20px; }
+.placement-panel > .muted { max-width: 900px; }
+.placement-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px; padding: 0; margin: 16px 0 0; list-style: none; }
+.placement-list li { display: grid; gap: 4px; padding: 10px; border-left: 3px solid var(--orange); background: var(--panel-strong); }
+.placement-list strong { font-size: 0.78rem; }
+.placement-list span { color: var(--muted); font-size: 0.72rem; }
 .player-token { position: absolute; z-index: 4; display: grid; grid-template-columns: auto 1fr; grid-template-rows: auto auto; column-gap: 7px; align-items: center; min-width: 104px; transform: translate(-50%, -50%); padding: 5px 9px 5px 5px; border: 2px solid currentColor; border-radius: 9px; color: var(--cyan); background: #0e2533; box-shadow: 0 4px 0 #061019; /* Deliberately no transition/animation: positions are authoritative snapshots. */ }
 .player-badge { grid-row: 1 / span 2; display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; color: #081019; background: currentColor; font-size: 0.72rem; font-weight: 900; }
 .player-name { font-size: 0.75rem; font-weight: 850; white-space: nowrap; }
@@ -107,6 +115,10 @@ h3 { margin: 0; font-size: 1.05rem; }
 .delivery-panel { display: flex; flex-direction: column; justify-content: center; min-height: 190px; }
 .delivery-panel h2 { margin-bottom: 10px; }
 .delivery-panel p:not(.eyebrow) { color: var(--muted); }
+.serving-panel { min-height: 230px; }
+.goose-queue { display: flex; flex-wrap: wrap; gap: 7px; margin: 11px 0 15px; }
+.goose-token { display: inline-grid; place-items: center; min-width: 52px; min-height: 34px; padding: 4px 6px; border: 2px solid #d6dce3; border-radius: 48% 48% 42% 42%; color: #16212b; background: #f5f7fa; font-size: 0.59rem; font-weight: 900; }
+.goose-token::after { content: ""; width: 7px; height: 7px; margin-top: -2px; border-radius: 50%; background: var(--orange); }
 .delivery-points { margin-top: auto; color: var(--green); font-size: 2.2rem; }
 .delivery-success { border-color: var(--green); background: #0d2a20; }
 .delivery-success h2 { color: var(--green); }

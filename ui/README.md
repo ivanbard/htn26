@@ -1,10 +1,10 @@
-# Game UI
+# Burger Level UI
 
-This directory contains the local, offline-first HTN26 spectator/host UI MVP. It is a dependency-free browser application: the only runtime assets are the files in this directory, and it makes no internet requests.
+This directory contains the local, offline-first HTN26 spectator and host UI MVP. It is a dependency-free browser application: the only runtime assets are files in this directory, and it makes no internet requests.
 
 ## Run locally
 
-Requires Node.js 20 or newer (the built-in `node:test` runner is used).
+Requires Node.js 20 or newer.
 
 ```sh
 cd ui
@@ -12,18 +12,36 @@ npm test
 npm run dev
 ```
 
-Open <http://127.0.0.1:4173>. The development page uses the in-process mock master-Pi transport, so the complete setup flow can be exercised without cameras, badges, or a network:
+Open <http://127.0.0.1:4173>. The development page uses the mock master-Pi transport. Try the host flow:
 
-1. `Scan Room`
-2. `Accept Layout`
-3. `Start Game`
-4. `End Game` or `Reset Game`
+1. `Start` host mode.
+2. `Scan Room` to show the proposed floor plan.
+3. `Approve Layout` to accept the plan and generate burger-level placement instructions.
+4. Place the cheese, lettuce, meat, and bun sources, the chopping boards, stoves, and serving badge as shown.
+5. `Start Game` for a roughly two-minute round.
 
-The mock is an authoritative **development fixture**, not UI-owned game state. The UI sends commands and renders the snapshots returned by its transport. The mock also exports delivery actions for fixture/tests; delivery results are rendered as success or rejection and only the mock master changes score.
+The mock also supports delivery fixtures for tests (`DELIVERY_SUCCESS` and `DELIVERY_FAILURE`). The UI renders the serving result and score supplied by the transport; it does not create a delivery result itself.
+
+## Product flow
+
+The master Pi remains authoritative. The UI mirrors this flow:
+
+```text
+host Start
+  -> camera room scan
+  -> proposed floor plan
+  -> host approves floor plan
+  -> burger level placement instructions
+  -> two-minute burger round
+  -> topping-variation orders and live player positions
+  -> serving badge validates completed burger
+```
+
+A burger uses buns, meat, cheese, and lettuce. Cheese, lettuce, and meat can be cut at chopping boards before assembly. Stoves expose authoritative cooking progress. There is no dish-washing station. The serving panel shows a line of standing Waterloo geese beside the serving location.
 
 ## Architecture and transport seam
 
-`src/main.js` only depends on a transport with this interface:
+`src/main.js` depends only on this transport interface:
 
 ```js
 {
@@ -34,19 +52,17 @@ The mock is an authoritative **development fixture**, not UI-owned game state. T
 ```
 
 - `src/mock-transport.js` is the required offline development transport. It owns a fixture state and applies host commands as a stand-in for the master Pi.
-- `src/transport.js` also includes a local HTTP/SSE transport for integration with a master Pi implementation. It expects `GET /api/state`, `POST /api/command`, and `GET /api/events`; those endpoints remain outside this UI task.
-- Use `http://127.0.0.1:4173/?transport=http` to select the HTTP seam. The browser is still pointed at a local address; no cloud service or remote asset is involved. A supplied `window.__HTN26_TRANSPORT__` takes precedence for integration tests.
+- `src/transport.js` includes a local HTTP/SSE transport for integration with a master Pi. It expects `GET /api/state`, `POST /api/command`, and `GET /api/events`; those endpoints remain outside this UI task.
+- Use `http://127.0.0.1:4173/?transport=http` to select the HTTP seam. A supplied `window.__HTN26_TRANSPORT__` takes precedence for integration tests.
 - `src/render.js` is a pure renderer. It does not create timers, move players, score deliveries, or infer station/order state.
 
-The state contract intentionally keeps authoritative values explicit:
+Authoritative values stay explicit:
 
-- `floorPlan.accepted` and `floorPlan.stations` describe the accepted top-down layout.
-- `players[].position` and `players[].tracking.lastSeenAt` are master-Pi observations. A missing/old observation is rendered at its last known coordinates with a visible `TRACKING STALE` marker; it is never animated indefinitely.
-- `order.remainingSeconds`, `clock.remainingSeconds`, and station `progress` are displayed values from the master snapshot. The UI never decrements them locally.
+- `floorPlan.accepted`, `floorPlan.stations`, and `burgerLevel.placementInstructions` describe the accepted map and where the physical burger level belongs.
+- `players[].position` and `players[].tracking.lastSeenAt` are master-Pi observations. Missing or old observations are rendered at no fabricated location with a visible `TRACKING LOST` or `TRACKING STALE` marker. Player tokens never animate between snapshots.
+- `order.remainingSeconds`, `clock.remainingSeconds`, station `progress`, and cooking state are displayed values from the master snapshot. The UI never decrements them locally.
 - `health.gateway`, `health.workers`, and `health.inference` show gateway/camera/AI health. A stale worker produces a visible `TRACKING DEGRADED` callout.
-- `delivery.lastEvent` and `score` are rendered exactly as delivered by the transport.
-
-The mock fixture is intentionally replaceable. A future master-Pi adapter can use WebSocket/SSE instead of the included HTTP polling fallback without changing the renderer or host controls.
+- `serving.lastEvent` and `score` are rendered exactly as delivered by the transport.
 
 ## Tests
 
@@ -54,4 +70,4 @@ The mock fixture is intentionally replaceable. A future master-Pi adapter can us
 npm test
 ```
 
-The tests use only Node's standard library and cover accepted-state rendering, stale player/worker health, setup command transitions, and delivery/score success and failure rendering.
+Tests use only Node's standard library and cover burger-level rendering, missing/stale tracking, stale worker health, host scan/approval/start/end/reset transitions, and serving/score success and failure updates.
