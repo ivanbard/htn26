@@ -1,26 +1,29 @@
-local transport = badge and require("transport")
+-- HTN26 host badge for the single-Pi v1 game.
+--
+-- The host owns the round lifecycle and countdown. It is a radio gateway only:
+-- player radio payloads are forwarded to the Pi over USB serial, while the Pi
+-- remains authoritative for player intent, orders, scoring, and game state.
 
--- HTN26 Overcooked IRL serving-area master badge.
--- START requests the one-Pi/phone-photo burger room scan. The badge has serial output
--- only, so the Pi owns floor-plan capture and approval after that log line.
--- Update 1 uses all four NFC tags as player stations; the host is radio/serial only.
-
+local GAME_DURATION_MS = 120000
+local PLAYER_COUNT = 3
 local MAX_RADIO_PAYLOAD = 44
-local MIN_PACKET_LENGTH = 9 -- OC1|1|N|X
-local MAX_COUNTER = 999999
+local MAX_PACKET_SEQUENCE = 4294967295
 local QUEUE_CAPACITY = 8
 local MAX_FLUSH_PER_TICK = 4
-local STATUS_INTERVAL_MS = 5000
+local MAX_COUNTER = 999999
+local DISPLAY_INTERVAL_MS = 100
 local LED_INTERVAL_MS = 100
-local RECEIVE_PULSE_MS = 450
-local PLATE_PULSE_MS = 700
-local NFC_POLL_MS = 200
-local NFC_CLEAR_MS = 600
-local NFC_REPEAT_MS = 4000
-local SCAN_COOLDOWN_MS = 3000
+local STATUS_INTERVAL_MS = 5000
+
+local game_active = false
+local game_ends_at = 0
+local remaining_seconds = 0
+local session_number = 0
+local session_received = 0
+local session_forwarded = 0
+local control_sequence = 0
 
 local radio_enabled = false
-local nfc_enabled = false
 local queue_mac = {}
 local queue_rssi = {}
 local queue_payload = {}
@@ -30,48 +33,32 @@ local queue_count = 0
 
 local forwarded_count = 0
 local invalid_count = 0
+local ignored_count = 0
 local queue_drop_count = 0
 local radio_drop_count = 0
-local nfc_bad_count = 0
-local plate_count = 0
-
-local last_mac = nil
+local last_sender = nil
 local last_rssi = nil
 local last_payload = nil
-local last_event_text = nil
-local last_event_source = nil
-local last_receive_ms = -1000000
-local last_plate_ms = -1000000
-local scan_flash_until = 0
+local last_event_ms = -1000000
+local last_status_log_ms = -1000000
+local next_display_ms = 0
 local next_led_ms = 0
-local next_status_ms = 0
-local next_scan_allowed = 0
-local next_nfc_poll = 0
-local clear_nfc_at = 0
-local last_nfc_uid = nil
-local last_nfc_uid_ms = -1000000
-local scan_phase = "READY - START room scan"
 
+-- These slots are deliberately reset for every round. The host does not assign
+-- players dynamically; the Pi maps each sender identity to one of the three
+-- pre-assigned players.
+local players = {}
+
+local status_label
+local timer_label
 local radio_label
-local nfc_label
-local scan_label
-local counter_label
-local plate_label
-local detail_label
-local last_label
-local source_label
-
-local shown_health = nil
-local shown_scan = nil
-local shown_forwarded = -1
-local shown_drops = -1
-local shown_plates = -1
-local shown_invalid = -1
-local shown_queue_drops = -1
-local shown_radio_drops = -1
-local shown_nfc_bad = -1
-local shown_last_text = false
-local shown_last_source = false
+local counters_label
+local event_label
+local shown_status = nil
+local shown_timer = nil
+local shown_radio = nil
+local shown_counters = nil
+local shown_event = nil
 
 local function increment_counter(value, amount)
   amount = amount or 1
@@ -81,62 +68,118 @@ local function increment_counter(value, amount)
   return result
 end
 
-local function bounded_counter(value)
-  if type(value) ~= "number" or value ~= value or value <= 0 then return 0 end
-  if value >= MAX_COUNTER then return MAX_COUNTER end
-  return math.floor(value)
+local function reset_queue()
+  for index = 1, QUEUE_CAPACITY do
+    queue_mac[index] = nil
+    queue_rssi[index] = nil
+    queue_payload[index] = nil
+  end
+  queue_head = 1
+  queue_tail = 1
+  queue_count = 0
 end
 
-local function add_counters(left, right)
-  if left >= MAX_COUNTER - right then return MAX_COUNTER end
-  return left + right
+local function reset_players()
+  for index = 1, PLAYER_COUNT do
+    players[index] = {
+      sender = nil,
+      received = 0,
+      last_sequence = nil,
+      held_item = nil,
+      action = "IDLE",
+    }
+  end
 end
 
-local function total_drop_count()
-  local total = add_counters(invalid_count, queue_drop_count)
-  total = add_counters(total, radio_drop_count)
-  return add_counters(total, nfc_bad_count)
+local function reset_session()
+  reset_queue()
+  reset_players()
+  session_received = 0
+  session_forwarded = 0
+  last_sender = nil
+  last_rssi = nil
+  last_payload = nil
+  last_event_ms = -1000000
 end
 
--- Accept both the documented sequence/type/value order and the order emitted
--- by the current player badge: OC1|<type>|<4-digit sequence>|<value>.
+local function valid_mac(mac)
+  if type(mac) ~= "string" or #mac ~= 17 then return false end
+  for index = 1, 17 do
+    local character = string.sub(mac, index, index)
+    if index % 3 == 0 then
+      if character ~= ":" then return false end
+    elseif string.match(character, "^[0-9A-Fa-f]$") == nil then
+      return false
+    end
+  end
+  return true
+end
+
+local function valid_rssi(rssi)
+  return type(rssi) == "number" and rssi == math.floor(rssi) and
+    rssi >= -127 and rssi <= 20
+end
+
+local function valid_sequence(sequence)
+  if type(sequence) ~= "string" or #sequence < 1 then return false end
+  local number = 0
+  for index = 1, #sequence do
+    local digit = string.byte(sequence, index) - string.byte("0")
+    if digit < 0 or digit > 9 then return false end
+    if number > math.floor((MAX_PACKET_SEQUENCE - digit) / 10) then
+      return false
+    end
+    number = number * 10 + digit
+  end
+  return true
+end
+
+local function printable_value(value)
+  if type(value) ~= "string" or #value == 0 then return false end
+  for index = 1, #value do
+    local byte = string.byte(value, index)
+    if byte < 32 or byte > 126 or byte == 124 then return false end
+  end
+  return true
+end
+
+-- This is the sequence-first OC1 payload consumed by pi/common/protocol.cpp:
+-- OC1|<sequence>|<type>|<value>. The value cannot contain a pipe, newline, or
+-- other control character so the surrounding serial fields stay unambiguous.
 local function valid_player_packet(payload)
-  if type(payload) ~= "string" then return false end
-  local length = #payload
-  if length < MIN_PACKET_LENGTH or length > MAX_RADIO_PAYLOAD then return false end
+  if type(payload) ~= "string" or #payload < 9 or #payload > MAX_RADIO_PAYLOAD then
+    return false
+  end
   if string.sub(payload, 1, 4) ~= "OC1|" then return false end
   if string.find(payload, string.char(0), 1, true) ~= nil then return false end
   if string.find(payload, "\r", 1, true) ~= nil then return false end
   if string.find(payload, "\n", 1, true) ~= nil then return false end
-  local kind, sequence, value = string.match(payload,
-    "^OC1|([A-Z])|(%d%d%d%d)|([^|]+)$")
-  if kind == nil then
-    -- Targeted three-badge replies carry an additional MAC field.
-    kind, sequence, value = string.match(payload,
-      "^OC1|([AUR])|(%d%d%d%d)|(%x%x%x%x%x%x%x%x%x%x%x%x|[^|]+)$")
+
+  local sequence, event_type, value = string.match(payload,
+    "^OC1|([^|]+)|([NMBHE])|([^|]+)$")
+  if sequence == nil or not valid_sequence(sequence) or
+      not printable_value(value) then
+    return false
   end
-  if kind == nil then
-    sequence, kind, value = string.match(payload,
-      "^OC1|([0-9]+)|([A-Z])|([^|]+)$")
-  end
-  return sequence ~= nil and kind ~= nil and value ~= nil
+  return true
 end
 
-local function valid_plate_tag(text)
-  if type(text) ~= "string" or #text ~= 4 then return false end
-  return string.match(text, "^P:0[1-3]$") ~= nil
-end
-
-local function serial_frame(mac, rssi, payload)
+local function serial_rx_frame(mac, rssi, payload)
   return "HTN26|RX|" .. mac .. "|" .. tostring(rssi) .. "|" .. payload
 end
 
-local function plate_frame(tag)
-  return "HTN26|PLATE|" .. tag
+local function serial_start_frame()
+  return "HTN26|GAME|START_GAME|120|3"
 end
 
-local function host_scan_frame()
-  return "HTN26|HOST|SCAN|1PI|PHONE|BURGER"
+local function serial_end_frame()
+  return "HTN26|GAME|GAME_END|3"
+end
+
+local function lifecycle_radio_frame(kind)
+  control_sequence = control_sequence + 1
+  local code = kind == "START_GAME" and "S" or "E"
+  return string.format("OC1|%06d|G|%s", control_sequence, code)
 end
 
 local function enqueue_packet(mac, rssi, payload)
@@ -168,106 +211,103 @@ local function dequeue_packet()
 end
 
 local function receive_packet(mac, rssi, payload)
-  -- Keep this callback short: validate and copy only. UI, NFC, LEDs, and
-  -- serial logging happen in normal bounded tick work.
-  if type(mac) ~= "string" or type(rssi) ~= "number" or
+  -- Radio callbacks are kept short. In particular, they never log, touch UI,
+  -- or call radio.send; the normal tick drains this bounded FIFO.
+  if not valid_mac(mac) or not valid_rssi(rssi) or
       not valid_player_packet(payload) then
     invalid_count = increment_counter(invalid_count)
     return
   end
-  enqueue_packet(mac, rssi, payload)
+  if not game_active then
+    ignored_count = increment_counter(ignored_count)
+    return
+  end
+  if enqueue_packet(mac, rssi, payload) then
+    session_received = increment_counter(session_received)
+  end
 end
 
 local function update_radio_drops()
-  local observed = transport.dropped()
-  if type(observed) == "number" then
-    radio_drop_count = bounded_counter(observed)
-  end
+  local observed = badge.radio.dropped()
+  if type(observed) ~= "number" then return end
+  observed = math.floor(observed)
+  if observed < 0 then observed = 0 end
+  if observed > MAX_COUNTER then observed = MAX_COUNTER end
+  radio_drop_count = observed
 end
 
 local function flush_packets(now)
   local flushed = 0
   while flushed < MAX_FLUSH_PER_TICK and queue_count > 0 do
     local mac, rssi, payload = dequeue_packet()
-    badge.sys.log(serial_frame(mac, rssi, payload))
+    badge.sys.log(serial_rx_frame(mac, rssi, payload))
     forwarded_count = increment_counter(forwarded_count)
-    last_mac = mac
+    session_forwarded = increment_counter(session_forwarded)
+    last_sender = mac
     last_rssi = rssi
     last_payload = payload
-    last_event_text = payload
-    last_event_source = "From " .. mac .. "  " .. tostring(rssi) .. " dBm"
-    last_receive_ms = now
+    last_event_ms = now
     flushed = flushed + 1
   end
 end
 
-local function poll_nfc(now)
-  if not nfc_enabled or now < next_nfc_poll then return end
-  next_nfc_poll = now + NFC_POLL_MS
-  local card = badge.nfc.card()
-  if not card or type(card.uid) ~= "string" then return end
-  if card.uid == last_nfc_uid and now - last_nfc_uid_ms < NFC_REPEAT_MS then return end
-  last_nfc_uid = card.uid
-  last_nfc_uid_ms = now
-  clear_nfc_at = now + NFC_CLEAR_MS
+local function format_clock(seconds)
+  if seconds < 0 then seconds = 0 end
+  local minutes = math.floor(seconds / 60)
+  local remainder = seconds - minutes * 60
+  local second_text = tostring(remainder)
+  if remainder < 10 then second_text = "0" .. second_text end
+  return tostring(minutes) .. ":" .. second_text
+end
 
-  local text = badge.nfc.read_text()
-  if not valid_plate_tag(text) then
-    nfc_bad_count = increment_counter(nfc_bad_count)
-    last_event_text = "Non-plate NFC tag"
-    last_event_source = "Serving NFC rejected"
-    return
-  end
+local function current_status()
+  if game_active then return "GAME ACTIVE" end
+  if session_number == 0 then return "HOST READY - PRESS START" end
+  return "GAME ENDED - PRESS START"
+end
 
-  badge.sys.log(plate_frame(text))
-  plate_count = increment_counter(plate_count)
-  last_event_text = "Plate " .. text .. " delivered"
-  last_event_source = "NFC -> master Pi"
-  last_plate_ms = now
+local function current_timer()
+  if game_active then return format_clock(remaining_seconds) end
+  return "--:--"
 end
 
 local function update_display(force)
-  local health = "Radio: " .. (radio_enabled and "ONLINE" or "OFFLINE") ..
-    "  NFC: PLAYER STATIONS"
-  if force or shown_health ~= health then
-    radio_label:set_text(health)
-    shown_health = health
-  end
-  if force or shown_scan ~= scan_phase then
-    scan_label:set_text(scan_phase)
-    shown_scan = scan_phase
+  local status = current_status()
+  if force or shown_status ~= status then
+    status_label:set_text(status)
+    shown_status = status
   end
 
-  local drops = total_drop_count()
-  if force or shown_forwarded ~= forwarded_count or shown_drops ~= drops then
-    counter_label:set_text("RX: " .. tostring(forwarded_count) ..
-      "   Drops: " .. tostring(drops))
-    shown_forwarded = forwarded_count
-    shown_drops = drops
+  local timer = current_timer()
+  if force or shown_timer ~= timer then
+    timer_label:set_text(timer)
+    shown_timer = timer
   end
-  if force or shown_plates ~= plate_count then
-    plate_label:set_text("Submissions: forwarded by radio")
-    shown_plates = plate_count
+
+  local radio = "RADIO " .. (radio_enabled and "ONLINE" or "UNAVAILABLE") ..
+    "  /  USB SERIAL OUT"
+  if force or shown_radio ~= radio then
+    radio_label:set_text(radio)
+    shown_radio = radio
   end
-  if force or shown_invalid ~= invalid_count or
-      shown_queue_drops ~= queue_drop_count or
-      shown_radio_drops ~= radio_drop_count or
-      shown_nfc_bad ~= nfc_bad_count then
-    detail_label:set_text("BadRX " .. tostring(invalid_count) ..
-      "  Queue " .. tostring(queue_drop_count) ..
-      "  Ring " .. tostring(radio_drop_count))
-    shown_invalid = invalid_count
-    shown_queue_drops = queue_drop_count
-    shown_radio_drops = radio_drop_count
-    shown_nfc_bad = nfc_bad_count
+
+  local counters = "Session RX " .. tostring(session_forwarded) ..
+    "  Total " .. tostring(forwarded_count) ..
+    "  Drop " .. tostring(queue_drop_count + radio_drop_count)
+  if force or shown_counters ~= counters then
+    counters_label:set_text(counters)
+    shown_counters = counters
   end
-  if force or shown_last_text ~= last_event_text or
-      shown_last_source ~= last_event_source then
-    last_label:set_text(last_event_text and ("Last: " .. last_event_text) or
-      "Last: none")
-    source_label:set_text(last_event_source or "Waiting for badges or plate")
-    shown_last_text = last_event_text
-    shown_last_source = last_event_source
+
+  local event = "Last: none"
+  if last_payload then
+    event = "Last " .. last_sender .. " " .. tostring(last_rssi) .. " dBm\n" .. last_payload
+  elseif not game_active and session_number > 0 then
+    event = "Round reset - player state cleared"
+  end
+  if force or shown_event ~= event then
+    event_label:set_text(event)
+    shown_event = event
   end
 end
 
@@ -277,14 +317,13 @@ local function render_leds(now)
   badge.led.clear()
   if not radio_enabled then
     if math.floor(now / 350) % 2 == 0 then badge.led.set_all(180, 0, 0) end
-  elseif now - last_plate_ms < PLATE_PULSE_MS then
-    badge.led.set_all(0, 190, 45)
-  elseif now - last_receive_ms < RECEIVE_PULSE_MS then
-    badge.led.set_all(0, 45, 190)
-  elseif now < scan_flash_until then
-    badge.led.set_all(190, 90, 0)
-  elseif total_drop_count() > 0 then
-    badge.led.set_all(180, 55, 0)
+  elseif game_active then
+    local seconds = remaining_seconds
+    local lit = math.max(1, math.min(6, math.ceil(seconds / 20)))
+    for index = 1, lit do badge.led.set(index, 0, 130, 35) end
+    if last_event_ms > 0 and now - last_event_ms < 300 then
+      badge.led.set_all(0, 70, 220)
+    end
   else
     local phase = (now % 2000) / 1000
     local wave = phase <= 1 and phase or (2 - phase)
@@ -293,118 +332,157 @@ local function render_leds(now)
   badge.led.show()
 end
 
-local function request_room_scan(now)
-  if now < next_scan_allowed then
-    scan_phase = "SCAN RATE LIMITED"
-    scan_flash_until = now + 250
+local function emit_lifecycle(kind)
+  -- The serial record is the Pi-facing contract. The radio broadcast is only
+  -- a best-effort badge-to-badge lifecycle hint; there is no Pi-to-badge API
+  -- or acknowledgement path in this app.
+  local serial_frame
+  if kind == "START_GAME" then
+    serial_frame = serial_start_frame()
+  else
+    serial_frame = serial_end_frame()
+  end
+  badge.sys.log(serial_frame)
+  local broadcast_queued = false
+  if radio_enabled then
+    local payload = lifecycle_radio_frame(kind)
+    broadcast_queued = badge.radio.send(payload) == true
+    if broadcast_queued then
+      badge.sys.log("HTN26|HOST|CONTROL|" .. payload)
+    end
+  end
+  return broadcast_queued
+end
+
+local function start_game(now)
+  if game_active then return false end
+  reset_session()
+  session_number = increment_counter(session_number)
+  game_active = true
+  game_ends_at = now + GAME_DURATION_MS
+  remaining_seconds = 120
+  emit_lifecycle("START_GAME")
+  return true
+end
+
+local function end_game()
+  if not game_active then return false end
+  -- Drop queued player events and clear all three player slots before the end
+  -- record, so no event from the old round can leak into the next one.
+  game_active = false
+  game_ends_at = 0
+  remaining_seconds = 0
+  reset_session()
+  emit_lifecycle("GAME_END")
+  return true
+end
+
+local function update_timer(now)
+  if not game_active then return end
+  local remaining_ms = game_ends_at - now
+  if remaining_ms <= 0 then
+    end_game()
     return
   end
-  next_scan_allowed = now + SCAN_COOLDOWN_MS
-  scan_phase = "SCAN REQUESTED - floor plan pending"
-  scan_flash_until = now + 700
-  -- The Pi sees this over serial and owns phone-photo upload, local inference,
-  -- floor-plan approval, and tag-placement instructions.
-  badge.sys.log(host_scan_frame())
+  remaining_seconds = math.ceil(remaining_ms / 1000)
 end
 
 function on_enter(root)
-  local title = badge.ui.label(root, "HTN26 HOST / BURGER")
-  title:style({ text_font = 20 })
+  local title = badge.ui.label(root, "HTN26 HOST / SINGLE PI")
+  title:style({text_font = 20})
   title:align("top_mid", 0, 8)
 
-  radio_label = badge.ui.label(root, "Radio: STARTING")
-  radio_label:style({ text_font = 14, text_align = "center" })
-  radio_label:align("top_mid", 0, 36)
+  status_label = badge.ui.label(root, "HOST READY - PRESS START")
+  status_label:style({text_font = 18, text_align = "center"})
+  status_label:align("top_mid", 0, 38)
 
-  scan_label = badge.ui.label(root, scan_phase)
-  scan_label:style({ text_font = 14, text_align = "center" })
-  scan_label:align("top_mid", 0, 59)
+  timer_label = badge.ui.label(root, "--:--")
+  timer_label:style({text_font = 24, text_align = "center"})
+  timer_label:align("top_mid", 0, 68)
 
-  counter_label = badge.ui.label(root, "RX: 0   Drops: 0")
-  counter_label:align("top_mid", 0, 86)
-  plate_label = badge.ui.label(root, "Submissions: forwarded by radio")
-  plate_label:align("top_mid", 0, 108)
+  radio_label = badge.ui.label(root, "RADIO STARTING")
+  radio_label:style({text_font = 14, text_align = "center"})
+  radio_label:align("top_mid", 0, 104)
 
-  detail_label = badge.ui.label(root, "BadRX 0  Queue 0  Ring 0")
-  detail_label:style({ text_font = 14, text_align = "center" })
-  detail_label:align("top_mid", 0, 132)
+  counters_label = badge.ui.label(root, "Session RX 0  Total 0  Drop 0")
+  counters_label:style({text_font = 14, text_align = "center"})
+  counters_label:align("top_mid", 0, 126)
 
-  last_label = badge.ui.label(root, "Last: none")
-  last_label:style({ text_font = 14, text_align = "center" })
-  last_label:align("center", 0, -8)
-  source_label = badge.ui.label(root, "Waiting for player badges")
-  source_label:style({ text_font = 14, text_align = "center" })
-  source_label:align("center", 0, 14)
+  event_label = badge.ui.label(root, "Last: none")
+  event_label:style({text_font = 14, text_align = "center"})
+  event_label:align("center", 0, 18)
 
-  local footer = badge.ui.label(root, "START scan room   HOME exits")
-  footer:style({ text_font = 14, text_align = "center" })
-  footer:align("bottom_mid", 0, -10)
+  local hint_label = badge.ui.label(root, "START new round   HOME exits")
+  hint_label:style({text_font = 14, text_align = "center"})
+  hint_label:align("bottom_mid", 0, -12)
 
-  radio_enabled = transport.enable() == true
-  if radio_enabled then transport.on_recv(receive_packet) end
-  nfc_enabled = false
+  reset_session()
+  radio_enabled = badge.radio.enable() == true
+  if radio_enabled then
+    badge.radio.on_recv(receive_packet)
+  end
 
-  local now = badge.sys.ms()
-  next_status_ms = now + STATUS_INTERVAL_MS
+  next_display_ms = 0
+  next_led_ms = 0
   update_display(true)
-  render_leds(now)
+  render_leds(badge.sys.ms())
   badge.sys.log("HTN26|GW|" .. (radio_enabled and "UP" or "DOWN") .. "|0|0")
 end
 
 function on_tick()
   local now = badge.sys.ms()
   if radio_enabled then update_radio_drops() end
-  flush_packets(now)
-  update_display(false)
+  if game_active then update_timer(now) end
+  if game_active then flush_packets(now) end
+  if now >= next_display_ms then
+    next_display_ms = now + DISPLAY_INTERVAL_MS
+    update_display(false)
+  end
   render_leds(now)
-  if now >= next_status_ms then
-    next_status_ms = now + STATUS_INTERVAL_MS
+  if now - last_status_log_ms >= STATUS_INTERVAL_MS then
+    last_status_log_ms = now
     badge.sys.log("HTN26|GW|" .. (radio_enabled and "UP" or "DOWN") ..
-      "|" .. tostring(forwarded_count) .. "|" .. tostring(total_drop_count()))
+      "|" .. tostring(forwarded_count) .. "|" ..
+      tostring(queue_drop_count + radio_drop_count))
   end
 end
 
 function on_button(button, kind)
   if kind ~= badge.input.KIND.PRESSED then return end
   if button == badge.input.BUTTON.START then
-    request_room_scan(badge.sys.ms())
+    if start_game(badge.sys.ms()) then
+      update_display(true)
+    end
   end
 end
 
 function on_exit()
   if radio_enabled then
-    transport.on_recv(nil)
-    transport.disable()
+    badge.radio.on_recv(nil)
+    badge.radio.disable()
     radio_enabled = false
   end
   badge.led.clear()
   badge.led.show()
 end
 
--- Host-only exports let the repository's tests execute these pure helpers in
--- a normal Lua interpreter. The badge sandbox never enters this branch.
+-- Pure helpers are exported only for host-side protocol tests. The badge
+-- sandbox always has a badge table, so this branch is never used on-device.
 if badge == nil then
   gateway_test = {
+    valid_mac = valid_mac,
+    valid_rssi = valid_rssi,
     valid_player_packet = valid_player_packet,
-    valid_plate_tag = valid_plate_tag,
-    serial_frame = serial_frame,
-    plate_frame = plate_frame,
-    host_scan_frame = host_scan_frame,
-    increment_counter = increment_counter,
-    reset_queue = function()
-      for index = 1, QUEUE_CAPACITY do
-        queue_mac[index] = nil
-        queue_rssi[index] = nil
-        queue_payload[index] = nil
-      end
-      queue_head = 1
-      queue_tail = 1
-      queue_count = 0
-      queue_drop_count = 0
-    end,
+    serial_rx_frame = serial_rx_frame,
+    serial_start_frame = serial_start_frame,
+    serial_end_frame = serial_end_frame,
+    lifecycle_radio_frame = lifecycle_radio_frame,
+    reset_queue = reset_queue,
     enqueue_packet = enqueue_packet,
     dequeue_packet = dequeue_packet,
     queue_size = function() return queue_count end,
     queue_drops = function() return queue_drop_count end,
+    reset_session = reset_session,
+    player_count = function() return #players end,
   }
 end

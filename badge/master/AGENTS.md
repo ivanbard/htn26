@@ -1,20 +1,29 @@
 # Gateway badge guidance
 
-The gateway implementation contract is [`README.md`](README.md).
+The host implementation contract is [`README.md`](README.md).
 
-The badge API boundary is [`../badge-app-guide.md`](../badge-app-guide.md), and the current product lifecycle is [`../../README.md`](../../README.md) with accepted clarifications in [`../../updates/UPDATE_v1.1.md`](../../updates/UPDATE_v1.1.md).
+The badge API boundary is [`../badge-app-guide.md`](../badge-app-guide.md), and
+product decisions are in [`../../README.md`](../../README.md) and
+[`../../updates/UPDATE_v1.1.md`](../../updates/UPDATE_v1.1.md).
 
-Keep this subtree responsible for host or gateway controls, radio and NFC capture, bounded forwarding, and local health feedback.
+Keep this subtree responsible for the stationary host's 120-second lifecycle,
+three-player session reset, restricted-radio receive gateway, bounded queue,
+serial framing, and local status UI. The Pi remains authoritative for player
+intent, inventory, orders, scoring, and resulting game state.
 
-Do not move authoritative game rules, timers, scoring, or UI state ownership into the gateway badge.
+Use only APIs documented by the badge guide. Do not add serial input, network,
+camera, arbitrary BLE/GATT, Pi-to-badge, multi-Pi, or live-camera behavior.
+Keep the host app self-contained; do not reintroduce transport modules as an
+installation dependency.
 
-Keep packet validation, queue limits, and serial framing in this README and the implementation rather than redefining them in root documentation.
+Run the focused host checks from the repository root:
 
-Run `python -m unittest discover -s badge/master/tests -p 'test_*.py'` from the repository root for gateway protocol tests.
+```sh
+python -m unittest discover -s badge/master/tests -p 'test_*.py' -v
+```
 
-Run `python badge/run_local.py` for the local forwarding smoke path.
-
-Physical radio, NFC, and USB serial checks require badge hardware.
+These are host-side checks only. Physical radio, USB serial, timer, and QNX
+validation require the connected hardware workflow in `README.md`.
 
 ## Maintaining this file
 

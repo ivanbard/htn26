@@ -9,7 +9,8 @@ The current v1 Pi layer owns:
 * embedded AI inference
 * phone-camera setup processing
 * authoritative game-state execution
-* host-badge and UI transport
+* host-badge and UI transport, with the local web/serial boundary documented in
+  [`server/README.md`](server/README.md)
 
 The current v1 deployment uses one Raspberry Pi and an Apple phone camera.
 The worker and multi-camera responsibilities below remain implementation seams
@@ -32,10 +33,21 @@ Owns:
 * phone-camera setup inference
 * station-zone evaluation
 * orders
-* timers
+* cooking and order timers (the host badge owns the two-minute round lifecycle)
 * scoring
 * health monitoring
 * UI API
+
+### Pi server slice
+
+`pi/server/`
+
+The server slice is the locally runnable HTTP/SSE and USB-serial boundary for
+the QNX deployment. It owns protocol adaptation, browser projections, photo
+upload/review plumbing, and deterministic workstation fixtures; it does not
+replace the master engine as the authoritative game-state owner. Its routes,
+serial setup, provider boundary, and QNX validation limits are documented in
+[`server/README.md`](server/README.md).
 
 ### Worker Pi
 
@@ -454,7 +466,9 @@ Do not bury game rules inside camera code.
 
 ## Timers
 
-Cooking and order timers belong on the master Pi.
+Cooking and order timers belong on the master Pi. The stationary host badge
+owns only the two-minute host round countdown and its START_GAME/GAME_END
+lifecycle records; the Pi must not invent a Pi-to-badge control path.
 
 Use a monotonic clock.
 

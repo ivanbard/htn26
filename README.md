@@ -61,7 +61,7 @@ The UI keeps player icons at the bottom of the screen and reports each player's 
 phone camera
      |
      v
-Raspberry Pi - setup inference, authoritative game state, timers, and UI transport
+Raspberry Pi - setup inference, authoritative game state, cooking/order timers, and UI transport
      |
      v
 host or gateway badge - radio and host controls
@@ -73,7 +73,9 @@ player badge 1      player badge 2      player badge 3
 
 The host badge is the gateway between the player badges and the Pi.
 
-The Pi owns authoritative game state, timers, orders, score, and submission results.
+The host badge owns the two-minute round lifecycle, START_GAME/GAME_END records,
+and reset of the three fixed-player session. The Pi owns authoritative game
+state, cooking and order timers, orders, score, and submission results.
 
 Player badges read NFC and motion input, provide local feedback, and report player intent.
 
@@ -191,7 +193,7 @@ The badges broadcast the submission result and drop any remaining held items as 
 
 The UI displays orders, player icons, held items, chopping state, cooking progress, and the submission result.
 
-The UI may apply the configured penalty, tip, or bonus-gold result for the submitted order, but it does not independently validate the plate.
+The authoritative Pi projection applies the configured penalty, tip, or bonus-gold result for the submitted order; the UI displays that result and does not independently validate or score the plate.
 
 ## v1 radio assumption
 

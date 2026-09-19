@@ -1,0 +1,3 @@
+# htn26 intentionally has no external CI checks.
+# Validation relies on no-mistakes review, tests, documentation, and lint validation.
+no_ci: true

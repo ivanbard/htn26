@@ -53,10 +53,10 @@ A burger uses buns, meat, cheese, and lettuce. The four supported recipes are pl
 }
 ```
 
-- `src/mock-transport.js` is the typed-JSDoc offline development adapter. It owns only fixture transitions and matches the request/response shape; it is not a second Pi server.
-- `src/transport.js` includes the local HTTP/SSE adapter. It sends command JSON to `POST /api/command`, reads the initial authoritative snapshot from `GET /api/state`, and consumes snapshot events from `GET /api/events`.
-- Use `http://127.0.0.1:4173/?transport=http` locally to select the HTTP seam. A supplied `window.__HTN26_TRANSPORT__` takes precedence for integration tests.
-- `src/render.js` is a pure renderer. It does not create timers, move players, score submissions, or infer station/order state.
+- `src/mock-transport.js` is the required offline development transport. It owns a fixture state and applies host commands as a stand-in for the master Pi.
+- `src/transport.js` includes a local HTTP/SSE transport for integration with the Pi server slice. It expects `GET /api/state`, `POST /api/command`, and `GET /api/events`; the endpoint owner and local server setup are [`pi/server/README.md`](../pi/server/README.md).
+- Use `http://127.0.0.1:4173/?transport=http` to select the HTTP seam. A supplied `window.__HTN26_TRANSPORT__` takes precedence for integration tests.
+- `src/render.js` is a pure renderer. It does not create timers, move players, score deliveries, or infer station/order state.
 
 Authoritative values stay explicit:
 

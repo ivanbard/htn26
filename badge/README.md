@@ -24,7 +24,8 @@ There are two types of badges.
 
 Each player wears a badge.
 
-Player badges are responsible for:
+The current player app is the fixed three-player app documented in
+[`slave/README.md`](slave/README.md). It is responsible for:
 
 * reading NFC interactions
 * identifying ingredient/station interactions
@@ -34,9 +35,8 @@ Player badges are responsible for:
 
 Player badges are **not authoritative**.
 
-They report what the player attempted to do.
-
-The QNX game server decides whether the action is valid.
+They keep local interaction state for immediate feedback and report the
+resulting intent; the Pi remains authoritative for orders and scoring.
 
 ---
 
@@ -67,9 +67,11 @@ USB serial
 main QNX Raspberry Pi
 ```
 
-The gateway badge should not run authoritative game logic.
-
-It forwards player events to the Pi.
+The host badge owns only the host lifecycle: its START action resets the three
+fixed-player session, starts the two-minute countdown, and emits START_GAME;
+timeout emits GAME_END and resets the session. It does not own player intent,
+inventory, orders, scoring, or resulting game state. Player events are still
+forwarded to the Pi.
 
 ---
 
@@ -77,7 +79,10 @@ It forwards player events to the Pi.
 
 The stationary gateway badge is plugged into the main Raspberry Pi before hosting begins.
 
-Player badges launch the game application and join the game through the badge radio network.
+Each player badge is provisioned as player 1, 2, or 3 before the round. The
+host starts the fixed session over radio; there is no radio enrollment or late
+join path. The player app's exact install files and controls are owned by
+[`slave/README.md`](slave/README.md).
 
 The game should not depend on arbitrary direct Raspberry Pi ↔ player badge Bluetooth communication.
 
@@ -103,32 +108,9 @@ Physical game objects contain NFC tags.
 
 The v1 zones are pantry, fridge, cutting board, and stove.
 
-Implementation-specific tag values remain owned by the player and gateway app READMEs.
-
-Examples from older app fixtures include:
-
-```text
-ING:TOMATO
-ING:ONION
-
-STATION:CHOP1
-STATION:CHOP2
-
-STATION:POT1
-STATION:POT2
-```
-
-A player interacts with the game by touching their badge against the relevant NFC tag.
-
-The badge sends that interaction to the server.
-
-Example:
-
-```text
-OC1|42|N|ING:TOMATO
-```
-
-The server combines the reported intent with the authoritative game state before applying it.
+The current player tag values and button combinations are owned by
+[`slave/README.md`](slave/README.md); older fixture tag names are not part of
+the current player app contract.
 
 ---
 
@@ -136,7 +118,7 @@ The server combines the reported intent with the authoritative game state before
 
 Player badge events use a compact protocol.
 
-Suggested initial format:
+The current player format is:
 
 ```text
 OC1|<sequence>|<type>|<value>
@@ -145,18 +127,21 @@ OC1|<sequence>|<type>|<value>
 For example:
 
 ```text
-OC1|42|N|ING:TOM
-OC1|43|N|STN:CHOP1
-OC1|44|M|CHOP
+OC1|000042|E|P2:PU:B
+OC1|000043|E|P2:CH:D:M
+OC1|000044|E|P2:SUB:BMLC
 ```
 
 `OC1` is the protocol version.
 
-The sequence number is monotonically increasing per player badge.
+The sequence number is monotonically increasing per player badge and the
+player action is sequence-tagged in the value. The complete current event and
+control contract is owned by [`master/README.md`](master/README.md) and
+[`slave/README.md`](slave/README.md).
 
 Important actions may be retransmitted, but retransmissions must reuse the same sequence number.
 
-The main Pi deduplicates using:
+The gateway and Pi may deduplicate using:
 
 ```text
 sender MAC + sequence number
