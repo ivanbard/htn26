@@ -9,11 +9,22 @@ import time
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / ".tools/ble"))
 COMPANY = 0xFFFF  # Existing badge HAL's manufacturer ID; OC1 separates our packets.
 ACTIONS = {b"PICK:MEAT", b"PICK:BREAD", b"PICK:LETTUCE", b"PICK:CHEESE",
-           b"CUT", b"STOVE", b"PLATE", b"SERVE", b"DISCARD"}
+           b"CUT:START", b"CUT:DONE", b"CUT:FAIL", b"PLATE", b"DISCARD", b"READY",
+           b"GAME:START", b"GAME:END",
+           b"STOVE1:PUT", b"STOVE1:TAKE", b"STOVE1:CHECK",
+           b"STOVE2:PUT", b"STOVE2:TAKE", b"STOVE2:CHECK"}
+
+
+def valid_action(action):
+    plate = len(action) == 11 and action[:7] in (b"SUBMIT:", b"BUMP:P:") and \
+        all(value in (45, b"BMLC"[index]) for index, value in enumerate(action[7:]))
+    hand = len(action) == 11 and action[:7] == b"BUMP:H:" and action[7:9] in \
+        (b"--", b"RM", b"CM", b"BM", b"BR", b"LT", b"SL", b"CH") and action[9:] == b"--"
+    return action in ACTIONS or plate or hand
 
 
 def decode(data):
-    if 18 <= len(data) < 45 and data[:4] == b"OC1|" and data[12:15] == b"|N|" and data[15:] in ACTIONS:
+    if 18 <= len(data) < 45 and data[:4] == b"OC1|" and data[12:15] == b"|N|" and valid_action(data[15:]):
         kind = "EVENT"
     elif len(data) == 17 and data[:4] == b"OC1|" and data[12:] == b"|A|OK":
         kind = "ACK"
@@ -180,6 +191,9 @@ if __name__ == "__main__":
         assert decode(packet("ACK", "87654321")) == ("ACK", "87654321")
         for action in ACTIONS:
             assert decode(b"OC1|01234567|N|" + action) == ("EVENT", "01234567")
+        assert decode(b"OC1|01234567|N|SUBMIT:BMLC") == ("EVENT", "01234567")
+        assert decode(b"OC1|01234567|N|BUMP:P:B-L-") == ("EVENT", "01234567")
+        assert decode(b"OC1|01234567|N|BUMP:H:RM--") == ("EVENT", "01234567")
         for bad in (b"MEAT", b"OC1|01234567|N|PICK:BEEF", b"OC1|0123456x|A|OK",
                     b"OC2|01234567|A|OK", bytes(225)):
             assert decode(bad) is None

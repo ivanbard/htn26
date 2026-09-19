@@ -52,8 +52,11 @@ The eight decimal digits are a per-boot randomized, monotonically increasing
 sequence. The acknowledgement echoes it. The `OC1` prefix isolates game traffic
 from Share and other stock advertisements.
 
-A sends the next valid action. Accepted values are `PICK:MEAT`, `PICK:BREAD`,
-`PICK:LETTUCE`, `PICK:CHEESE`, `CUT`, `STOVE`, `PLATE`, `SERVE`, and `DISCARD`.
+A station scan or gesture sends an action. Accepted values are `PICK:MEAT`,
+`PICK:BREAD`, `PICK:LETTUCE`, `PICK:CHEESE`, `CUT:START|DONE|FAIL`, `PLATE`,
+`DISCARD`, `READY`, `GAME:START|END`, `STOVE1:PUT|TAKE|CHECK`,
+`STOVE2:PUT|TAKE|CHECK`, the fixed-width plate summary `SUBMIT:BMLC`, and
+fixed-width bump state `BUMP:P:BMLC` or `BUMP:H:RM--` (`-` means absent).
 The badge waits 150 ticks (nominally three seconds) and makes
 at most three attempts using the exact same sequence and packet. Only a matching
 ACK completes the request. An idle peer advertises the ACK for 100 ticks
@@ -64,9 +67,10 @@ window but produce only one gateway serial frame:
 HTN26|RX|<sender_mac>|<rssi>|OC1|01234567|N|PICK:MEAT
 ```
 
-For this play-test build, an ACK commits the sender's local state. The peer only
-acknowledges and logs the action; it does not mirror that state. The future Pi
-will consume the same serial frames and become authoritative. NFC is not added yet.
+An ACK commits the sender's immediate local state. Peers also mirror stove
+put/take events so both stove displays advance, while the host badge logs every
+unique action for the single Pi. The Pi is authoritative for player inventory,
+orders, score, and whether `READY` events overlap a `SUBMIT` event.
 Overcooked uses 30 ms minimum/maximum advertising intervals, matching Share's
 existing send setup. Scanning timing stays at the stock HAL default. Faster
 advertising costs radio airtime while sending; advertisements stop on timeout,
@@ -76,10 +80,11 @@ The receive callback validates and copies into one fixed slot. It never calls
 LVGL or transmits. The app tick consumes the slot and handles display/transmit.
 Aligned 32-bit loads/stores plus RISC-V acquire/release fences publish the slot;
 no unsupported RV32 atomic extension or libatomic is needed. A full slot drops
-new reports and increments a diagnostic counter. The app object is 244 bytes.
+new reports and increments a diagnostic counter. The app object is 300 bytes.
 
 LED 0: green ready. LED 1: blue send. LED 2: yellow receive. LED 5: red error.
-Pulses last 25 ticks. Inputs account for the stock HAL's brightness curve.
+Normal pulses last 25 ticks; invalid-combination red lasts 50 ticks. Inputs
+account for the stock HAL's brightness curve.
 Exit disables receive acceptance, invokes stock radio
 stop, clears LEDs, and follows the existing focused-launcher reboot lifecycle.
 

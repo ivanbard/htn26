@@ -43,26 +43,43 @@ Boot logs `OC_NATIVE|registered`. Overcooked appears as a native launcher app,
 using the existing Share icon for this first shell. Selecting it uses the
 stock clean-reboot policy and the target ID `overcooked`.
 
-The app draws the burger order, held item, plate contents, score, next action,
-radio status, and button instructions. Its first tick
-checks NVS without erasing it, then starts the existing native radio HAL.
-NVS failure prevents radio initialization. Radio failure remains on screen
-with serial diagnostics. A performs the displayed next action: collect meat,
-cut and cook it, then collect bread, lettuce, and cheese, plate everything,
-and serve for 100 points. Cutting and cooking each take three seconds. B
-discards the held item. Every action is acknowledged by the peer and logged as
-one `HTN26|RX|...` frame; a sender makes at most three attempts.
+On launch, press A for a player badge or START for the host badge. Player
+numbers come from each badge's advertising address. The host starts the
+two-minute round with START, broadcasts `GAME:START`, shows the countdown,
+then broadcasts `GAME:END`; both messages wipe round state. Gameplay input is
+ignored outside an active round.
 
-This is intentionally a badge-only play-test loop. NFC station scans,
-hold-and-shake discard, simultaneous shared state, order timers/burning, and
-Pi-authoritative validation remain outside this slice. Text items are the v0.1 UI.
+The app draws the held item, plate ownership/contents, selected direction,
+both stoves, radio status, and controls. Its first tick checks NVS without erasing
+it, then starts the existing native radio and NFC HALs.
+NVS failure prevents radio initialization. Radio failure remains on screen
+with serial diagnostics. Program the four NDEF Text tags as `pantry`, `fridge`,
+`cutting board`, and `stove`.
+
+- LEFT/RIGHT + pantry: lettuce/bread; LEFT/RIGHT + fridge: meat/cheese.
+- DOWN + pantry takes a plate with an empty hand or a prepared held item.
+- Prepared pickups go directly onto a held plate; duplicates and raw items are rejected.
+- Hold A + cutting board chops meat or lettuce; releasing A resets progress.
+- LEFT/RIGHT + stove selects stove 1/2, then puts, checks, or takes meat.
+- Hold B + shake discards; hold A + shake submits the plate. A shake without
+  either button broadcasts `READY` for Pi-side team submission consensus.
+- Bump two badges to merge a platable hand item onto the other plate, or swap
+  inventories when that merge is invalid or both badges have the same plate state.
+
+Invalid station/button combinations show `UNKNOWN BUTTON COMBO` and red LEDs
+for one second. Meat cooks for 15 seconds, is done for two, flashes a three-second
+warning, then burns. The six LEDs also show cutting and stove progress. Every
+action is acknowledged by a peer and logged as one
+`HTN26|RX|...` frame; a sender makes at most three attempts. The badge tracks
+immediate controller feedback, while the Pi/web app remains authoritative for
+players, orders, scoring, penalties, and the simultaneous-submit window.
 See `RADIO_PROTOCOL.md` for packet format, recovered HAL calls, LED meanings,
 and the Windows test peer.
 
 Serial heap measurements include internal 8-bit memory (mask 0x804) and
 default memory (mask 0x1000), at entry, before radio, after radio, exit, and
 every 250 ticks while idle. The nominal tick interval is 20 ms. The permanent
-app object is 244 bytes, excluding allocator, registry, and launcher overhead.
+app object is 300 bytes, excluding allocator, registry, and launcher overhead.
 LVGL allocations belong to the app screen and are reclaimed by stock code.
 
 Home uses stock registry exit handling. The app stops the radio; the registry
@@ -95,7 +112,8 @@ minutes of stable heap logs, repeated exit/reentry with focus restoration,
 then My Badge/identity, Share transfer, Sync, and installed Lua app regression
 checks. Actual Share/Sync transfer checks require a peer/station. Two-way
 PING/PONG and the first event/ACK controller slice were proven on two badges.
-The gameplay build still requires physical acceptance before adding NFC.
+The Update 1.1 NFC/accelerometer build requires physical acceptance. In
+particular, calibrate the shake/tap thresholds and stove timing constants on-device.
 
 See `../NATIVE_INVESTIGATION.md` for recovered interfaces and NVS recovery
 behavior. The addresses are private ABI details, not a stable SDK.

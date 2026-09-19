@@ -95,7 +95,7 @@ class GatewayProtocolTests(unittest.TestCase):
             'assert(not gateway_test.valid_plate_tag("P:04"))\n'
             'assert(not gateway_test.valid_plate_tag("I:MEAT"))\n'
             'assert(gateway_test.plate_frame("P:02") == "HTN26|PLATE|P:02")\n'
-            'assert(gateway_test.host_scan_frame() == "HTN26|HOST|SCAN|3PI|BURGER")'
+            'assert(gateway_test.host_scan_frame() == "HTN26|HOST|SCAN|1PI|PHONE|BURGER")'
         )
 
     def test_queue_is_bounded_and_preserves_order(self):

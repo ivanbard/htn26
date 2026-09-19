@@ -1,9 +1,9 @@
 local transport = badge and require("transport")
 
 -- HTN26 Overcooked IRL serving-area master badge.
--- START requests the three-Pi burger room scan. The badge has serial output
+-- START requests the one-Pi/phone-photo burger room scan. The badge has serial output
 -- only, so the Pi owns floor-plan capture and approval after that log line.
--- A serving-area NFC plate tap is forwarded through badge.sys.log().
+-- Update 1 uses all four NFC tags as player stations; the host is radio/serial only.
 
 local MAX_RADIO_PAYLOAD = 44
 local MIN_PACKET_LENGTH = 9 -- OC1|1|N|X
@@ -136,7 +136,7 @@ local function plate_frame(tag)
 end
 
 local function host_scan_frame()
-  return "HTN26|HOST|SCAN|3PI|BURGER"
+  return "HTN26|HOST|SCAN|1PI|PHONE|BURGER"
 end
 
 local function enqueue_packet(mac, rssi, payload)
@@ -228,7 +228,7 @@ end
 
 local function update_display(force)
   local health = "Radio: " .. (radio_enabled and "ONLINE" or "OFFLINE") ..
-    "  NFC: " .. (nfc_enabled and "ONLINE" or "OFFLINE")
+    "  NFC: PLAYER STATIONS"
   if force or shown_health ~= health then
     radio_label:set_text(health)
     shown_health = health
@@ -246,7 +246,7 @@ local function update_display(force)
     shown_drops = drops
   end
   if force or shown_plates ~= plate_count then
-    plate_label:set_text("Plates delivered: " .. tostring(plate_count))
+    plate_label:set_text("Submissions: forwarded by radio")
     shown_plates = plate_count
   end
   if force or shown_invalid ~= invalid_count or
@@ -255,8 +255,7 @@ local function update_display(force)
       shown_nfc_bad ~= nfc_bad_count then
     detail_label:set_text("BadRX " .. tostring(invalid_count) ..
       "  Queue " .. tostring(queue_drop_count) ..
-      "  Ring " .. tostring(radio_drop_count) ..
-      "  NFC " .. tostring(nfc_bad_count))
+      "  Ring " .. tostring(radio_drop_count))
     shown_invalid = invalid_count
     shown_queue_drops = queue_drop_count
     shown_radio_drops = radio_drop_count
@@ -276,7 +275,7 @@ local function render_leds(now)
   if now < next_led_ms then return end
   next_led_ms = now + LED_INTERVAL_MS
   badge.led.clear()
-  if not radio_enabled or not nfc_enabled then
+  if not radio_enabled then
     if math.floor(now / 350) % 2 == 0 then badge.led.set_all(180, 0, 0) end
   elseif now - last_plate_ms < PLATE_PULSE_MS then
     badge.led.set_all(0, 190, 45)
@@ -303,8 +302,8 @@ local function request_room_scan(now)
   next_scan_allowed = now + SCAN_COOLDOWN_MS
   scan_phase = "SCAN REQUESTED - floor plan pending"
   scan_flash_until = now + 700
-  -- The Pi sees this over the documented serial log path and owns the camera
-  -- capture, floor-plan approval, and burger placement instructions.
+  -- The Pi sees this over serial and owns phone-photo upload, local inference,
+  -- floor-plan approval, and tag-placement instructions.
   badge.sys.log(host_scan_frame())
 end
 
@@ -313,7 +312,7 @@ function on_enter(root)
   title:style({ text_font = 20 })
   title:align("top_mid", 0, 8)
 
-  radio_label = badge.ui.label(root, "Radio: STARTING  NFC: STARTING")
+  radio_label = badge.ui.label(root, "Radio: STARTING")
   radio_label:style({ text_font = 14, text_align = "center" })
   radio_label:align("top_mid", 0, 36)
 
@@ -323,17 +322,17 @@ function on_enter(root)
 
   counter_label = badge.ui.label(root, "RX: 0   Drops: 0")
   counter_label:align("top_mid", 0, 86)
-  plate_label = badge.ui.label(root, "Plates delivered: 0")
+  plate_label = badge.ui.label(root, "Submissions: forwarded by radio")
   plate_label:align("top_mid", 0, 108)
 
-  detail_label = badge.ui.label(root, "BadRX 0  Queue 0  Ring 0  NFC 0")
+  detail_label = badge.ui.label(root, "BadRX 0  Queue 0  Ring 0")
   detail_label:style({ text_font = 14, text_align = "center" })
   detail_label:align("top_mid", 0, 132)
 
   last_label = badge.ui.label(root, "Last: none")
   last_label:style({ text_font = 14, text_align = "center" })
   last_label:align("center", 0, -8)
-  source_label = badge.ui.label(root, "Waiting for badges or plate")
+  source_label = badge.ui.label(root, "Waiting for player badges")
   source_label:style({ text_font = 14, text_align = "center" })
   source_label:align("center", 0, 14)
 
@@ -343,8 +342,7 @@ function on_enter(root)
 
   radio_enabled = transport.enable() == true
   if radio_enabled then transport.on_recv(receive_packet) end
-  nfc_enabled = badge.nfc.enable() == true
-  if nfc_enabled then badge.nfc.clear() end
+  nfc_enabled = false
 
   local now = badge.sys.ms()
   next_status_ms = now + STATUS_INTERVAL_MS
@@ -357,11 +355,6 @@ function on_tick()
   local now = badge.sys.ms()
   if radio_enabled then update_radio_drops() end
   flush_packets(now)
-  poll_nfc(now)
-  if clear_nfc_at > 0 and now >= clear_nfc_at then
-    badge.nfc.clear()
-    clear_nfc_at = 0
-  end
   update_display(false)
   render_leds(now)
   if now >= next_status_ms then
@@ -379,10 +372,6 @@ function on_button(button, kind)
 end
 
 function on_exit()
-  if nfc_enabled then
-    badge.nfc.disable()
-    nfc_enabled = false
-  end
   if radio_enabled then
     transport.on_recv(nil)
     transport.disable()

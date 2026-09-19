@@ -147,7 +147,8 @@ Reference: https://raw.githubusercontent.com/espressif/esp-idf/v5.5.3/components
 | Buttons | embedded `main/hal/hal_buttons.cpp`; boot init call to `0x4200B254` |
 | Display | embedded `main/hal/hal_display.cpp`; boot call to `0x4200E408`; LVGL9 port present |
 | LEDs | `hal_lights`, boot call to `0x4200F424`, RMT LED-strip driver strings |
-| NFC | `hal_nfc`, RC522 and `rc522_new_api` driver strings; stop `0x42010016`, active query `0x4201003E` |
+| NFC | enable `0x4200FF2E`, stop `0x42010016`, card `0x42010062`, clear `0x420100FC`, NDEF Text `0x42010138` |
+| Accelerometer | cached XYZ read `0x4200AED4`; Update 1.1 uses integer IEEE-754 shake/tap thresholds pending calibration |
 | Lua apps | boot passes `/littlefs/apps` to `0x420547FE`; native registry remains present |
 | Heap | recovered free/largest routines `0x420023A6` / `0x420024AC` |
 

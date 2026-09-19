@@ -159,7 +159,7 @@ def build(dump, zig, output):
         "stock_bytes": len(stock), "candidate_bytes": len(candidate),
         "factory_capacity": CAPACITY, "remaining_bytes": CAPACITY - len(candidate),
         "payload_code_bytes": len(text), "payload_rodata_bytes": len(rodata),
-        "drom_growth_bytes": 0x10000, "permanent_app_object_bytes": 244,
+        "drom_growth_bytes": 0x10000, "permanent_app_object_bytes": 300,
         "hook_virtual_address": hex(HOOK), "hook_old": HOOK_BYTES.hex(),
         "hook_new": hook_bytes().hex(), "stock_round_trip": "byte-identical",
         "stock_loaded_segments": "identical except eight-byte registration hook",
