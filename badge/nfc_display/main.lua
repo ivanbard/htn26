@@ -59,6 +59,15 @@ local function clean_detail(value)
   return value
 end
 
+local function is_empty_text_error(error_text)
+  if error_text == nil then return true end
+  if type(error_text) ~= "string" then return false end
+  local normalized = string.lower(error_text)
+  return normalized == "no-text" or normalized == "no text" or
+    normalized == "empty" or normalized == "empty tag" or
+    normalized == "no ndef text record"
+end
+
 local function format_record(text)
   text = string.gsub(text, string.char(13), " ")
   text = string.gsub(text, string.char(10), " ")
@@ -155,7 +164,11 @@ local function poll_nfc(now)
   clear_at = now + NFC_CLEAR_MS
   local text, error_text = badge.nfc.read_text()
   if type(text) ~= "string" then
-    show_empty(uid, error_text)
+    if is_empty_text_error(error_text) then
+      show_empty(uid, nil)
+    else
+      show_empty(uid, error_text)
+    end
   elseif #text == 0 then
     show_empty(uid, nil)
   else

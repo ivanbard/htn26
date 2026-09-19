@@ -60,9 +60,9 @@ state.now = 2200
 on_tick()
 assert(shown("NO TAG"), "removed tag returns to no-tag state")
 
-state.card = { uid = "04B2" }
-state.text = ""
-state.error_text = nil
+state.card = { uid = "04C4" }
+state.text = nil
+state.error_text = "no-text"
 state.now = 2400
 on_tick()
 assert(shown("EMPTY TAG"), "empty tag is handled")
