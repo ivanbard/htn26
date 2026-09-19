@@ -1,9 +1,27 @@
 # Camera Worker Pi
 
 This directory contains the portable worker core deployed to each non-master
-camera Pi. The same process is configured with different `node_id` and
-`camera_id` values (for example `pi2/cam2` and `pi3/cam3`). The core does not
-run game rules, ingest badge events, or own authoritative state.
+camera Pi. The physical deployment has three Raspberry Pis with cameras: the
+serving-area Pi is the master, and two field-coverage Pis run this worker with
+different `node_id` and `camera_id` values (for example `pi2/cam2` and
+`pi3/cam3`). The core does not run game rules, ingest badge events, or own
+authoritative state.
+
+## FLOW alignment: host room scan to live coordinates
+
+After the host starts a game, the master Pi owns the room-scan/floor-plan
+workflow. It captures the room, presents the floor plan for approval, and then
+provides each camera Pi with a camera-specific homography in one approved
+shared coordinate frame. The worker receives that result through
+`WorkerCore::set_calibration()` (or initial `WorkerConfig::calibration`). It
+remains `WaitingForCalibration` before approval, so it cannot publish guessed
+locations. Once configured, each worker reports live marker/person positions in
+the same world coordinates for the master/UI to display.
+
+This worker remains generic: it does not assume a recipe, ingredient, station,
+or level-specific interaction. Room scanning and floor-plan approval are
+control-plane responsibilities of the master and are intentionally represented
+here by the approved calibration input rather than by a fake camera scanner.
 
 ## Implemented MVP
 
@@ -70,6 +88,12 @@ pi/slave/build/worker_demo
 The tests cover homography projection and rejection, freshness and stale
 tracking behavior, bounded queue replacement, unknown identity handling,
 heartbeat generation without bursts, and camera/master failure recovery.
+
+`worker_demo` uses simulated inputs only: an identity homography stands in for
+an approved room-scan floor plan, marker `7` is configured as player `1`, and a
+synthetic track reports one feet point. It demonstrates the post-approval
+shared-coordinate path; it is not a room-scan implementation or QNX hardware
+validation.
 
 ## Operational behavior
 

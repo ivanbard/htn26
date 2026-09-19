@@ -7,11 +7,18 @@ using namespace htn26::slave;
 using namespace std::chrono_literals;
 
 int main() {
+  // Host Start normally produces this calibration from an approved room scan
+  // on the serving-area master. The demo substitutes a synthetic floor plan.
+  const Calibration simulated_approved_room_scan = Calibration{
+      Homography{{1.0, 0.0, 0.0,
+                  0.0, 1.0, 0.0,
+                  0.0, 0.0, 1.0}}};
+
   WorkerConfig config;
-  config.node_id = "host-demo";
-  config.camera_id = "camera-demo";
-  config.calibration =
-      Calibration{Homography{{1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0}}};
+  config.node_id = "field-worker-demo";
+  config.camera_id = "field-camera-demo";
+  config.calibration = simulated_approved_room_scan;
+  // Synthetic visible marker 7 represents player 1 for this host-only demo.
   config.marker_to_player.emplace(7, 1);
 
   WorkerCore worker(config);
@@ -22,7 +29,9 @@ int main() {
 
   if (!observation || !heartbeat)
     return 1;
-  std::cout << "node=" << heartbeat->node_id
+  std::cout << "room_scan=simulated-approved-floor-plan"
+            << " marker=simulated-7->player-1"
+            << " node=" << heartbeat->node_id
             << " sequence=" << observation->sequence
             << " players=" << observation->players.size() << " world=("
             << observation->players.front().position.x << ","
