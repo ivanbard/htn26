@@ -71,6 +71,7 @@ integration gaps, not reasons to rewrite the current game for the radio failure.
 
 Review fixes: gateway targeted-reply parsing now matches its tests; player
 delivery-tag emission was removed to preserve stationary submission ownership;
+NFC rearm no longer discards a different tag arriving at the rearm deadline;
 unconfigured workers cannot enroll themselves in the Pi engine. Gateway tests
 now run Lua instead of skipping, and player helper tests execute production Lua
 instead of a Python reimplementation.

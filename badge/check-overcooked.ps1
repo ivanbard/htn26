@@ -9,9 +9,9 @@ $sources = @{}
 foreach ($file in $files) {
   $source = Get-Content -Raw (Join-Path $PSScriptRoot $file)
   $sources[$file] = $source
-  Require ($source -match '(?m)^api=2$') "$file must use api=2"
-  Require ($source -match '(?m)^heap_kb=48$') "$file must use the 48 KiB heap"
-  Require ($source -match '(?m)^wake_lock=1$') "$file must hold the wake lock"
+  Require ($source -match '(?m)^api=2\r?$') "$file must use api=2"
+  Require ($source -match '(?m)^heap_kb=48\r?$') "$file must use the 48 KiB heap"
+  Require ($source -match '(?m)^wake_lock=1\r?$') "$file must hold the wake lock"
   Require ([Text.Encoding]::UTF8.GetByteCount($source) -le 65536) "$file exceeds the Lua upload limit"
   Require ($source -notmatch 'badge\.radio\.') "$file must use the transport adapter"
   foreach ($word in @('wifi', 'http', 'socket', 'lvgl', 'ble', 'coroutine', 'sleep')) {
