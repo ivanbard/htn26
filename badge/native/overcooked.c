@@ -25,7 +25,7 @@ typedef struct App {
     void *info;
     u32 active, inbox_full, inbox_size;
     char inbox[45];
-    u8 peer[6], padding;
+    u8 peer[6], nfc_retries;
     int rssi;
     u32 dropped, sent, received, errors, wait_ticks, advertise_ticks, pulse_ticks;
     u32 attempts, sequence, pending_size, last_size;
@@ -71,6 +71,8 @@ _Static_assert(sizeof(App) == 300, "Update heap report when app size changes");
 #define NFC_CARD FN(0x42010062, int, NfcCard *)
 #define NFC_CLEAR FN(0x420100fc, void, void)
 #define NFC_TEXT FN(0x42010138, int, char *, usize)
+#define NFC_RX_TIMEOUT 0xf527
+#define NFC_RX_TIMER_TIMEOUT 0xf528
 #define SENSOR_ACCEL FN(0x4200aed4, int, u32 *)
 #define FORMAT FN(0x4211bc16, int, char *, usize, const char *, ...)
 #define LED FN(0x4200f4ca, void, u32, u32, u32, u32)
@@ -495,39 +497,55 @@ static int same_uid(const NfcCard *card, App *self) {
 static void poll_nfc(App *self) {
     if (!self->nfc_enabled || ++self->nfc_poll_ticks < 10) return;
     self->nfc_poll_ticks = 0;
+    if (self->nfc_enabled == 2) {
+        /* A separate tick leaves the RF field off before fresh selection. */
+        self->nfc_enabled = NFC_ENABLE() == 0;
+        NFC_CLEAR();
+        if (!self->nfc_enabled && self->status) LABEL_TEXT(self->status, "NFC RESTART FAILED - REOPEN APP");
+        return;
+    }
     NfcCard card = {{0}, {0}, 0, 0, 0, 0};
     int present = NFC_CARD(&card);
     if (self->nfc_clear_ticks && --self->nfc_clear_ticks == 0 && (!present || same_uid(&card, self))) {
         NFC_CLEAR(); self->nfc_rearm = 1; return;
     }
     if (!present) {
-        if (self->nfc_rearm && ++self->nfc_rearm >= 6) {
-            self->nfc_rearm = 0; self->nfc_seen_size = 0;
-        }
+        if (self->nfc_rearm) { self->nfc_rearm = 0; self->nfc_seen_size = 0; self->nfc_retries = 0; }
         return;
     }
     if (!card.uid_size || card.uid_size > 10) return;
-    if (self->nfc_rearm && same_uid(&card, self)) {
-        self->nfc_rearm = 1;
-        if (!self->nfc_clear_ticks) self->nfc_clear_ticks = 5;
-        return;
-    }
+    if (self->nfc_rearm && same_uid(&card, self)) return;
     if (self->nfc_rearm) { self->nfc_rearm = 0; self->nfc_seen_size = 0; }
     if (same_uid(&card, self)) return;
+    /* Match nfc_display: debounce failures too and clear after ~900 ms. */
+    copy(self->nfc_seen, card.uid, card.uid_size); self->nfc_seen_size = (u8)card.uid_size;
+    self->nfc_clear_ticks = 5;
     /* Match the stock Lua read_text binding's 256-byte NDEF output buffer. */
     char text[256];
     int error = NFC_TEXT(text, sizeof(text));
     if (error) {
-        char message[40];
-        FORMAT(message, sizeof(message), "NFC TEXT ERROR %u - RETRY", (u32)error);
-        if (self->status) LABEL_TEXT(self->status, message);
         PRINT("OC_NATIVE|nfc_text_error=%u|uid_size=%u\n", (u32)error, card.uid_size);
+        if ((error == NFC_RX_TIMEOUT || error == NFC_RX_TIMER_TIMEOUT) && self->nfc_retries < 2) {
+            ++self->nfc_retries;
+            NFC_STOP(); NFC_CLEAR();
+            self->nfc_enabled = 2;
+            self->nfc_seen_size = self->nfc_rearm = self->nfc_clear_ticks = 0;
+            if (self->status) LABEL_TEXT(self->status, "NFC RESELECTING - HOLD TAG STILL");
+            return;
+        }
+        char message[40];
+        FORMAT(message, sizeof(message), "NFC READ %u - REMOVE AND RETAP", (u32)error);
+        if (self->status) LABEL_TEXT(self->status, message);
         return;
     }
-    copy(self->nfc_seen, card.uid, card.uid_size); self->nfc_seen_size = (u8)card.uid_size;
-    self->nfc_clear_ticks = 5;
+    self->nfc_retries = 0;
     text[sizeof(text) - 1] = 0;
     PRINT("OC_NATIVE|nfc=%s\n", text);
+    if (self->status) {
+        char message[64];
+        FORMAT(message, sizeof(message), "NFC: %.24s%s", text, self->game_active ? "" : " / WAIT FOR HOST");
+        LABEL_TEXT(self->status, message);
+    }
     station_scan(self, text);
 }
 
@@ -663,6 +681,7 @@ static void enter(App *self, void *screen) {
     self->held = self->plate = self->has_plate = self->selected = self->a_held = self->b_held = 0;
     self->role = self->game_active = self->player = 0;
     self->nfc_enabled = self->nfc_seen_size = self->nfc_rearm = 0;
+    self->nfc_retries = 0;
     self->nfc_poll_ticks = self->nfc_clear_ticks = self->shake_cooldown = 0;
     self->process_from = self->process_to = self->stove_view = 0;
     self->stove_state[0] = self->stove_state[1] = 0;

@@ -158,6 +158,28 @@ round.
 
 ## Physical acceptance still required
 
+### NFC timeout recovery
+
+`62760` (`0xF528`) is `RC522_ERR_RX_TIMER_TIMEOUT`, defined in the
+[reader driver's error table](https://github.com/abobija/esp-idf-rc522/blob/main/include/rc522_types.h).
+The pinned image constructs that same return at `0x420A1A5C`; it propagates
+through the first page read into `NFC_TEXT`. It is not an undefined return or
+proof of BLE interference. The Lua `read_text` wrapper at `0x4205C75C` calls
+the same native reader at `0x42010138` with a 256-byte output buffer.
+
+The controller now debounces failed reads and rearms like `nfc_display`.
+Receive timeouts additionally stop and clear NFC, leave its field off until
+the next 200 ms poll, then re-enable detection before retrying. Recovery is
+limited to two restarts; persistent failure asks for removal and another tap.
+BLE stays running. Successful text appears on screen even before game start;
+gameplay still requires a player role and an active round. Host mode has no NFC.
+
+The emulator checks recovery from injected `62760` with the same UID, no BLE
+restart, and bounded persistent failures. This verifies recovery logic, not
+the physical cause or resolution of RF timeouts. Hardware acceptance requires
+repeated scans of all four tags in Player mode with BLE active, plus removal
+and retapping of the same tag and normal gameplay event delivery.
+
 The current role-selection, Lua-compatible payload, gateway-only ACK, exact
 lifecycle records, and host-without-NFC changes have offline build/emulator
 coverage only. Physical acceptance still requires all four badges and the Pi:

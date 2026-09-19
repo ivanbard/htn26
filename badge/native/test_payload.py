@@ -11,7 +11,7 @@ from unicorn.riscv_const import UC_RISCV_REG_A0, UC_RISCV_REG_A1, UC_RISCV_REG_R
 
 
 def scenario(nvs_error=0, radio_error=0, nfc_error=0, allocation_failure=False,
-             send_error=0, role="player"):
+             send_error=0, role="player", timeout_recovery=False):
     cpu = Uc(UC_ARCH_RISCV, UC_MODE_RISCV32)
     for base, size in [(0x3C000000, 0x300000), (0x3FC80000, 0x80000),
                        (0x40380000, 0x20000), (0x42000000, 0x140000), (0x50000000, 0x1000)]:
@@ -89,6 +89,9 @@ def scenario(nvs_error=0, radio_error=0, nfc_error=0, allocation_failure=False,
             result = send_error
         elif address == 0x4200FF2E:
             result = nfc_error
+        elif address == 0x42010016:
+            if timeout_recovery is True:
+                hardware["nfc_text_error"] = 0  # A stale selection needs an RF reset, not another read.
         elif address == 0x42010062:
             if hardware["tag"] is not None:
                 card = bytearray(20)
@@ -205,6 +208,17 @@ def scenario(nvs_error=0, radio_error=0, nfc_error=0, allocation_failure=False,
             "HOST READY - PRESS START" if role == "host" else
             ("RADIO READY / NFC ERROR" if nfc_error else "PLAYER READY - WAIT FOR START"))
         assert expected in texts
+    if timeout_recovery == "persistent":
+        hardware["nfc_text_error"] = 62760
+        hardware["tag"] = 'pantry'
+        for _ in range(200): invoke(0x5c)
+        assert hardware["nfc_text_calls"] == 3, "persistent timeout must stop after two recoveries"
+        assert calls.count(0x42010016) == 2
+        assert calls.count(0x4200FF2E) == 3
+        assert calls.count(0x420109C6) == 1
+        assert not packets and 'NFC READ 62760 - REMOVE AND RETAP' in texts
+        invoke(0x58)
+        return
     if role == "host":
         assert 0x4200FF2E not in calls  # The stationary gateway does not allocate/enable NFC.
         if nvs_error or radio_error:
@@ -233,9 +247,19 @@ def scenario(nvs_error=0, radio_error=0, nfc_error=0, allocation_failure=False,
         invoke(0x60, 4)  # LEFT, packed press event; upper bits are ignored.
         if not nfc_error:
             hardware["nfc_text_error"] = 0x105; scan('pantry')
-            assert not packets and 'NFC TEXT ERROR 261 - RETRY' in texts
+            assert not packets and 'NFC READ 261 - REMOVE AND RETAP' in texts
             hardware["nfc_text_error"] = 0
+            if timeout_recovery:
+                hardware["nfc_text_error"] = 62760
             scan('pantry')
+            if timeout_recovery:
+                assert not packets
+                assert 'NFC RESELECTING - HOLD TAG STILL' in texts
+                hardware["tag"] = 'pantry'  # Same physical UID throughout recovery.
+                for _ in range(20): invoke(0x5c)
+                assert calls.count(0x42010016) == 1
+                assert calls.count(0x4200FF2E) == 2
+                assert calls.count(0x420109C6) == 1, "NFC recovery must leave BLE running"
             calls_after_scan = hardware["nfc_text_calls"]
             hardware["tag"] = 'pantry'
             for _ in range(100): invoke(0x5c)
@@ -349,6 +373,8 @@ def scenario(nvs_error=0, radio_error=0, nfc_error=0, allocation_failure=False,
 
 if __name__ == "__main__":
     scenario()
+    scenario(timeout_recovery=True)
+    scenario(timeout_recovery="persistent")
     scenario(role="host")
     scenario(nvs_error=0x110D)
     scenario(nvs_error=0x1110, role="host")
