@@ -746,7 +746,46 @@ function ResultsView({ state, now, onCommand }) {
   return h(React.Fragment, null, h("section", { className: "flex flex-col justify-between gap-4 border border-[#ffd166] bg-[#2a2415] p-5 md:flex-row md:items-center" }, h("div", null, h("p", { className: "mb-1 text-xs font-black uppercase tracking-[0.16em] text-[#ffd166]" }, "Round complete"), h("h2", { className: "text-2xl font-black text-white" }, phaseLabel(state.setup?.phase)), h("p", { className: "mt-1 text-sm text-[#a9bac9]" }, state.setup?.message)), h(ActionButton, { state, action: GAME_ACTIONS.RESET_GAME, label: "Reset game", onCommand })), h("div", { className: "mt-5 grid gap-5 xl:grid-cols-[minmax(0,1.55fr)_minmax(320px,.85fr)]" }, h("section", { className: "border border-[#2a435a] bg-[#101c29] p-5" }, h("div", { className: "mb-4 flex items-center justify-between" }, h("h2", { className: "text-xl font-black text-white" }, "Room mirror"), h(StatusBadge, { status: "healthy", label: "Final layout" })), h("div", { className: "aspect-[1672/941] overflow-hidden border border-[#45647d]" }, h(RoomSurface, { state, now }))), h(ServingPanel, { state })));
 }
 
+function PhotoUploadView({ onGenerateLayout }) {
+  const [files, setFiles] = React.useState([]);
+  const [message, setMessage] = React.useState("");
+  const [busy, setBusy] = React.useState(false);
+  const choose = (event) => {
+    const selected = Array.from(event.target.files || []).slice(0, 5);
+    setFiles(selected);
+    setMessage(selected.length ? `${selected.length} photo${selected.length === 1 ? "" : "s"} selected` : "");
+  };
+  const submit = async () => {
+    setBusy(true);
+    setMessage("Uploading photos and generating the room proposal…");
+    try {
+      await onGenerateLayout(files);
+      setMessage("Proposal ready. Open the laptop view to review and approve it.");
+    } catch {
+      setMessage("Upload failed. Check the server and try again.");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return h("main", { className: "mobile-photo-page" },
+    h("div", { className: "mobile-photo-card" },
+      h("p", { className: "mobile-photo-kicker" }, "HTN26 ROOM SETUP"),
+      h("h1", null, "Scan your classroom"),
+      h("p", { className: "mobile-photo-help" }, "Take or choose 3–5 photos of the same room. We’ll build a proposed layout for review."),
+      h("label", { className: "mobile-photo-picker" },
+        h("span", null, files.length ? "Choose different photos" : "Take or choose photos"),
+        h("input", { type: "file", accept: "image/*", capture: "environment", multiple: true, onChange: choose }),
+      ),
+      files.length > 0 && h("div", { className: "mobile-photo-list" }, files.map((file) => h("span", { key: `${file.name}-${file.size}` }, file.name))),
+      h("button", { className: "mobile-photo-submit", type: "button", disabled: files.length < 3 || files.length > 5 || busy || typeof onGenerateLayout !== "function", onClick: submit }, busy ? "Generating…" : `Generate layout${files.length ? ` (${files.length})` : ""}`),
+      message && h("p", { className: "mobile-photo-message", role: "status" }, message),
+      h("a", { className: "mobile-photo-desktop-link", href: "/" }, "Open the full laptop game view"),
+    ),
+  );
+}
+
 export function App({ state, now = Date.now(), connectionError = "", uploadStatus = "", transportKind, onCommand, onUploadPhotos, onGenerateLayout }) {
+  if (typeof window !== "undefined" && window.location.pathname === "/photos") return h(PhotoUploadView, { onGenerateLayout });
   if (!state) return h("section", { className: "mx-auto mt-24 max-w-2xl border border-[#2a435a] bg-[#101c29] p-8 text-center" }, h("p", { className: "text-xs font-black uppercase tracking-[0.16em] text-[#a9bac9]" }, "Burger level"), h("h1", { className: "mt-2 text-3xl font-black text-white" }, "Waiting for authoritative state…"), connectionError && h("div", { id: "ui-error", className: "ui-error", role: "alert" }, connectionError));
   const validation = validateFrontendSnapshot(state);
   if (!validation.valid) return h("section", { className: "mx-auto mt-24 max-w-3xl border border-[#ff6f6f] bg-[#2c1820] p-8", role: "alert" }, h("p", { className: "text-xs font-black uppercase tracking-[0.16em] text-[#ff6f6f]" }, "Burger level"), h("h1", { className: "mt-2 text-3xl font-black text-white" }, "Authoritative state unavailable"), h("p", { className: "mt-3 text-[#a9bac9]" }, "The received snapshot does not match the frontend contract. No game values were rendered."), h("p", { className: "mt-3 text-white" }, validation.errors.map((error) => error.message).join(" ")));

@@ -48,9 +48,11 @@ export function createApp({ root, transport, now = () => Date.now() }) {
       const nextState = await transport.generateLayout(files);
       if (state !== stateAtCommandStart) return;
       render(nextState);
+      return nextState;
     } catch (error) {
       connectionError = "ROOM LAYOUT UNAVAILABLE — Try again with 3-5 classroom photos.";
       render(state);
+      throw error;
     }
   };
 
