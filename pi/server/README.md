@@ -63,7 +63,7 @@ is tolerated because the parser searches for `HTN26|` in each line.
 
 ```text
 HTN26|1|HOST|START
-HTN26|1|HOST|START|120|3
+HTN26|1|HOST|START|240|3
 HTN26|1|HOST|END
 HTN26|1|HOST|RESET
 ```
@@ -120,6 +120,9 @@ Accepted item names are `BUN`, `RAW_MEAT`, `CHOPPED_MEAT`, `COOKED_MEAT`,
 `STATUS` accepts `EMPTY`, `COOKING`, `DONE`, `WARNING`, or `BURNT`, but it is a
 reported diagnostic only: it cannot overwrite the server's stove timer.
 `CHECK` likewise reads the authoritative station phase.
+`DONE` is a diagnostic completion report: it cannot finish chopping before the
+server's three-second deadline. The server timer completes the chop even if no
+`DONE` report arrives.
 
 A plate summary always has four fixed `BMLC` columns: bun, cooked meat, sliced
 lettuce, and sliced cheese. A dash means absent, so a plain burger is `BM--`
@@ -163,11 +166,18 @@ HTN26|1|SUBMIT|2|CHEESEBURGER
 ```
 
 The last field is normally the submitted `BMLC` plate summary; recipe IDs are
-also accepted for diagnostics. The server matches plate components against an
-active order and consumes the submitting player's plate on both success and
-failure. A successful early order awards recipe gold and a positive tip. A
-wrong or already expired order applies a penalty. The browser cannot provide a
-score or validation result.
+also accepted as assertions. `SUBMIT` counts as the submitting player's shake;
+the other two fixed players must each have sent `READY` within the same
+0.5-second server window. Arrival order does not matter: an early `SUBMIT` is
+held only until that window closes. The submitter must hold an authoritative server
+plate, and the submitted summary or recipe must match that plate. The server
+never constructs inventory from the submission payload. Once consensus and the
+assertion pass, the server matches its plate against active orders and clears
+all three players' held state. A successful early order awards recipe gold and
+a positive server-calculated tip. A wrong or already expired order applies a
+penalty. Missing consensus, missing inventory, and assertion mismatches are
+rejected without scoring. The browser cannot provide a score or validation
+result.
 
 ## Legacy badge compatibility
 
@@ -180,7 +190,7 @@ HTN26|RX|AA:BB:CC:DD:EE:FF|-48|OC1|42|H|START
 HTN26|RX|AA:BB:CC:DD:EE:FF|-48|OC1|43|B|SUBMIT:CHEESEBURGER
 HTN26|RX|AA:BB:CC:DD:EE:FF|-48|OC1|000044|E|P2:PU:R
 HTN26|GW|UP|12|0
-HTN26|GAME|START_GAME|120|3
+HTN26|GAME|START_GAME|240|3
 HTN26|GAME|GAME_END|3
 ```
 
@@ -197,7 +207,9 @@ fixed-player `E|P<player>:<action>` vocabulary is translated:
   drop, transfer, shake readiness, and submission.
 
 The encoded player number in an `E` event wins over radio arrival order. Legacy
-`N`, `M`, `B`, and `H` fixture intents remain accepted. `GW` status and `GAME`
+`N`, `M`, `B`, and `H` fixture intents remain parse-compatible. Legacy
+`B|TIP:<amount>` claims are recorded diagnostically and ignored; only a
+successful authoritative submission can award a tip. `GW` status and `GAME`
 lifecycle records map to the same internal operations as canonical records.
 USB chunks can split records at any byte boundary.
 
@@ -210,7 +222,7 @@ and native radio profiles.
 
 ## Authoritative simulator rules
 
-- A round defaults to 120 seconds and publishes integer countdown snapshots.
+- A round defaults to 240 seconds and publishes integer countdown snapshots.
   End/timeout clears held items, plates, chopping, and both stoves.
 - Burger orders appear immediately at start and naturally at randomized
   intervals up to the active-order limit. Recipes cycle through `PLAIN_MEAT`,
@@ -220,6 +232,9 @@ and native radio profiles.
 - A wrong submission subtracts 25 money. Gold is 100/120/120/150 by recipe.
   Tips are 20%, 10%, or 5% of recipe gold in patience tier 3/2/1, with a
   minimum positive tip for a successful active order.
+- Submission requires the submitter's authoritative plate plus all three fixed
+  players' fresh 0.5-second shake state. A submitted BMLC/recipe value is only
+  a consistency assertion and cannot create or replace server inventory.
 - `money.net = gold + tips - penalties`; `score.value` mirrors net money.
 - Chopping takes 3 seconds. Releasing/failing before completion loses progress
   while retaining the raw item.
@@ -309,10 +324,12 @@ node --test test/*.test.mjs
 ```
 
 Tests cover canonical and legacy protocol parsing, chunked/noisy serial input,
-deduplication, lifecycle timing and cleanup, natural orders, all four patience
-states, expiration/wrong-order penalties, early gold/tips, chopping/cooking,
-player plates, browser HTML, SSE/JSON projections, and diagnostic serial
-injection. They are laptop-hosted simulator tests only. They do not prove
+deduplication, native `GAME`/fixed-player `E` lifecycle processing, lifecycle
+timing and cleanup, natural orders, all four patience states,
+expiration/wrong-order penalties, authoritative three-player submissions,
+early gold/tips, chopping/cooking, player plates, browser HTML, SSE/JSON
+projections, and diagnostic serial injection. They are laptop-hosted simulator
+tests only. They do not prove
 physical badge/NFC/radio/USB behavior, phone-camera capture, OpenAI
 connectivity, or any possible future QNX deployment.
 

@@ -91,10 +91,10 @@ export function startupGuide(baseUrl) {
     `Paste these examples in that page's browser console:\n` +
     `const serial = line => fetch('/api/serial', {method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({line})}).then(r => r.json());\n` +
     `await serial('HTN26|1|HOST|RESET');\n` +
-    `await serial('HTN26|1|HOST|START|120|3');\n` +
+    `await serial('HTN26|1|HOST|START|240|3');\n` +
     `await serial('HTN26|1|GATEWAY|UP|1|0');\n` +
     `await serial('HTN26|1|PLAYER|1|PLATE|BM--');\n` +
-    `await serial('HTN26|1|SUBMIT|1|BM--');\n\n` +
+    `await Promise.all([serial('HTN26|1|PLAYER|2|READY'), serial('HTN26|1|PLAYER|3|READY'), serial('HTN26|1|SUBMIT|1|BM--')]);\n\n` +
     `Query the same authoritative state shown on the page:\n` +
     `await fetch('/api/timer').then(r => r.json());\n` +
     `await fetch('/api/orders').then(r => r.json());\n` +

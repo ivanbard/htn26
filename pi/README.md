@@ -1,20 +1,22 @@
 # FILE: `/pi/README.md`
 
-# Raspberry Pi / QNX System
+# Laptop server and possible future Raspberry Pi / QNX system
 
-All Raspberry Pis run QNX.
+The current v1 server runs, is tested, and is deployed on the captain's laptop.
+It receives the host badge's USB serial stream and serves the local browser UI.
+QNX is only a possible future server target; the current path does not require
+or claim Raspberry Pi or QNX deployment validation.
 
-The current v1 Pi layer owns:
+The current laptop server slice owns:
 
-* embedded AI inference
-* phone-camera setup processing
+* setup-photo upload and provider adaptation
 * authoritative game-state execution
 * host-badge and UI transport, with the local web/serial boundary documented in
   [`server/README.md`](server/README.md)
 
-The current v1 deployment uses one Raspberry Pi and an Apple phone camera.
-The worker and multi-camera responsibilities below remain implementation seams
-for future expansion, not current v1 player-location tracking.
+The current v1 setup accepts still photographs from an Apple phone. Pi-hosted
+inference, workers, and multi-camera responsibilities below remain possible
+future seams, not the current deployment or current player-location tracking.
 
 No AI inference required for gameplay should depend on the cloud.
 
@@ -22,11 +24,11 @@ No AI inference required for gameplay should depend on the cloud.
 
 ## Roles
 
-### Master Pi
+### Possible future master Pi/QNX adapter
 
 `pi/master/`
 
-Owns:
+Would own:
 
 * authoritative game state
 * USB gateway-badge serial input
@@ -257,13 +259,13 @@ Reliability and consistency are more important than 30/60 FPS.
 
 # FILE: `/pi/master/README.md`
 
-# Master Pi
+# Possible future Master Pi
 
 ## Role
 
-The master Pi is the single authoritative controller for the game.
+This possible future master Pi would be the single authoritative controller for the game.
 
-It runs QNX and is responsible for combining:
+It would run QNX and combine:
 
 ```text
 badge intent

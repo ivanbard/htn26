@@ -153,10 +153,10 @@ export function browserDocument() {
     <h2 id="serial-heading">Development serial injection</h2>
     <form id="serial-form">
       <label for="serial-line">Canonical serial line</label>
-      <input id="serial-line" name="line" size="64" value="HTN26|1|HOST|START|120|3">
+      <input id="serial-line" name="line" size="64" value="HTN26|1|HOST|START|240|3">
       <button type="submit">Send</button>
     </form>
-    <button type="button" data-line="HTN26|1|HOST|START|120|3">Start round</button>
+    <button type="button" data-line="HTN26|1|HOST|START|240|3">Start round</button>
     <button type="button" data-line="HTN26|1|HOST|END">End round</button>
     <button type="button" data-line="HTN26|1|HOST|RESET">Reset round</button>
     <pre id="serial-result" aria-live="polite"></pre>

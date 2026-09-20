@@ -4,13 +4,13 @@
 
 HTN26 is a local cooperative cooking game inspired by Overcooked.
 
-The first playable version uses one Raspberry Pi and one phone camera.
+The first playable server runs on the captain's laptop and accepts setup photos
+from an Apple phone.
 
-The phone camera is an Apple phone connected to the Pi for room photographs and setup inference.
+The current setup path uploads Apple-phone room photographs to the laptop server.
 
-The v1 Pi remains the QNX target, and AI inference for setup runs on the Pi without cloud services.
-
-The qualifying open-source QNX AI module is still unresolved and its status is owned by [`pi/README.md`](pi/README.md).
+QNX is only a possible future server target. The current run, test, and
+deployment path does not require a Raspberry Pi or claim QNX validation.
 
 The v1 round uses one host or gateway badge and exactly three fixed player badges.
 
@@ -41,11 +41,11 @@ If a product summary here conflicts with a component implementation contract, ke
 
 ## v1 setup
 
-1. Connect the phone camera to the Raspberry Pi and use it to photograph the play area.
-2. Run the setup inference on the Pi to propose a floor plan.
-3. Approve the proposed floor plan on the local UI.
+1. Photograph the play area with the phone and upload the stills to the laptop server.
+2. Run the server's setup provider to propose a floor plan.
+3. Approve the proposed floor plan in the laptop-hosted local UI.
 4. Generate the burger level and follow the placement instructions for the four NFC zones.
-5. Connect the host badge to the Pi and assign unique numbers to the three player badges.
+5. Connect the host badge to the captain's laptop and assign unique numbers to the three player badges.
 6. Select host mode on the host badge and player mode on the other badges.
 7. Start the round from the host badge.
 
@@ -58,10 +58,10 @@ The UI keeps player icons at the bottom of the screen and reports each player's 
 ## Hardware and ownership
 
 ```text
-phone camera
+Apple phone setup photos
      |
      v
-Raspberry Pi - setup inference, authoritative game state, cooking/order timers, and UI transport
+captain's laptop - setup provider, authoritative game state, cooking/order timers, and UI transport
      |
      v
 host or gateway badge - radio and host controls
@@ -71,19 +71,19 @@ host or gateway badge - radio and host controls
 player badge 1      player badge 2      player badge 3
 ```
 
-The host badge is the gateway between the player badges and the Pi.
+The host badge is the gateway between the player badges and the laptop server.
 
 The host badge owns the four-minute round lifecycle, START_GAME/GAME_END records,
-and reset of the three fixed-player session. The Pi owns authoritative game
+and reset of the three fixed-player session. The laptop server owns authoritative game
 state, cooking and order timers, orders, score, and submission results.
 
 Player badges read NFC and motion input, provide local feedback, and report player intent.
 
-The UI mirrors state from the Pi and does not become a second game authority.
+The UI mirrors state from the laptop server and does not become a second game authority.
 
 Badge API limits and gateway behavior belong to the badge guide and badge component READMEs.
 
-Pi engine and adapter boundaries belong to the [`pi/`](pi/README.md) component documentation.
+Laptop-server and possible future Pi/QNX adapter boundaries belong to the [`pi/`](pi/README.md) component documentation.
 
 UI transport and rendering boundaries belong to the [`ui/`](ui/README.md) component documentation.
 
@@ -193,7 +193,7 @@ The badges broadcast the submission result and drop any remaining held items as 
 
 The UI displays orders, player icons, held items, chopping state, cooking progress, and the submission result.
 
-The authoritative Pi projection applies the configured penalty, tip, or bonus-gold result for the submitted order; the UI displays that result and does not independently validate or score the plate.
+The authoritative laptop-server projection applies the configured penalty, tip, or bonus-gold result for the submitted order; the UI displays that result and does not independently validate or score the plate.
 
 ## v1 radio assumption
 
@@ -220,14 +220,14 @@ These commands validate host-side behavior and do not claim physical badge, phon
 ## v1 success criteria
 
 1. The host badge starts a clean round for three fixed players.
-2. The Pi receives player NFC and motion intent through the gateway path.
+2. The laptop server receives player NFC and motion intent through the gateway serial path.
 3. The four NFC zones support the ingredient, cutting, and stove interactions above.
 4. Plate transfer and duplicate prevention follow the v1 rules.
 5. Cooking follows the 15-second, done, warning, and burnt timeline.
 6. All three players can perform the simultaneous shake submission.
-7. The Pi accepts or rejects the submission once and the UI shows the result.
+7. The laptop server accepts or rejects the submission once and the UI shows the result.
 8. The host badge ends the round after approximately four minutes and all round state is wiped.
-9. The first playable run completes using the reliable-enough radio assumption without cloud services.
+9. The first playable run completes on the captain's laptop using the reliable-enough radio assumption without cloud services.
 
 ## Repository layout
 
