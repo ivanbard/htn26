@@ -424,9 +424,10 @@ test("renders readable burger stacks and full-width time remaining rails", () =>
   const html = renderApp(state, 1_000);
 
   assert.equal((html.match(/data-burger-preview=/g) || []).length, 4);
-  // The bun is one held item (base only, not a duplicated top+bottom cap), so
-  // the stack renders toppings top-to-bottom above a single bun base.
-  assert.match(html, /data-order-id="order-1"[\s\S]*data-burger-layer="LETTUCE"[\s\S]*data-burger-layer="CHEESE"[\s\S]*data-burger-layer="MEAT"[\s\S]*data-burger-layer="BUN"/);
+  // The preview is one pre-drawn burger icon (not an assembled stack of the
+  // individual ingredient PNGs) — the exact required components are listed
+  // separately in .hud-ingredient-slots right next to it.
+  assert.match(html, /data-order-id="order-1"[\s\S]*class="burger-preview-art" src="\/assets\/order-burger\.png"/);
   assert.match(html, /data-order-id="order-1"[\s\S]*role="progressbar"[\s\S]*aria-valuenow="50"[\s\S]*style="width:50%"/);
   assert.equal((html.match(/class="hud-order-progress"/g) || []).length, 4);
   assert.match(html, /class="hud-order hud-order-compact is-warning"[^>]*data-order-id="order-1"/);

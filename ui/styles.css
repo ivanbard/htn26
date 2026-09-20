@@ -232,31 +232,10 @@ button:focus-visible { outline: 3px solid var(--yellow); outline-offset: 3px; }
 .hud-order { min-height: clamp(84px, 8.5vw, 128px); grid-template-columns: clamp(46px, 4.2vw, 76px) minmax(0, 1fr) clamp(60px, 5.5vw, 96px); align-items: center; gap: clamp(.35rem, .65vw, .75rem); border-width: clamp(2px, .22vw, 4px); border-radius: clamp(14px, 1.35vw, 24px); padding: clamp(.5rem, .75vw, .9rem); }
 .hud-order-compact { min-height: clamp(84px, 8.5vw, 128px); grid-template-columns: clamp(46px, 4.2vw, 76px) minmax(0, 1fr) clamp(60px, 5.5vw, 96px); gap: clamp(.35rem, .65vw, .75rem); border-radius: clamp(14px, 1.35vw, 24px); padding: clamp(.5rem, .75vw, .9rem); }
 .hud-order-preview { position: relative; display: grid; min-width: 0; min-height: 0; aspect-ratio: 1 / 1.12; place-items: center; overflow: hidden; border: 2px solid #e7d9c5; border-radius: clamp(8px, .8vw, 14px); background: #fffaf0; box-shadow: 0 3px 6px rgba(51, 36, 23, .16); }
-/* Absolutely positioned (not width/height:100% of a place-items:center grid
-   item) on purpose: a grid item under place-items:center is sized to its own
-   content, not stretched, so percentage heights here had no definite parent
-   to resolve against and silently fell back to each image's intrinsic size —
-   which is what was actually clipping the stack down to 1-2 visible layers. */
-.burger-preview { position: absolute; inset: 8%; }
-/* --layer-count (set inline per order) divides the available height evenly
-   across however many ingredients this burger has, so 1-layer and 4-layer
-   burgers both fill the card instead of using one fixed size for every count.
-   Absolutely positioned (inset: 0) rather than width/height: 100%: its parent
-   here is a plain block, not a place-items:center grid item, but this keeps
-   the same definite-size pattern as .burger-preview above and avoids ever
-   depending on percentage heights resolving through a centered ancestor. */
-.burger-preview-stack { --layer-count: 1; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; flex-direction: column; min-width: 0; }
-/* display: block, not grid: an implicit grid track can't measure a
-   percentage-sized child, so it silently falls back to sizing the row/column
-   from the <img>'s own intrinsic pixel size instead of this element's actual
-   (definite) height — the image then overflows its slot and gets clipped by
-   .hud-order-preview's overflow: hidden, which is what was hiding all but the
-   first 1-2 layers of the stack. A plain block avoids that auto-track step
-   entirely, so the 100%-sized <img> just resolves against the real box. */
-.burger-preview-layer { display: block; width: 78%; height: calc(100% / var(--layer-count)); margin-top: calc(-.32 * (100% / var(--layer-count))); }
-.burger-preview-layer:first-child { margin-top: 0; }
-.burger-preview-layer.is-bun { width: 94%; }
-.burger-preview-layer img { width: 100%; height: 100%; object-fit: contain; filter: drop-shadow(0 2px 2px rgba(51, 36, 23, .2)); }
+/* A single pre-drawn pixel-art icon, not an assembled stack — image-rendering:
+   pixelated keeps its native chunky-pixel look crisp instead of the browser
+   smoothing it while it's scaled up from its small source resolution. */
+.burger-preview-art { width: 82%; height: 82%; object-fit: contain; image-rendering: pixelated; filter: drop-shadow(0 2px 2px rgba(51, 36, 23, .2)); }
 .hud-order-main { min-width: 0; }
 .hud-order-heading { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: .35rem; margin-bottom: clamp(.25rem, .4vw, .45rem); }
 .hud-order-main h2 { min-width: 0; overflow: hidden; margin: 0; font-size: clamp(.68rem, .95vw, 1.25rem); line-height: 1; text-align: left; text-overflow: ellipsis; text-transform: uppercase; white-space: nowrap; }
