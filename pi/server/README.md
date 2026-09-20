@@ -83,8 +83,11 @@ been approved. After normal floorplan approval, the HTTP setup command
 production timer. Pressing START on the physical host badge and receiving its
 native `GAME|START_GAME` record starts production play.
 
-`END` marks active orders cancelled, sets the timer to ended/zero, and clears
-player and station round state. Natural timeout performs the same cleanup.
+`END` cancels active orders and future order scheduling, sets the timer to
+ended/zero, and clears player and station round state. It retains order,
+submission, and event history plus the accumulated score, gold, tips, and
+penalties for the results view until the next start or reset. Natural timeout
+performs the same cleanup.
 `RESET` returns to ready state with no active order and zeroed money while
 retaining the selected floorplan and badge assignments.
 
@@ -213,22 +216,28 @@ console diagnostics. The parser continues to accept all current physical-badge
 frames:
 
 ```text
-HTN26|RX|AA:BB:CC:DD:EE:FF|-48|OC1|42|H|START
-HTN26|RX|AA:BB:CC:DD:EE:FF|-48|OC1|43|B|SUBMIT:CHEESEBURGER
-HTN26|RX|AA:BB:CC:DD:EE:FF|-48|OC1|000044|E|P2:PU:R
+HTN26|RX|AA:BB:CC:DD:EE:FF|-48|OC2|42|H|START
+HTN26|RX|AA:BB:CC:DD:EE:FF|-48|OC2|43|B|SUBMIT:CHEESEBURGER
+HTN26|RX|AA:BB:CC:DD:EE:FF|-48|OC2|000044|E|P2:PU:R
 HTN26|GW|UP|12|0
 HTN26|GAME|START_GAME|240|3
 HTN26|GAME|GAME_END|3
 HTN26|GAME|RESET_GAME|3
 ```
 
-`RX` validation preserves the 44-byte `OC1` payload bound, MAC/RSSI checks,
+`RX` validation preserves the 44-byte `OC2` payload bound, MAC/RSSI checks,
 32-bit sequence checks, and `(MAC, sequence)` duplicate suppression. The full
 fixed-player `E|P<player>:<action>` vocabulary is translated:
 
-- `PU:B|R|Q|K` and the cooked/chopped item codes update the hand.
+OC2 is the only active application namespace. It carries distinct chopped-meat
+and cooked-meat snapshots and intentionally rejects OC1; deploy the matching
+native image or matching whole-fleet Lua rollback apps rather than mixing
+revisions.
+
+- `PU:B|R|D|M|X|Q|L|K|C` updates the hand; `D` is chopped meat and
+  `M` is cooked meat, so transfer snapshots preserve the distinct states.
 - `PL:NEW` and `PL:<BMLC>` update the plate.
-- `CH:S`, `CH:F`, and `CH:D:M|L|C` update chopping.
+- `CH:S`, `CH:F`, and `CH:D:D|L|C` update chopping.
 - `ST:L|R:P|T|X` and `ST:L|R:C:<phase>` update/check the two stoves without
   letting a reported phase override server time.
 - `DROP:<snapshot>`, paired `X:<snapshot>`, `READY`, and `SUB:<BMLC>` map to

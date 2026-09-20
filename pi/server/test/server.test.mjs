@@ -62,6 +62,17 @@ async function approveAndStart(base) {
   return started.data.state;
 }
 
+async function readyProjection(now = 1_000) {
+  const projection = new ServerProjection({
+    provider: new LocalFloorplanProvider({ now: () => now }),
+    now: () => now,
+    random: () => 0,
+  });
+  await projection.proposeFloorplan({ photos: [{ id: "fixture" }] }, now);
+  projection.approveFloorplan(true, now);
+  return projection;
+}
+
 test("fixture parser accepts noisy and chunk-framed gateway records", async () => {
   const fixture = await readFile(new URL("./fixtures/gateway-events.ndjson", import.meta.url));
   const records = [];
@@ -73,10 +84,11 @@ test("fixture parser accepts noisy and chunk-framed gateway records", async () =
   assert.equal(records[1].intent.value, "START");
   assert.equal(records[2].intent.senderMac, MAC.replace("01", "02"));
   assert.equal(adapter.stats().malformed, 1);
-  const fixedPlayer = parseGatewayRxLine("debug HTN26|RX|AA:BB:CC:DD:EE:02|-46|OC1|000043|E|P2:PU:R");
+  const fixedPlayer = parseGatewayRxLine("debug HTN26|RX|AA:BB:CC:DD:EE:02|-46|OC2|000043|E|P2:PU:R");
   assert.equal(fixedPlayer.ok, true);
   assert.equal(fixedPlayer.intent.value, "P2:PU:R");
-  assert.equal(parseGatewayRxLine("debug HTN26|RX|bad|-1|OC1|1|H|START").ok, false);
+  assert.equal(parseGatewayRxLine("debug HTN26|RX|bad|-1|OC2|1|H|START").ok, false);
+  assert.equal(parseGatewayRxLine(`debug HTN26|RX|${MAC}|-46|OC1|1|E|P2:PU:R`).ok, false);
 });
 
 test("canonical protocol covers host, gateway, player actions, and submissions while legacy frames remain valid", () => {
@@ -110,7 +122,7 @@ test("canonical protocol covers host, gateway, player actions, and submissions w
   assert.equal(parseGatewaySerialLine("noise HTN26|GW|DOWN|4|2").kind, "gateway-status");
   assert.equal(parseGatewaySerialLine("noise HTN26|GAME|START_GAME|120|3").kind, "host-control");
   assert.equal(parseGatewaySerialLine("noise HTN26|GAME|GAME_END|3").control, "END");
-  assert.equal(parseGatewaySerialLine(`noise HTN26|RX|${MAC}|-44|OC1|7|E|P2:PU:R`).kind, "badge-event");
+  assert.equal(parseGatewaySerialLine(`noise HTN26|RX|${MAC}|-44|OC2|7|E|P2:PU:R`).kind, "badge-event");
 });
 
 test("configurable serial-device adapter opens a fixture stream", async () => {
@@ -433,7 +445,7 @@ test("native GAME and complete E event path is parsed and projected by the lapto
       return runtime.projection.snapshot(now);
     };
     let sequence = 100_000;
-    const event = (player, action) => ingest(`native HTN26|RX|AA:BB:CC:DD:EE:0${player}|-45|OC1|${sequence++}|E|P${player}:${action}`);
+    const event = (player, action) => ingest(`native HTN26|RX|AA:BB:CC:DD:EE:0${player}|-45|OC2|${sequence++}|E|P${player}:${action}`);
 
     let state = ingest("native HTN26|GW|UP|0|0");
     assert.equal(state.health.gateway.status, "healthy");
@@ -444,11 +456,11 @@ test("native GAME and complete E event path is parsed and projected by the lapto
     state = event(1, "PU:R");
     assert.equal(state.players[0].heldItem, "RAW_MEAT");
     event(1, "CH:S");
-    state = event(1, "CH:D:M");
+    state = event(1, "CH:D:D");
     assert.equal(state.players[0].heldItem, "RAW_MEAT");
     assert.equal(state.eventHistory.at(-1).type, "rejected-action");
     now += GAME_TIMINGS.chopSeconds * 1_000;
-    state = event(1, "CH:D:M");
+    state = event(1, "CH:D:D");
     assert.equal(state.players[0].heldItem, "CHOPPED_MEAT");
     assert.match(state.eventHistory.at(-1).message, /confirmed completed chop/);
 
@@ -485,7 +497,7 @@ test("native GAME and complete E event path is parsed and projected by the lapto
     assert.equal(state.submissions[1].playerId, "p1");
     assert.deepEqual(state.submissions[1].consumedSubmissions.map((submission) => submission.playerId), ["p1", "p2"]);
 
-    for (const [code, expected] of [["M", "CHOPPED_MEAT"], ["X", "BURNT_MEAT"], ["L", "LETTUCE"], ["C", "CHEESE"]]) {
+    for (const [code, expected] of [["D", "CHOPPED_MEAT"], ["M", "COOKED_MEAT"], ["X", "BURNT_MEAT"], ["L", "LETTUCE"], ["C", "CHEESE"]]) {
       state = event(3, `PU:${code}`);
       assert.equal(state.players[2].heldItem, expected);
       state = event(3, `DROP:H${code}`);
@@ -508,7 +520,7 @@ test("native GAME and complete E event path is parsed and projected by the lapto
     assert.deepEqual(state.players.slice(0, 2).map((player) => player.currentStation), ["center", "center"]);
     state = event(3, "ST:R:C:EMPTY");
     assert.equal(state.players[2].actionState, "checked stove 2: idle");
-    event(3, "PU:M");
+    event(3, "PU:D");
     event(3, "ST:R:P");
     now += (GAME_TIMINGS.cookSeconds + GAME_TIMINGS.doneSeconds + GAME_TIMINGS.warningSeconds) * 1_000;
     state = event(3, "ST:R:X");
@@ -539,6 +551,95 @@ test("legacy tip frames remain parseable but cannot change server money", () => 
   assert.equal(projection.snapshot(now).eventHistory.at(-1).type, "legacy-tip-ignored");
 });
 
+test("duplicate plate transfers swap both carried states without loss", async () => {
+  const now = 2_000;
+  const projection = await readyProjection(now);
+  projection.ingestHostControl({ control: "START", framing: "legacy-game", durationSeconds: 240 }, now);
+  const event = (mac, sequence, player, action) => projection.ingestBadgeEvent({
+    senderMac: mac,
+    sequence,
+    type: "E",
+    value: `P${player}:${action}`,
+    playerId: `p${player}`,
+    action,
+  }, now);
+
+  event("AA:BB:CC:DD:EE:11", 1, 1, "PU:B");
+  event("AA:BB:CC:DD:EE:22", 1, 2, "PL:B---");
+  event("AA:BB:CC:DD:EE:11", 2, 1, "X:HB");
+  event("AA:BB:CC:DD:EE:22", 2, 2, "X:PB---");
+
+  const state = projection.snapshot(now);
+  assert.equal(state.players[0].heldItem, "PLATE");
+  assert.deepEqual(state.players[0].inventory, ["BUN"]);
+  assert.equal(state.players[1].heldItem, "BUN");
+  assert.deepEqual(state.players[1].inventory, ["BUN"]);
+  assert.match(state.players[0].actionState, /^transferred with /);
+  assert.match(state.players[1].actionState, /^transferred with /);
+  assert.deepEqual(
+    state.players.slice(0, 2).map((player) => player.simulatedLocation.stationId),
+    ["center", "center"],
+  );
+});
+
+test("transfer snapshots preserve distinct chopped and cooked meat states", async () => {
+  const now = 2_500;
+  const projection = await readyProjection(now);
+  projection.ingestHostControl({ control: "START", framing: "legacy-game", durationSeconds: 240 }, now);
+  const event = (mac, sequence, player, action) => projection.ingestBadgeEvent({
+    senderMac: mac,
+    sequence,
+    type: "E",
+    value: `P${player}:${action}`,
+    playerId: `p${player}`,
+    action,
+  }, now);
+
+  event("AA:BB:CC:DD:EE:11", 1, 1, "PU:D");
+  event("AA:BB:CC:DD:EE:22", 1, 2, "PU:M");
+  event("AA:BB:CC:DD:EE:11", 2, 1, "X:HD");
+  event("AA:BB:CC:DD:EE:22", 2, 2, "X:HM");
+
+  const state = projection.snapshot(now);
+  assert.equal(state.players[0].heldItem, "COOKED_MEAT");
+  assert.deepEqual(state.players[0].inventory, ["COOKED_MEAT"]);
+  assert.equal(state.players[1].heldItem, "CHOPPED_MEAT");
+  assert.deepEqual(state.players[1].inventory, ["CHOPPED_MEAT"]);
+});
+
+test("native and development host lifecycle controls share round-state behavior", async () => {
+  const now = 3_000;
+  const serialProjection = await readyProjection(now);
+  const developmentProjection = await readyProjection(now);
+
+  const started = serialProjection.ingestHostControl({ control: "START", framing: "legacy-game", durationSeconds: 240 }, now);
+  assert.equal(started.accepted, true);
+  const simulatedStart = developmentProjection.ingestHostControl({ control: "START", durationSeconds: 240 }, now);
+  assert.equal(simulatedStart.accepted, true);
+  for (const projection of [serialProjection, developmentProjection]) {
+    const state = projection.snapshot(now);
+    assert.equal(state.timer.status, "running");
+    assert.equal(state.timer.totalSeconds, 240);
+    assert.equal(state.activeOrders.length, 1);
+  }
+
+  const ended = serialProjection.ingestHostControl({ control: "END", framing: "legacy-game" }, now);
+  assert.equal(ended.accepted, true);
+  const simulatedEnd = developmentProjection.ingestHostControl({ control: "END" }, now);
+  assert.equal(simulatedEnd.accepted, true);
+  const serialEnd = serialProjection.snapshot(now);
+  const developmentEnd = developmentProjection.snapshot(now);
+  for (const state of [serialEnd, developmentEnd]) {
+    assert.equal(state.timer.status, "ended");
+    assert.equal(state.timer.remainingSeconds, 0);
+    assert.deepEqual(state.activeOrders, []);
+    assert.ok(state.players.every((player) => player.heldItem === "EMPTY"));
+    assert.deepEqual(state.eventHistory.map((event) => event.type), ["round-started", "order-created", "round-ended"]);
+  }
+  assert.equal(serialEnd.eventHistory[0].startSource, "physical host badge");
+  assert.equal(developmentEnd.eventHistory[0].startSource, "development simulator");
+});
+
 test("HTTP upload, review, approval, serial projection, and browser reads work", async () => {
   await withRuntime(async (base) => {
     const initial = await fetch(`${base}/api/state`).then((response) => response.json());
@@ -549,7 +650,7 @@ test("HTTP upload, review, approval, serial projection, and browser reads work",
     assert.equal(state.eventHistory[0].startSource, "physical host badge");
     assert.equal(state.floorPlan.room.widthMeters, 10);
     assert.equal(state.floorPlan.stations.length, 4);
-    const serial = await post(base, "/api/serial", { line: `noise HTN26|RX|${MAC}|-40|OC1|99|N|ING:MEAT` });
+    const serial = await post(base, "/api/serial", { line: `noise HTN26|RX|${MAC}|-40|OC2|99|N|ING:MEAT` });
     assert.equal(serial.response.status, 200);
     assert.equal(serial.data.result.ok, true);
     assert.equal(serial.data.state.players[0].heldItem, "MEAT");

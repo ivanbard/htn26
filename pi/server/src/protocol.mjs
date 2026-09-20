@@ -53,7 +53,7 @@ export function parseGatewayRxLine(line) {
   if (!senderMac) return invalid("invalid sender MAC");
   const rssi = parseInteger(fields[3], -127, 20);
   if (rssi == null) return invalid("invalid RSSI");
-  if (fields[4] !== "OC1") return invalid("unsupported badge protocol");
+  if (fields[4] !== "OC2") return invalid("unsupported badge protocol");
   const sequence = parseInteger(fields[5], 0, 0xffffffff);
   if (sequence == null) return invalid("invalid badge sequence");
   if (!/^[NMBHE]$/.test(fields[6])) return invalid("invalid badge event type");

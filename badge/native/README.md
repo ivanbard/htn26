@@ -1,14 +1,21 @@
 # Native Overcooked controller app
 
-This is a binary extension of the backed-up stock firmware, not a replacement
-firmware or a source rebuild. It is pinned to `v0.1.2-392-gd3089c4` and the
-exact factory partition in this repository's two backups.
+This is the **production/live badge implementation**. It is a binary extension
+of the backed-up stock firmware, not a replacement firmware or a source rebuild.
+It is pinned to `v0.1.2-392-gd3089c4` and the exact factory partition in this
+repository's two backups. The Lua host/player apps are whole-fleet rollback
+assets only; never mix native and Lua radio profiles.
+
+The current production game host is a laptop running the local server/UI with
+the gateway badge attached over USB. QNX is only a possible future target and
+is not a requirement or validation claim for this deployment.
 
 ## Build and check
 
 From the repository root, with Python and Zig 0.14.1 installed:
 
 ```powershell
+python badge/assets/icons/generate_native_icons.py --check
 python badge/native/build.py
 python badge/native/test_build.py
 python badge/native/test_payload.py
@@ -23,8 +30,10 @@ The local compiler can be installed with
 `python -m pip install --target .tools/native ziglang==0.14.1`.
 The compiled-callback tests use
 `python -m pip install --target .tools/reverse unicorn==2.1.4`.
-Those tests emulate the RISC-V payload with firmware calls stubbed; they do
-not simulate actual BLE, LVGL, flash, or the stock registry.
+Those tests emulate the RISC-V payload with firmware calls stubbed. They execute
+held-state transitions and inspect the LVGL image descriptors selected by the
+compiled code, but do not render actual pixels or simulate BLE, LVGL, flash, or
+the stock registry.
 No full ESP-IDF installation or original firmware source is required to build
 this extension. The extension calls the existing firmware's compiled APIs.
 
@@ -35,21 +44,33 @@ Outputs under ignored `build/`:
   trailing bytes, for rollback at the same factory offset.
 - `overcooked.elf`: native payload with fixed text and constant addresses.
 - `overcooked-factory.bin`: factory-only candidate.
-- `verification.json`: sizes, hashes, hook bytes, and static verification results.
+- `verification.json`: sizes, hashes, hook bytes, generated-icon hashes, and static verification results.
+
+`../assets/icons/generate_native_icons.py` converts the checked-in PNGs into
+`generated_icons.h`, which is committed for review. The build runs the
+generator's deterministic `--check` mode and stops if the header is stale.
 
 The original app descriptor stays intact; it still reports the stock version
 and ELF hash. Identify the modified image by its SHA-256 and `OC_NATIVE` logs,
 not by that unchanged descriptor.
 
-## Supported deployment and role selection
+## Production deployment and role selection
 
-The v1 low-memory profile is one native factory image on **all four badges**:
-one host and three players. It is the supported response to the observed host
-NimBLE OOM and player Lua-allocation failure. The existing `master/` and
-`slave/` Lua apps remain in the repository and in LittleFS; they are the
-explicit unmodified-firmware rollback profile, not deleted assets.
+The live profile is one native factory image on **all four badges**: one host
+and three players. It is the production response to the observed host NimBLE
+OOM and player Lua-allocation failure. The existing `master/` and `slave/` Lua
+apps remain in the repository and in LittleFS only as the explicit
+unmodified-firmware rollback profile; they are not an alternate live profile.
 
-Do not mix profiles within a round. Native mode preserves the current OC1
+The current native and Lua rollback sources use the OC2 application namespace.
+The backup gate below requires preserving the original device before any
+LittleFS update. Only after that backup and read-only security inspection may
+you push the current `../master/` app to the host and the current `../slave/`
+app to all three players. Verify that matching rollback set before the native
+factory write. Factory-only deployment leaves LittleFS untouched, and the
+laptop intentionally rejects the older OC1 namespace.
+
+Do not mix profiles within a round. Native mode preserves the current OC2
 application payloads, but calls the stock advertising HAL directly. Lua
 `badge.radio` adds and filters its private `LUA1` carrier prefix, so a Lua host
 cannot hear a native player and a native host cannot hear a Lua player.
@@ -65,14 +86,31 @@ which is the memory-critical difference from launching either Lua app.
    to choose host mode. Host mode starts radio without NFC and emits
    `HTN26|GW|UP|0|0` on success or `HTN26|GW|DOWN|0|0` on failure.
 3. After all players show waiting state, press **START** again on the host. It
-   logs `HTN26|GAME|START_GAME|240|3`, broadcasts `OC1|000001|G|S`, counts down
+   logs `HTN26|GAME|START_GAME|240|3`, broadcasts `OC2|000001|G|S`, counts down
    four minutes, then logs `HTN26|GAME|GAME_END|3` and broadcasts the matching
    end control. Events before start are ignored.
 
-The app draws held state, plate contents, selection, stoves, radio status, and
-controls. Radio initialization has a fail-closed NVS preflight and never invokes
-the stock erase/recovery branch. The player role then enables NFC; the host
-role does not. Program the four NDEF Text tags as `pantry`, `fridge`,
+The app continuously draws the player's authoritative local held state, plate
+contents, selection, stoves, radio status, and controls. Empty hands have no
+stale image and remain labelled `HELD: EMPTY`; raw, chopping, prepared, cooked,
+burnt, bun, and plate states select generated artwork. Plate contents remain
+listed as the fixed `B/M/L/C` columns next to the plate icon. Pickup, failed or
+completed cutting, stove put/take, drop, transfer, submission, game start/end,
+and reset all rerender from the same local state used to form events.
+
+The artwork is generated from `../assets/icons/*.png` as ten 42×42 LVGL
+RGB565A8 descriptors. The bun deterministically stacks the checked-in top and
+bottom assets, while `BURNT_MEAT` consumes the independent named
+`../assets/icons/ing_meat_burnt.png` source directly. That source is the
+documented temporary cooked-meat placeholder until dedicated burnt artwork is
+supplied. The payload uses one reusable image widget rather than ten runtime
+image objects or the Lua display test's 196-box grid. Current build metadata
+records 55,695 bytes of total payload DROM and a 308-byte permanent app object;
+the builder enforces the existing 64 KiB DROM page and factory boundaries.
+
+Radio initialization has a fail-closed NVS preflight and never invokes the
+stock erase/recovery branch. The player role then enables NFC; the host role
+does not. Program the four NDEF Text tags as `pantry`, `fridge`,
 `cutting board`, and `stove`.
 
 - LEFT/RIGHT + pantry: lettuce/bread; LEFT/RIGHT + fridge: meat/cheese.
@@ -81,7 +119,7 @@ role does not. Program the four NDEF Text tags as `pantry`, `fridge`,
 - Hold A + cutting board chops meat, lettuce, or cheese; releasing A resets progress.
 - LEFT/RIGHT + stove selects stove 1/2, then puts, checks, or takes meat.
 - Hold B + shake discards; hold A + shake submits the plate. A shake without
-  either button broadcasts `READY` for Pi-side team submission consensus.
+  either button broadcasts `READY` for server-side team submission consensus.
 - Bump two badges to merge a platable hand item onto the other plate, or swap
   inventories when that merge is invalid or both badges have the same plate state.
 
@@ -89,19 +127,20 @@ Invalid station/button combinations show `UNKNOWN BUTTON COMBO` and red LEDs
 for one second. Meat cooks for 15 seconds, is done for two, flashes a three-second
 warning, then burns. The six LEDs also show cutting and stove progress. Only
 the native host acknowledges player actions, so a player makes at most three
-identical attempts until the single-Pi gateway has observed the event. The host
+identical attempts until the laptop-connected gateway has observed the event. The host
 logs each unique event as one `HTN26|RX|...` record and emits periodic gateway
-health. The badge tracks immediate controller feedback, while the Pi/web app
-remains authoritative for players, orders, scoring, penalties, and the
-simultaneous-submit window.
+health. The badge tracks immediate controller feedback, while the laptop-hosted local
+server/web app remains authoritative for players, orders, scoring, penalties,
+and the simultaneous-submit window.
 See `RADIO_PROTOCOL.md` for packet format, recovered HAL calls, LED meanings,
 and the Windows test peer.
 
 Serial heap measurements include internal 8-bit memory (mask 0x804) and
 default memory (mask 0x1000), at entry, before radio, after radio, exit, and
 every 250 ticks while idle. The nominal tick interval is 20 ms. The permanent
-app object is 300 bytes, excluding allocator, registry, and launcher overhead.
-LVGL allocations belong to the app screen and are reclaimed by stock code.
+app object is 308 bytes, excluding allocator, registry, launcher, and LVGL
+widget overhead. Generated pixel data is const flash-mapped DROM. LVGL
+allocations belong to the app screen and are reclaimed by stock code.
 
 Home uses stock registry exit handling. The app stops the radio; the registry
 then cleans the screen and reboots with `focus=overcooked` when radio/NFC was
@@ -118,8 +157,8 @@ never change secure-boot, flash-encryption, security configuration, or eFuses.
 Read security state only with the esptool version's `get-security-info` command.
 If it differs from the inspected disabled state, stop rather than changing it.
 
-Before any write, put the badge in its established bootloader mode and take a
-fresh backup while keeping it there:
+Before any mutation, put the badge in its established bootloader mode and take
+a fresh backup while keeping it there:
 
 ```powershell
 New-Item -ItemType Directory -Force badge-backup
@@ -130,8 +169,15 @@ python -m esptool --chip esp32c3 --port COM4 --before no-reset --after no-reset 
 ```
 
 Verify the partition table and factory hashes against the builder's pinned
-inputs before proceeding. Preserve all three files off the badge. Then write
-**only** the factory application and read it back before booting:
+inputs before proceeding. Preserve all three files off the badge. Only now may
+you leave bootloader mode, boot the unchanged stock firmware, and push the
+current OC2 `../master/` app to the host or `../slave/` app to a player. Verify
+the installed role and repeat this backup-first sequence for every badge; never
+update LittleFS before preserving that badge's original full-device backup.
+
+After all four matching OC2 rollback apps are verified, return each badge to
+bootloader mode. Then write **only** the factory application and read it back
+before booting:
 
 ```powershell
 python -m esptool --chip esp32c3 --port COM4 --baud 460800 --before no-reset --after no-reset write-flash 0x10000 badge/native/build/overcooked-factory.bin
@@ -151,12 +197,13 @@ python -m esptool --chip esp32c3 --port COM4 --baud 460800 --before no-reset --a
 python -m esptool --chip esp32c3 --port COM4 --before no-reset --after no-reset read-flash 0x10000 0x2A0000 badge-backup/factory-rollback-readback.bin
 ```
 
-Rollback leaves LittleFS/storage untouched, so the Lua `master` and `slave`
-apps remain available. Roll back all four badges together and select **HTN26
+Rollback leaves LittleFS/storage untouched, so the required preinstalled OC2
+Lua `master` and `slave` apps remain available. Roll back all four badges
+together and select **HTN26
 Host** on the gateway plus **HTN26 Player** on each player; do not create a mixed
 round.
 
-## Physical acceptance still required
+## Validation boundary and unverified bump behavior
 
 ### NFC timeout recovery
 
@@ -176,28 +223,25 @@ gameplay still requires a player role and an active round. Host mode has no NFC.
 
 The emulator checks recovery from injected `62760` with the same UID, no BLE
 restart, and bounded persistent failures. This verifies recovery logic, not
-the physical cause or resolution of RF timeouts. Hardware acceptance requires
-repeated scans of all four tags in Player mode with BLE active, plus removal
-and retapping of the same tag and normal gameplay event delivery.
+the physical cause or resolution of RF timeouts.
 
-The current role-selection, Lua-compatible payload, gateway-only ACK, exact
-lifecycle records, and host-without-NFC changes have offline build/emulator
-coverage only. Physical acceptance still requires all four badges and the Pi:
-cold boot; unique player selection; host `GW|UP`; start/end on every player;
-NFC, chop, stove, transfer, three-shake submission; deduped USB serial ingestion;
-several minutes of stable heap logs; repeated Home/reentry; and My Badge, Share,
-Sync, and installed-Lua regression checks. Also calibrate shake/tap thresholds
-and stove timing on-device. Share transfer and full Sync need their real peer or
-station. Do not claim the supplied OOM is resolved on hardware until this gate
-passes.
+The captain reports that the native game binary is working and has been tested
+on the badges, with one explicit exception: **physically bumping two badges
+together remains unverified**. Do not turn emulator transfer coverage into a
+bump-acceptance claim. Share transfer and full Sync likewise retain the real
+peer/station limits recorded in the hardware-results documents.
 
-One static integration boundary remains outside this badge-memory change. The
-Pi transport parsers now retain the current fixed-player `E|P<player>:<action>`
-record unchanged, but the portable C++ master is still its documented legacy
-tomato-soup fixture and does not apply the burger action vocabulary. This does
-not prevent measuring native BLE/heap or serial forwarding, but it does prevent
-claiming full authoritative Pi/UI gameplay until the existing Pi adapter seam is
-implemented and validated on QNX.
+This icon/display revision has offline build and compiled-callback emulator
+coverage only. Those tests cover empty, bun, raw, cutting, prepared, cooked,
+burnt, plated, drop, transfer, submission, game-end, game-start, and reset icon
+selection. They do not render the display or validate visual placement on a
+physical badge, so the new screen still needs an on-device visual check. This
+narrow display boundary does not rewrite or overstate the captain's reported
+baseline hardware result.
+
+The current production integration target is the laptop-hosted local server,
+USB serial gateway, and browser UI. QNX may be evaluated later, but no QNX
+hardware or runtime validation is required or claimed here.
 
 See `../NATIVE_INVESTIGATION.md` for recovered interfaces and NVS recovery
 behavior. The addresses are private ABI details, not a stable SDK.

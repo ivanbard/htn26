@@ -1,8 +1,12 @@
 """Offline checks; never opens the badge or modifies the backup."""
-from pathlib import Path
+import hashlib
+import json
 import struct
+import subprocess
+import sys
 from build import (ROOT, HERE, FACTORY, CAPACITY, HOOK, HOOK_BYTES, TEXT,
-                   load_stock, encode, decode, extend, elf_payload, hook_bytes)
+                   ICON_GENERATOR, GENERATED_ICONS, load_stock, encode, decode,
+                   extend, elf_payload, hook_bytes)
 
 
 def rejects(action):
@@ -14,6 +18,7 @@ def rejects(action):
 
 
 def main():
+    subprocess.run([sys.executable, str(ICON_GENERATOR), "--check"], check=True)
     header, segments, stock = load_stock(ROOT / "htn_badge_full.bin")
     assert encode(header, segments) == stock
     assert load_stock(ROOT / "htn_badge_full_2.bin")[2] == stock
@@ -56,7 +61,12 @@ def main():
     assert len(candidate) < 0x400000 and candidate[:24] == stock[:24]
     rollback = (HERE / "build/stock-factory-partition.bin").read_bytes()
     assert rollback == (ROOT / "htn_badge_full.bin").read_bytes()[FACTORY:FACTORY + CAPACITY]
-    print("PASS: stock round-trip, both backups, corruption rejection, bounds, hook target, stock preservation, rollback")
+    report = json.loads((HERE / "build/verification.json").read_text())
+    assert report["permanent_app_object_bytes"] == 308
+    assert report["native_icon_count"] == 10
+    assert report["generated_icons_sha256"] == hashlib.sha256(GENERATED_ICONS.read_bytes()).hexdigest()
+    assert report["payload_rodata_bytes"] <= 0x10000
+    print("PASS: stock round-trip, both backups, generated icons, bounds, hook target, stock preservation, rollback")
 
 
 if __name__ == "__main__":

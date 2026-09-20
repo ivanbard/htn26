@@ -6,8 +6,19 @@ Read [`badge-app-guide.md`](badge-app-guide.md) before using or describing any H
 
 Use the nearest component README as the owner for gateway, player, NFC display, and native implementation contracts.
 
-Keep badge apps focused on input capture and local feedback; authoritative game
-state belongs to the laptop server or a future authoritative-engine adapter.
+Treat [`native/README.md`](native/README.md) as the production/live badge
+profile. The Lua host/player apps are whole-fleet rollback only; never mix
+their radio profile with native. Keep the native backup-first, factory-only,
+security-preserving deployment gate unchanged.
+
+The current production host is the laptop-local server/UI connected through
+the USB gateway. QNX is only a possible future target, not a current badge
+requirement or validation claim.
+
+Keep badge apps focused on input capture and local feedback; shared
+authoritative game state belongs to the laptop server or a future
+authoritative-engine adapter, while each player badge keeps the local
+held/controller state it displays and reports.
 
 Do not invent Wi-Fi, HTTP, arbitrary BLE, serial-input, or radio capabilities that the badge guide does not document.
 
@@ -17,7 +28,11 @@ Run the relevant badge test suite from the repository root after documentation o
 
 Use `python badge/run_local.py` for the documented local transport smoke path.
 
-Physical badge behavior remains unvalidated until an IDE upload and hardware run are performed.
+The captain reports the native binary working on physical badges except that
+bumping two badges together remains unverified. Treat generated-icon and
+held-display emulator tests as offline evidence only; they do not establish
+physical rendering or bump acceptance. Keep the exact evidence boundary in
+[`native/README.md`](native/README.md).
 
 ## Maintaining this file
 

@@ -7,7 +7,7 @@ import sys
 import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / ".tools/ble"))
-COMPANY = 0xFFFF  # Existing badge HAL's manufacturer ID; OC1 separates our packets.
+COMPANY = 0xFFFF  # Existing badge HAL's manufacturer ID; OC2 separates our packets.
 ACTIONS = {b"READY", b"CH:S", b"CH:F", b"PL:NEW",
            b"PU:B", b"PU:R", b"PU:Q", b"PU:K",
            b"ST:L:P", b"ST:L:T", b"ST:L:X",
@@ -23,13 +23,13 @@ def valid_snapshot(value):
     return ((len(value) == 5 and value[:1] == b"P" and valid_plate(value[1:])) or
             value == b"E----" or
             (len(value) == 2 and value[:1] == b"H" and value[1:] in
-             (b"B", b"R", b"M", b"X", b"Q", b"L", b"K", b"C")))
+             (b"B", b"R", b"D", b"M", b"X", b"Q", b"L", b"K", b"C")))
 
 
 def valid_action(action):
     plate = ((len(action) == 7 and action[:3] == b"PL:" and valid_plate(action[3:])) or
              (len(action) == 8 and action[:4] == b"SUB:" and valid_plate(action[4:])))
-    chop = len(action) == 6 and action[:5] == b"CH:D:" and action[5:] in (b"M", b"L", b"C")
+    chop = len(action) == 6 and action[:5] == b"CH:D:" and action[5:] in (b"D", b"L", b"C")
     stove_check = action[:7] in (b"ST:L:C:", b"ST:R:C:") and action[7:] in \
         (b"EMPTY", b"COOKING", b"DONE", b"WARNING", b"BURNT")
     snapshot = ((action.startswith(b"DROP:") and valid_snapshot(action[5:])) or
@@ -38,12 +38,12 @@ def valid_action(action):
 
 
 def decode(data):
-    if (17 <= len(data) < 45 and data[:4] == b"OC1|" and data[10:14] == b"|E|P" and
+    if (17 <= len(data) < 45 and data[:4] == b"OC2|" and data[10:14] == b"|E|P" and
             data[14:15] in (b"1", b"2", b"3") and data[15:16] == b":" and valid_action(data[16:])):
         kind = "EVENT"
-    elif len(data) == 15 and data[:4] == b"OC1|" and data[10:] == b"|A|OK":
+    elif len(data) == 15 and data[:4] == b"OC2|" and data[10:] == b"|A|OK":
         kind = "ACK"
-    elif len(data) == 14 and data[:4] == b"OC1|" and data[10:13] == b"|G|" and data[13:] in (b"S", b"E"):
+    elif len(data) == 14 and data[:4] == b"OC2|" and data[10:13] == b"|G|" and data[13:] in (b"S", b"E"):
         kind = "CONTROL"
     else:
         return None
@@ -54,7 +54,7 @@ def decode(data):
 
 def packet(kind, sequence):
     suffix = "|E|P1:PU:R" if kind == "EVENT" else "|A|OK" if kind == "ACK" else ""
-    result = f"OC1|{sequence}{suffix}".encode("ascii")
+    result = f"OC2|{sequence}{suffix}".encode("ascii")
     if decode(result) is None:
         raise ValueError("Invalid controller packet")
     return result
@@ -206,14 +206,16 @@ if __name__ == "__main__":
     if args.self_test:
         assert decode(packet("EVENT", "012345")) == ("EVENT", "012345")
         assert decode(packet("ACK", "876543")) == ("ACK", "876543")
-        assert decode(b"OC1|000001|G|S") == ("CONTROL", "000001")
+        assert decode(b"OC2|000001|G|S") == ("CONTROL", "000001")
         for action in ACTIONS:
-            assert decode(b"OC1|012345|E|P2:" + action) == ("EVENT", "012345")
-        assert decode(b"OC1|012345|E|P2:SUB:BMLC") == ("EVENT", "012345")
-        assert decode(b"OC1|012345|E|P2:X:PB-L-") == ("EVENT", "012345")
-        assert decode(b"OC1|012345|E|P2:X:HR") == ("EVENT", "012345")
-        for bad in (b"MEAT", b"OC1|012345|E|P2:PU:Z", b"OC1|01234x|A|OK",
-                    b"OC2|012345|A|OK", bytes(225)):
+            assert decode(b"OC2|012345|E|P2:" + action) == ("EVENT", "012345")
+        assert decode(b"OC2|012345|E|P2:SUB:BMLC") == ("EVENT", "012345")
+        assert decode(b"OC2|012345|E|P2:X:PB-L-") == ("EVENT", "012345")
+        assert decode(b"OC2|012345|E|P2:X:HD") == ("EVENT", "012345")
+        assert decode(b"OC2|012345|E|P2:X:HM") == ("EVENT", "012345")
+        assert decode(b"OC2|012345|E|P2:X:HR") == ("EVENT", "012345")
+        for bad in (b"MEAT", b"OC1|012345|E|P2:PU:R", b"OC2|012345|E|P2:PU:Z", b"OC2|01234x|A|OK",
+                    b"OC3|012345|A|OK", bytes(225)):
             assert decode(bad) is None
         print("PASS: packet format, strict length, namespace, and sequence validation")
     else:

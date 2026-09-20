@@ -4,8 +4,8 @@
 
 HTN26 is a local cooperative cooking game inspired by Overcooked.
 
-The first playable server runs on the captain's laptop and accepts setup photos
-from an Apple phone.
+The current production/live deployment runs on the captain's laptop and accepts
+setup photos from an Apple phone.
 
 The current setup path uploads Apple-phone room photographs to the laptop server.
 
@@ -181,7 +181,9 @@ A round lasts approximately four minutes.
 After the round duration, the host badge broadcasts game end to all badges and
 the laptop server and UI.
 
-Game end wipes held items, plates, timers, and other round state on every badge and in the authoritative game state.
+Game end clears active badge and gameplay state. The laptop server's retained
+results and history behavior is defined in
+[`pi/server/README.md`](pi/server/README.md).
 
 The system should keep retrying a lost connection rather than treating a temporary reconnect as a product failure.
 
