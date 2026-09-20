@@ -31,7 +31,6 @@ const STATION_SLOTS = Object.freeze([
   { id: "assembly", label: "ASSEMBLY", kind: "assembly", column: 13, row: 8, assetKey: "COUNTER", contents: ["BUN", "COOKED MEAT", "SHREDDED LETTUCE"] },
   { id: "chop1", label: "CHOP 1", kind: "chop", column: 2, row: 8, assetKey: "CHOP" },
   { id: "chop2", label: "CHOP 2", kind: "chop", column: 6, row: 8, assetKey: "CHOP" },
-  { id: "serving", label: "PLATES", kind: "delivery", column: 18, row: 8, assetKey: "COUNTER" },
 ]);
 
 const COUNTER_REGIONS = Object.freeze([
@@ -40,9 +39,8 @@ const COUNTER_REGIONS = Object.freeze([
   { id: "pantry-counter", column: 1, row: 1, columns: 12, rows: 2 },
   { id: "stove-counter", column: 14, row: 1, columns: 7, rows: 2 },
   { id: "chop-counter", column: 1, row: 8, columns: 10, rows: 2 },
-  { id: "plate-counter", column: 17, row: 8, columns: 4, rows: 2 },
-  // The assembly counter fills the gap between the chopping and plate
-  // counters. There is deliberately no center island: with two-tile-thick
+  // The assembly counter sits in the bottom row beside the chopping counter.
+  // There is deliberately no center island: with two-tile-thick
   // perimeter counters and the chef collision radius, any obstacle in the
   // middle would split the room into two halves players cannot cross. The
   // assembly tile displays the plate and the current burger components.
@@ -161,7 +159,6 @@ const PLACEMENT_TEXT = Object.freeze({
   chop2: "Keep the second chopping board beside chop 1",
   stove1: "Use the left burner on the upper-right counter",
   stove2: "Use the right burner beside stove 1",
-  serving: "Keep plates on the lower-right counter",
 });
 
 export function createStandardRoomPlan() {

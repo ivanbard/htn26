@@ -1,4 +1,4 @@
-import { canRunAction, cloneState, GAME_ACTIONS, SETUP_PHASES } from "./state.js";
+import { canRunAction, cloneState, GAME_ACTIONS, SETUP_PHASES, stationProgressPercent } from "./state.js";
 import { createStandardRoomPlan } from "./room-grid.js";
 
 const STANDARD_ROOM_PLAN = createStandardRoomPlan();
@@ -20,9 +20,13 @@ const PLACEMENT_INSTRUCTIONS = STANDARD_ROOM_PLAN.placementInstructions;
 function health(now) {
   return {
     gateway: { id: "gateway", label: "GATEWAY BADGE", status: "healthy", lastSeenAt: now, detail: "Host badge / USB online" },
-    workers: [],
-    inference: { id: "inference", label: "SETUP INFERENCE", status: "healthy", lastSeenAt: now, detail: "Room setup complete" },
-    trackingCoverage: "event-inferred",
+    workers: [
+      { id: "camera-1", label: "CAMERA 1", status: "healthy", lastSeenAt: now, detail: "Master Pi camera" },
+      { id: "camera-2", label: "CAMERA 2", status: "healthy", lastSeenAt: now, detail: "Worker Pi 2" },
+      { id: "camera-3", label: "CAMERA 3", status: "healthy", lastSeenAt: now, detail: "Worker Pi 3" },
+    ],
+    inference: { id: "inference", label: "AI INFERENCE", status: "healthy", lastSeenAt: now, detail: "On-device tracking" },
+    trackingCoverage: "healthy",
   };
 }
 
@@ -30,7 +34,7 @@ function burgerLevel(status = "not-generated") {
   return { status, recipe: "BURGER", placementInstructions: cloneState(PLACEMENT_INSTRUCTIONS) };
 }
 
-// Mirrors server/src/projection.mjs BURGER_RECIPES exactly (id, dish name,
+// Mirrors pi/server/src/projection.mjs BURGER_RECIPES exactly (id, dish name,
 // components, gold) — the mock is a stand-in for that authoritative Pi
 // projection, so it uses the same four recipes and the same gold values
 // rather than inventing its own catalog.
@@ -44,7 +48,7 @@ const RECIPE_BY_ID = new Map(BURGER_RECIPES.map((recipe) => [recipe.id, recipe])
 
 // README.md "Submission behavior": "The authoritative Pi projection applies
 // the configured penalty, tip, or bonus-gold result for the submitted
-// order." The gold/tip side of that is implemented in server's
+// order." The gold/tip side of that is implemented in pi/server's
 // projection.mjs (ported below in orderTip()); no file in this repo defines
 // a penalty amount, so this is this mock's own reasonable stand-in for that
 // documented-but-unspecified value, not a value read from server code.
@@ -61,7 +65,7 @@ function makeMockOrder(id, recipe, remainingSeconds, totalSeconds = 120) {
     goldValue: recipe.gold,
     remainingSeconds,
     totalSeconds,
-    // Same 3-segment patience meter as server's projection.mjs, computed
+    // Same 3-segment patience meter as pi/server's projection.mjs, computed
     // the same way: ceil((remaining / total) * 3), clamped to [0, 3].
     patience: { segments: 3, filledSegments: orderPatienceSegments(remainingSeconds, totalSeconds) },
   };
@@ -72,7 +76,7 @@ function orderPatienceSegments(remainingSeconds, totalSeconds) {
   return Math.max(0, Math.min(3, Math.ceil((remainingSeconds / totalSeconds) * 3)));
 }
 
-// Identical formula to server/src/projection.mjs's submit(): gold is
+// Identical formula to pi/server/src/projection.mjs's submit(): gold is
 // worth 10% of a tip, plus up to 5 more for a plate turned in with a full
 // patience meter — so a same-tick (3/3 segments) submission tips the most,
 // and it never rounds down to nothing.
@@ -101,15 +105,14 @@ export function createInitialMockState(now = Date.now()) {
   const orders = cloneState(MOCK_ORDERS);
   return {
     version: 2,
-    schemaVersion: 2,
-    source: "mock-laptop-server",
-    setup: { phase: SETUP_PHASES.IDLE, message: "Host is idle. Start to prepare the standard kitchen.", updatedAt: now },
+    source: "mock-master-pi",
+  setup: { phase: SETUP_PHASES.IDLE, message: "Host is idle. Start to prepare the standard kitchen.", updatedAt: now },
     floorPlan: cloneState(PROPOSED_PLAN),
     burgerLevel: burgerLevel(),
     players: [
-      { id: "p1", label: "P1", name: "PLAYER 1", color: "red", position: { x: 20, y: 58 }, location: "center", positionSource: "badge-events", tracking: { status: "inferred", source: "badge-events", lastSeenAt: now, staleAfterMs: null }, heldItem: "PLATE", actionState: "holding plate", inventory: ["BUN", "COOKED MEAT", "SHREDDED LETTUCE"], plate: ["BUN", "COOKED MEAT", "SHREDDED LETTUCE"] },
-      { id: "p2", label: "P2", name: "PLAYER 2", color: "blue", position: { x: 68, y: 58 }, location: "center", positionSource: "badge-events", tracking: { status: "inferred", source: "badge-events", lastSeenAt: now, staleAfterMs: null }, heldItem: "RAW_MEAT", actionState: "holding raw meat", inventory: ["RAW MEAT"] },
-      { id: "p3", label: "P3", name: "PLAYER 3", color: "green", position: { x: 82, y: 63 }, location: "center", positionSource: "badge-events", tracking: { status: "inferred", source: "badge-events", lastSeenAt: now, staleAfterMs: null }, heldItem: "PLATE", actionState: "holding plate", inventory: ["BUN", "CHOPPED CHEESE"], plate: ["BUN", "CHOPPED CHEESE"] },
+      { id: "p1", label: "P1", name: "PLAYER 1", color: "red", position: { x: 20, y: 58 }, tracking: { status: "healthy", source: "nfc-scan", lastSeenAt: now, staleAfterMs: 20_000 }, inventory: [], plate: ["BUN", "COOKED MEAT", "SHREDDED LETTUCE"] },
+      { id: "p2", label: "P2", name: "PLAYER 2", color: "blue", position: { x: 68, y: 58 }, tracking: { status: "healthy", source: "nfc-scan", lastSeenAt: now, staleAfterMs: 20_000 }, inventory: ["RAW MEAT"] },
+      { id: "p3", label: "P3", name: "PLAYER 3", color: "green", position: { x: 82, y: 63 }, tracking: { status: "healthy", source: "nfc-scan", lastSeenAt: now, staleAfterMs: 20_000 }, inventory: [], plate: ["BUN", "CHOPPED CHEESE"] },
     ],
     order: cloneState(orders[0]),
     orders,
@@ -120,6 +123,7 @@ export function createInitialMockState(now = Date.now()) {
       { id: "chop1", label: "CHOP 1", kind: "chop", status: "ready", progress: 1, remainingSeconds: 0, item: "LETTUCE" },
       { id: "chop2", label: "CHOP 2", kind: "chop", status: "chopping", progress: 0.4, remainingSeconds: 9, totalSeconds: 15, item: "CHEESE" },
     ],
+    score: { value: 0, delivered: 0 },
     gold: { total: 0, earned: 0, lastChange: 0 },
     tips: { total: 0, earned: 0, lastChange: 0 },
     score: { value: 0, delivered: 0 },
@@ -131,6 +135,65 @@ export function createInitialMockState(now = Date.now()) {
 
 function withUpdate(state, changes, now) {
   return { ...state, ...changes, setup: { ...state.setup, ...changes.setup, updatedAt: now } };
+}
+
+// Timings mirrored from pi/server/src/projection.mjs (CHOP_SECONDS,
+// COOK_SECONDS, DONE_SECONDS, WARNING_SECONDS, and its stove state machine in
+// _updateStoves): cooking -> done -> warning -> burnt.
+const CHOP_SECONDS = 3;
+const COOK_SECONDS = 15;
+const DONE_SECONDS = 2;
+const WARNING_SECONDS = 3;
+const EXPIRED_MESSAGE = "Time’s up. Reset to host another burger level.";
+
+// advanceMockState keeps sub-second precision in hidden `remainingMs` /
+// `elapsedMs` fields beside the whole-second values it publishes (the Pi sends
+// whole seconds rounded up). They are only trusted while they still agree with
+// the published seconds; anything that rewrote the seconds (a restart, a test
+// fixture) falls back to the seconds, so a stale carry can never leak across.
+function withoutCarry(item) {
+  if (!item || typeof item !== "object") return item;
+  const { remainingMs, elapsedMs, ...rest } = item;
+  return rest;
+}
+
+function carriedRemainingMs(item, fallbackMs) {
+  const carried = Number(item?.remainingMs);
+  const seconds = Number(item?.remainingSeconds);
+  return Number.isFinite(carried) && Number.isFinite(seconds) && Math.ceil(carried / 1000) === Math.ceil(seconds)
+    ? carried
+    : fallbackMs;
+}
+
+function restartOrder(order) {
+  const totalSeconds = order.totalSeconds;
+  return {
+    ...withoutCarry(order),
+    status: "active",
+    remainingSeconds: totalSeconds,
+    patience: {
+      ...order.patience,
+      segments: order.patience?.segments ?? 3,
+      remainingSeconds: totalSeconds,
+      totalSeconds,
+      filledSegments: orderPatienceSegments(totalSeconds, totalSeconds),
+    },
+  };
+}
+
+// A new round starts the workstation timers from zero, the way a fresh Pi
+// round starts a fresh cook: the fixture's mid-cook stove/board restart their
+// clocks so their bars visibly fill during the round.
+function restartStationTimer(station) {
+  if (station?.kind === "stove" && station.status === "cooking") {
+    const { warningMessage, ...rest } = withoutCarry(station);
+    return { ...rest, progress: 0, totalSeconds: COOK_SECONDS, remainingSeconds: COOK_SECONDS, warning: false };
+  }
+  if (station?.kind === "chop" && station.status === "chopping") {
+    const totalSeconds = Number(station.totalSeconds) > 0 ? Number(station.totalSeconds) : CHOP_SECONDS;
+    return { ...withoutCarry(station), progress: 0, totalSeconds, remainingSeconds: totalSeconds };
+  }
+  return station;
 }
 
 function startHost(state, now) {
@@ -167,7 +230,7 @@ function rescanRoom(state, now) {
 function approveLayout(state, now) {
   if (!canRunAction(state, GAME_ACTIONS.APPROVE_LAYOUT)) return state;
   return withUpdate(state, {
-    setup: { phase: SETUP_PHASES.BURGER_PLACEMENT, message: "Burger level generated. Place the ingredients, chopping boards, stoves, and serving badge as shown." },
+    setup: { phase: SETUP_PHASES.BURGER_PLACEMENT, message: "Burger level generated. Place the ingredients, chopping boards, stoves, and assembly counter as shown." },
     floorPlan: { ...state.floorPlan, accepted: true },
     burgerLevel: { ...state.burgerLevel, status: "placement-ready" },
   }, now);
@@ -175,42 +238,24 @@ function approveLayout(state, now) {
 
 function startGame(state, now) {
   if (!canRunAction(state, GAME_ACTIONS.START_GAME)) return state;
-  const orders = normalizedOrders(state).map((order) => ({ ...order, status: "active", remainingSeconds: order.totalSeconds }));
+  const orders = normalizedOrders(state).map((order) => restartOrder(order));
   return withUpdate(state, {
-    setup: { phase: SETUP_PHASES.RUNNING, message: "Burger game running. Badge events drive player state and inferred positions." },
+    setup: { phase: SETUP_PHASES.RUNNING, message: "Burger game running. Live locations and orders come from the master Pi." },
+    score: { value: 0, delivered: 0 },
     gold: { total: 0, earned: 0, lastChange: 0 },
     tips: { total: 0, earned: 0, lastChange: 0 },
-    penalties: { total: 0, lastChange: 0 },
-    score: { value: 0, delivered: 0 },
-    clock: { ...state.clock, status: "running", remainingSeconds: state.clock.totalSeconds },
+    clock: { ...withoutCarry(state.clock), status: "running", remainingSeconds: state.clock.totalSeconds },
     order: { ...withPrimaryOrder(orders, state.order) },
     orders,
+    stations: Array.isArray(state.stations) ? state.stations.map(restartStationTimer) : state.stations,
     serving: { ...state.serving, lastEvent: null },
-    submissions: [],
-    players: state.players.map((player, index) => ({
-      ...player,
-      position: { x: [34, 50, 66][index] ?? 50, y: 88 },
-      location: "bottom",
-      heldItem: "EMPTY",
-      actionState: "idle",
-      inventory: [],
-    })),
     burgerLevel: { ...state.burgerLevel, status: "in-play" },
   }, now);
 }
 
 function endGame(state, now) {
   if (!canRunAction(state, GAME_ACTIONS.END_GAME)) return state;
-  const orders = normalizedOrders(state).map((order) => order.status === "active"
-    ? { ...order, status: "expired", remainingSeconds: 0 }
-    : { ...order });
-  return withUpdate(state, {
-    setup: { phase: SETUP_PHASES.ENDED, message: "Game ended. Reset to host another burger level." },
-    clock: { ...state.clock, status: "ended", remainingSeconds: 0 },
-    orders,
-    order: { ...withPrimaryOrder(orders, state.order) },
-    players: state.players.map((player, index) => ({ ...player, position: { x: [34, 50, 66][index] ?? 50, y: 88 }, location: "bottom", heldItem: "EMPTY", actionState: "idle", inventory: [] })),
-  }, now);
+  return withUpdate(state, { setup: { phase: SETUP_PHASES.ENDED, message: "Game ended. Reset to host another burger level." }, clock: { ...state.clock, status: "ended" } }, now);
 }
 
 function hasActiveRound(state) {
@@ -220,7 +265,7 @@ function hasActiveRound(state) {
 }
 
 // README.md "Submission behavior": a correct submission "reports its
-// score"; a failed one "applies a penalty and has no retry." server's
+// score"; a failed one "applies a penalty and has no retry." pi/server's
 // submit() implements the success side (gold from the matched recipe, a tip
 // from remaining patience) — ported via orderTip()/RECIPE_BY_ID above so
 // this mock computes the same numbers the authoritative Pi would. The
@@ -242,8 +287,6 @@ function recordDelivery(state, success, now, orderId) {
   const penalty = success ? 0 : FAILED_SUBMISSION_PENALTY;
   const event = success
     ? {
-      id: `submission-${(state.submissions || []).length + 1}`,
-      playerId: "p1",
       status: "success",
       message: "BURGER SERVED",
       detail: segments >= 3 ? "Served with a full patience meter — max tip." : segments > 0 ? `Served with ${segments}/3 patience remaining.` : "Served just before the order ran out.",
@@ -254,8 +297,6 @@ function recordDelivery(state, success, now, orderId) {
       at: now,
     }
     : {
-      id: `submission-${(state.submissions || []).length + 1}`,
-      playerId: "p1",
       status: "failure",
       message: "WRONG BURGER",
       detail: `Serving badge rejected the topping combination — penalty applied.`,
@@ -268,27 +309,21 @@ function recordDelivery(state, success, now, orderId) {
   const nextOrders = success
     ? orders.map((order, index) => index === targetIndex ? { ...order, status: "completed" } : { ...order })
     : orders.map((order) => ({ ...order }));
-  const goldTotal = Number(state.gold?.total || 0) + (success ? gold : 0);
-  const tipsTotal = Number(state.tips?.total || 0) + (success ? tip : 0);
-  const penaltiesTotal = Number(state.penalties?.total || 0) + (success ? 0 : penalty);
   return withUpdate(state, {
-    gold: success
-      ? { total: goldTotal, earned: Number(state.gold?.earned || 0) + gold, lastChange: gold }
-      : { ...state.gold, lastChange: 0 },
-    tips: success
-      ? { total: tipsTotal, earned: Number(state.tips?.earned || 0) + tip, lastChange: tip }
-      : { ...state.tips, lastChange: 0 },
-    penalties: success
-      ? { ...state.penalties, lastChange: 0 }
-      : { total: penaltiesTotal, lastChange: -penalty },
     score: {
-      value: goldTotal + tipsTotal - penaltiesTotal,
+      ...state.score,
+      value: Number(state.score?.value || 0) + (success ? gold : -penalty),
       delivered: Number(state.score?.delivered || 0) + (success ? 1 : 0),
     },
+    gold: success
+      ? { ...state.gold, total: Number(state.gold?.total || 0) + gold, earned: Number(state.gold?.earned || 0) + gold, lastChange: gold }
+      : { ...state.gold, lastChange: 0 },
+    tips: success
+      ? { ...state.tips, total: Number(state.tips?.total || 0) + tip, earned: Number(state.tips?.earned || 0) + tip, lastChange: tip }
+      : { ...state.tips, lastChange: 0 },
     order: { ...withPrimaryOrder(nextOrders, state.order) },
     orders: nextOrders,
     serving: { ...state.serving, lastEvent: event },
-    submissions: [...(state.submissions || []), event],
   }, now);
 }
 
@@ -309,31 +344,194 @@ export function reduceMockState(state, command, now = Date.now()) {
   }
 }
 
+function stovePhase(elapsedMs, cookSeconds) {
+  const elapsed = Math.max(0, elapsedMs) / 1000;
+  if (elapsed < cookSeconds) {
+    return { status: "cooking", progress: Math.min(1, elapsed / cookSeconds), remainingSeconds: Math.ceil(cookSeconds - elapsed) };
+  }
+  if (elapsed < cookSeconds + DONE_SECONDS) {
+    return { status: "done", progress: 1, remainingSeconds: Math.ceil(cookSeconds + DONE_SECONDS - elapsed) };
+  }
+  if (elapsed < cookSeconds + DONE_SECONDS + WARNING_SECONDS) {
+    return { status: "warning", progress: 1, remainingSeconds: Math.ceil(cookSeconds + DONE_SECONDS + WARNING_SECONDS - elapsed) };
+  }
+  return { status: "burnt", progress: 1, remainingSeconds: 0 };
+}
+
+// Time already spent cooking, from the carried sub-second value when it still
+// matches the published state, else from the published status/remaining.
+function stoveElapsedMs(station, cookSeconds) {
+  const carried = Number(station.elapsedMs);
+  if (Number.isFinite(carried) && carried >= 0) {
+    const phase = stovePhase(carried, cookSeconds);
+    if (phase.status === station.status && phase.remainingSeconds === Number(station.remainingSeconds)) return carried;
+  }
+  const remaining = Number(station.remainingSeconds);
+  const known = station.remainingSeconds != null && Number.isFinite(remaining);
+  if (station.status === "cooking") {
+    return (known ? Math.max(0, cookSeconds - remaining) : cookSeconds * (stationProgressPercent(station) / 100)) * 1000;
+  }
+  const phaseLength = station.status === "done" ? DONE_SECONDS : WARNING_SECONDS;
+  const phaseEnd = cookSeconds + (station.status === "done" ? DONE_SECONDS : DONE_SECONDS + WARNING_SECONDS);
+  return (phaseEnd - (known ? Math.max(0, Math.min(remaining, phaseLength)) : phaseLength)) * 1000;
+}
+
+function advanceStove(station, elapsedMs) {
+  const cookSeconds = Number(station.totalSeconds) > 0 ? Number(station.totalSeconds) : COOK_SECONDS;
+  const elapsed = stoveElapsedMs(station, cookSeconds) + elapsedMs;
+  const phase = stovePhase(elapsed, cookSeconds);
+  const { warningMessage, ...rest } = station;
+  return {
+    ...rest,
+    status: phase.status,
+    progress: phase.progress,
+    remainingSeconds: phase.remainingSeconds,
+    elapsedMs: elapsed,
+    item: phase.status === "cooking" ? station.item : phase.status === "burnt" ? "BURNT MEAT" : "COOKED MEAT",
+    warning: phase.status === "warning",
+    ...(phase.status === "warning" ? { warningMessage: "MEAT IS NEARLY BURNT" } : {}),
+  };
+}
+
+function advanceChop(station, elapsedMs) {
+  const totalSeconds = Number(station.totalSeconds) > 0 ? Number(station.totalSeconds) : CHOP_SECONDS;
+  const remaining = Number(station.remainingSeconds);
+  const fallbackMs = station.remainingSeconds != null && Number.isFinite(remaining)
+    ? remaining * 1000
+    : totalSeconds * 1000 * (1 - stationProgressPercent(station) / 100);
+  const remainingMs = carriedRemainingMs(station, fallbackMs) - elapsedMs;
+  if (remainingMs <= 0) {
+    return { ...withoutCarry(station), status: "ready", progress: 1, remainingSeconds: 0 };
+  }
+  return {
+    ...station,
+    status: "chopping",
+    progress: Math.max(0, Math.min(1, 1 - remainingMs / (totalSeconds * 1000))),
+    remainingSeconds: Math.ceil(remainingMs / 1000),
+    remainingMs,
+  };
+}
+
+function advanceStation(station, elapsedMs) {
+  if (station?.kind === "chop" && station.status === "chopping") return advanceChop(station, elapsedMs);
+  if (station?.kind === "stove" && ["cooking", "done", "warning"].includes(station.status)) return advanceStove(station, elapsedMs);
+  return station;
+}
+
+function advanceOrder(order, elapsedMs) {
+  if (order?.status !== "active") return order;
+  const totalSeconds = Number(order.totalSeconds);
+  const remainingMs = carriedRemainingMs(order, Number(order.remainingSeconds || 0) * 1000) - elapsedMs;
+  if (remainingMs <= 0) {
+    return {
+      ...withoutCarry(order),
+      status: "expired",
+      remainingSeconds: 0,
+      patienceState: 0,
+      patience: { ...order.patience, remainingSeconds: 0, filledSegments: 0, state: 0 },
+    };
+  }
+  const remainingSeconds = Math.ceil(remainingMs / 1000);
+  const filledSegments = orderPatienceSegments(remainingSeconds, totalSeconds);
+  return {
+    ...order,
+    remainingSeconds,
+    remainingMs,
+    patienceState: filledSegments,
+    patience: { ...order.patience, segments: order.patience?.segments ?? 3, remainingSeconds, totalSeconds, filledSegments, state: filledSegments },
+  };
+}
+
+// The Pi clears the workstations and cancels open orders when the round timer
+// reaches zero (projection.mjs _tick).
+function endRound(state, now) {
+  const cancel = (order) => order?.status === "active"
+    ? {
+      ...withoutCarry(order),
+      status: "cancelled",
+      remainingSeconds: 0,
+      patienceState: 0,
+      patience: { ...order.patience, remainingSeconds: 0, filledSegments: 0, state: 0 },
+    }
+    : order;
+  const hasOrders = Array.isArray(state.orders) && state.orders.length > 0;
+  const orders = hasOrders ? state.orders.map(cancel) : state.orders;
+  const cleared = (station) => {
+    if (station?.kind !== "stove" && station?.kind !== "chop") return station;
+    const { warningMessage, ...rest } = withoutCarry(station);
+    return { ...rest, status: "idle", progress: 0, remainingSeconds: 0, item: null, warning: false };
+  };
+  return withUpdate(state, {
+    setup: { phase: SETUP_PHASES.ENDED, message: EXPIRED_MESSAGE },
+    clock: { ...withoutCarry(state.clock), status: "ended", remainingSeconds: 0 },
+    ...(hasOrders ? { orders, order: { ...withPrimaryOrder(orders, state.order) } } : { order: cancel(state.order) }),
+    stations: Array.isArray(state.stations) ? state.stations.map(cleared) : state.stations,
+    burgerLevel: { ...state.burgerLevel, status: "ended" },
+  }, now);
+}
+
+/**
+ * Advance a RUNNING round by `elapsedMs` the way the real Pi's projection tick
+ * does, and return the next state (the input is never mutated). This is the one
+ * place the browser side simulates timers; the renderer only displays them.
+ *
+ * - the round clock counts down and, at zero, the round ends (setup.phase
+ *   ENDED, clock.status "ended", open orders cancelled, workstations cleared);
+ * - active orders count down with `patience.filledSegments` recomputed, and an
+ *   order that reaches zero becomes "expired";
+ * - a chopping board's progress follows remaining/total and finishes "ready";
+ * - a stove runs cooking -> done -> warning -> burnt (COOK/DONE/WARNING
+ *   seconds as in projection.mjs).
+ *
+ * Returns the same `state` object when the round is not running or no time has
+ * elapsed, so callers can cheaply detect a no-op.
+ */
+export function advanceMockState(state, elapsedMs, now = Date.now()) {
+  const elapsed = Number(elapsedMs);
+  if (!Number.isFinite(elapsed) || elapsed <= 0) return state;
+  if (state?.setup?.phase !== SETUP_PHASES.RUNNING || state.clock?.status !== "running") return state;
+
+  const clockMs = carriedRemainingMs(state.clock, Number(state.clock.remainingSeconds || 0) * 1000) - elapsed;
+  if (clockMs <= 0) return endRound(state, now);
+
+  const hasOrders = Array.isArray(state.orders) && state.orders.length > 0;
+  const orders = hasOrders ? state.orders.map((order) => advanceOrder(order, elapsed)) : state.orders;
+  return {
+    ...state,
+    clock: { ...state.clock, remainingSeconds: Math.ceil(clockMs / 1000), remainingMs: clockMs },
+    ...(hasOrders
+      ? { orders, order: { ...withPrimaryOrder(orders, state.order) } }
+      : { order: advanceOrder(state.order, elapsed) }),
+    stations: Array.isArray(state.stations) ? state.stations.map((station) => advanceStation(station, elapsed)) : state.stations,
+  };
+}
+
 export function createMockTransport({ initialState, now = () => Date.now() } = {}) {
   let state = cloneState(initialState || createInitialMockState(now()));
   const listeners = new Set();
   const emit = () => { const snapshot = cloneState(state); listeners.forEach((listener) => listener(snapshot)); };
+  // The mock stands in for the Pi's projection tick: every second it advances a
+  // running round by the real time that passed (advanceMockState is a no-op
+  // unless the round is running, or when `now` has not moved).
+  let lastTickAt = now();
+  const tick = () => {
+    const at = now();
+    const elapsedMs = at - lastTickAt;
+    lastTickAt = at;
+    state = advanceMockState(state, elapsedMs, at);
+  };
   // Real badges keep re-scanning, so tracking.lastSeenAt keeps advancing. The
   // mock never dispatches anything per-player, so without a heartbeat every
   // player's lastSeenAt freezes at game start and trips staleAfterMs (20s),
   // fading all players (.is-stale) for the rest of the round.
   const heartbeat = setInterval(() => {
+    tick();
     if (!listeners.size || !Array.isArray(state.players)) return;
     const seenAt = now();
     const players = state.players.map((player) => player.tracking?.status === "healthy"
       ? { ...player, tracking: { ...player.tracking, lastSeenAt: seenAt } }
       : player);
-    if (state.setup?.phase === SETUP_PHASES.RUNNING && state.clock?.status === "running") {
-      const remaining = Math.max(0, Number(state.clock.remainingSeconds || 0) - 1);
-      const orders = normalizedOrders(state).map((order) => order.status === "active"
-        ? { ...order, remainingSeconds: Math.max(0, Number(order.remainingSeconds || 0) - 1) }
-        : { ...order });
-      state = remaining === 0
-        ? withUpdate(state, { setup: { phase: SETUP_PHASES.ENDED, message: "Time’s up. Reset to host another burger level." }, clock: { ...state.clock, status: "ended", remainingSeconds: 0 }, players, orders, order: withPrimaryOrder(orders, state.order) }, seenAt)
-        : { ...state, players, clock: { ...state.clock, remainingSeconds: remaining }, orders, order: withPrimaryOrder(orders, state.order) };
-    } else {
-      state = { ...state, players };
-    }
+    state = { ...state, players };
     emit();
   }, 1_000);
   // Don't keep a Node process (tests) alive just for the heartbeat.
@@ -342,7 +540,7 @@ export function createMockTransport({ initialState, now = () => Date.now() } = {
     kind: "mock",
     connect(listener) { listeners.add(listener); listener(cloneState(state)); return () => listeners.delete(listener); },
     snapshot() { return cloneState(state); },
-    async command(command) { state = reduceMockState(state, command, now()); emit(); return cloneState(state); },
+    async command(command) { tick(); state = reduceMockState(state, command, now()); emit(); return cloneState(state); },
     close() { clearInterval(heartbeat); listeners.clear(); },
   };
 }

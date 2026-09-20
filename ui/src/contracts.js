@@ -344,8 +344,8 @@ function normalizedPoint(item, scaleX, scaleY) {
   return { ...item, x: Number(item.x) * scaleX, y: Number(item.y) * scaleY };
 }
 
-function isLaptopServerSnapshot(snapshot) {
-  return snapshot?.source === "pi-server-simulator"
+function isServerSnapshot(snapshot) {
+  return ["pi-server", "root-server", "pi-server-simulator", "root-server-simulator"].includes(snapshot?.source)
     || (snapshot?.floorPlan?.units === "m" && snapshot?.players?.some((player) => isRecord(player?.simulatedLocation)));
 }
 
@@ -384,8 +384,14 @@ function stationPosition(stationId, floorPlan) {
 }
 
 export function normalizeFrontendSnapshot(snapshot) {
-  if (!isRecord(snapshot) || !isLaptopServerSnapshot(snapshot)) return isRecord(snapshot) ? { ...snapshot } : snapshot;
+  if (!isRecord(snapshot) || !isServerSnapshot(snapshot)) return isRecord(snapshot) ? { ...snapshot } : snapshot;
   const floorPlan = normalizeLaptopFloorPlan(snapshot.floorPlan);
+  const score = isRecord(snapshot.score)
+    ? snapshot.score
+    : {
+        value: Number(snapshot.money?.net ?? snapshot.gold?.total ?? 0) || 0,
+        delivered: Number(snapshot.delivered ?? snapshot.submissions?.filter((submission) => submission?.status === "accepted").length ?? 0) || 0,
+      };
   const scaleX = floorPlan === snapshot.floorPlan ? 1 : 100 / Number(snapshot.floorPlan?.width);
   const scaleY = floorPlan === snapshot.floorPlan ? 1 : 100 / Number(snapshot.floorPlan?.height);
   const placementInstructions = Array.isArray(snapshot.burgerLevel?.placementInstructions)
@@ -394,6 +400,7 @@ export function normalizeFrontendSnapshot(snapshot) {
   return {
     ...snapshot,
     floorPlan,
+    score,
     burgerLevel: isRecord(snapshot.burgerLevel)
       ? { ...snapshot.burgerLevel, placementInstructions }
       : snapshot.burgerLevel,
