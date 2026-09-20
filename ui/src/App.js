@@ -229,52 +229,26 @@ function OrderTimerIcon() {
   );
 }
 
-function IngredientIcon({ value, decorative = false }) {
-  // Every caller (.station-plate img, .hud-ingredient-slot img,
-  // .burger-preview-layer img) already sets its own explicit width/height/
-  // object-fit for this <img> based on its own slot. A fixed Tailwind h-*/w-*
-  // class here fought that sizing (it rendered at its own fixed pixel size
-  // instead of shrinking to fill a stacked burger layer's slot, clipping the
-  // rest of the stack), so this intentionally sets no size of its own.
+function IngredientIcon({ value }) {
+  // Every caller (.station-plate img, .hud-ingredient-slot img) already sets
+  // its own explicit width/height/object-fit for this <img> based on its own
+  // slot, so this intentionally sets no size of its own (a fixed Tailwind
+  // h-*/w-* class here previously fought that per-slot sizing).
   const source = ingredientAsset(value);
-  return source ? h("img", { className: "object-contain", src: source, alt: decorative ? "" : upper(value), loading: "lazy" }) : h("span", { className: "text-xs font-black text-[#8e7664]" }, upper(value).slice(0, 3));
+  return source ? h("img", { className: "object-contain", src: source, alt: upper(value), loading: "lazy" }) : h("span", { className: "text-xs font-black text-[#8e7664]" }, upper(value).slice(0, 3));
 }
 
-// Real burger cross-section, top to bottom. The bun is a single held item
-// (see product rules: "the bun is one object that includes both the top and
-// bottom buns together"), so it renders once as the base rather than as a
-// duplicated cap — stacking a second copy of the same icon on top produced
-// an oversized, overflowing stack that clipped inside the small HUD card.
-const BURGER_TOPPING_ORDER = ["LETTUCE", "CHEESE", "MEAT"];
-
-function burgerLayers(components) {
-  const toppings = components.filter((item) => ingredientKey(item) !== "BUN" && Boolean(item));
-  if (!toppings.length) return ["BUN"];
-  const ordered = [...toppings].sort((a, b) => {
-    const rank = (item) => {
-      const index = BURGER_TOPPING_ORDER.indexOf(ingredientKey(item));
-      return index === -1 ? BURGER_TOPPING_ORDER.length : index;
-    };
-    return rank(a) - rank(b);
-  });
-  return [...ordered, "BUN"];
-}
+// A single pre-drawn burger icon (not an assembled stack of the individual
+// ingredient PNGs) — this card is a "this order is a burger" glance icon;
+// the exact required components are already listed explicitly right next to
+// it in .hud-ingredient-slots, so the preview doesn't need to reconstruct the
+// recipe pixel-by-pixel. Art: Kenney "Pixel Platformer: Food Expansion"
+// (kenney.nl), CC0.
+const BURGER_PREVIEW_SRC = "/assets/order-burger.png";
 
 function BurgerPreview({ order, components }) {
-  const layers = burgerLayers(components);
   const title = orderTitle(order);
   const recipe = components.length ? components.map((item) => upper(item)).join(", ") : "BUN";
-  const layerElements = layers.map((item, index) => h(
-    "span",
-    {
-      key: `${item}-${index}`,
-      className: cx("burger-preview-layer", ingredientKey(item) === "BUN" && "is-bun"),
-      "data-burger-layer": upper(item),
-      style: { zIndex: layers.length - index },
-    },
-    h(IngredientIcon, { value: item, decorative: true }),
-  ));
-
   return h(
     "div",
     {
@@ -283,14 +257,7 @@ function BurgerPreview({ order, components }) {
       role: "img",
       "aria-label": `${title} assembled burger: ${recipe}`,
     },
-    h(
-      "div",
-      { className: "burger-preview" },
-      // --layer-count sizes and overlaps each layer as a share of the card's
-      // height so a 1-item and a 4-item burger both fill the frame without
-      // the top or bottom layer clipping against its rounded corners.
-      h("div", { className: "burger-preview-stack", style: { "--layer-count": layers.length } }, layerElements),
-    ),
+    h("img", { className: "burger-preview-art", src: BURGER_PREVIEW_SRC, alt: "" }),
   );
 }
 
