@@ -9,7 +9,7 @@ import {
   displayModeForPhase,
   UI_DISPLAY_MODES,
 } from "./state.js";
-import { validateFrontendSnapshot } from "./contracts.js";
+import { validateAndNormalizeSnapshot } from "./contracts.js";
 import {
   planPlayerPaths,
   projectPointIntoWalkableRoom,
@@ -72,9 +72,7 @@ function submissionRewardLabels(submission) {
     ].filter(Boolean);
   }
   const penalty = Number(submission.penalty);
-  const points = Number(submission.points);
-  if (Number.isFinite(points) && points < 0) return [String(points)];
-  return Number.isFinite(penalty) && penalty > 0 ? [String(-penalty)] : [];
+  return Number.isFinite(penalty) && penalty !== 0 ? [`-${Math.abs(penalty)} POINTS`] : [];
 }
 
 function authoritativeTotals(state) {
@@ -138,8 +136,8 @@ function seconds(value) {
 }
 
 function stageIndex(phase) {
-  if (phase === SETUP_PHASES.RUNNING) return 4;
-  if (phase === SETUP_PHASES.BURGER_PLACEMENT || phase === SETUP_PHASES.LAYOUT_ACCEPTED) return 3;
+  if ([SETUP_PHASES.RUNNING, SETUP_PHASES.WAITING_FOR_HOST_START].includes(phase)) return 4;
+  if ([SETUP_PHASES.BURGER_PLACEMENT, SETUP_PHASES.LAYOUT_ACCEPTED].includes(phase)) return 3;
   if (phase === SETUP_PHASES.LAYOUT_PROPOSED) return 2;
   if (phase === SETUP_PHASES.SCANNING) return 1;
   return 0;
@@ -835,8 +833,10 @@ function ResultsView({ state, now, onCommand }) {
 
 export function App({ state, now = Date.now(), connectionError = "", uploadStatus = "", transportKind, onCommand, onUploadPhotos }) {
   if (!state) return h("section", { className: "mx-auto mt-24 max-w-2xl border border-[#2a435a] bg-[#101c29] p-8 text-center" }, h("p", { className: "text-xs font-black uppercase tracking-[0.16em] text-[#a9bac9]" }, "Burger level"), h("h1", { className: "mt-2 text-3xl font-black text-white" }, "Waiting for authoritative state…"), connectionError && h("div", { id: "ui-error", className: "ui-error", role: "alert" }, connectionError));
-  const validation = validateFrontendSnapshot(state);
+  const boundary = validateAndNormalizeSnapshot(state);
+  const validation = boundary;
   if (!validation.valid) return h("section", { className: "mx-auto mt-24 max-w-3xl border border-[#ff6f6f] bg-[#2c1820] p-8", role: "alert" }, h("p", { className: "text-xs font-black uppercase tracking-[0.16em] text-[#ff6f6f]" }, "Burger level"), h("h1", { className: "mt-2 text-3xl font-black text-white" }, "Authoritative state unavailable"), h("p", { className: "mt-3 text-[#a9bac9]" }, "The received snapshot does not match the frontend contract. No game values were rendered."), h("p", { className: "mt-3 text-white" }, validation.errors.map((error) => error.message).join(" ")));
+  state = boundary.snapshot;
   const mode = displayModeForPhase(state.setup?.phase);
   const content = mode === UI_DISPLAY_MODES.GAMEPLAY ? h(GameplayView, { state, now, onCommand }) : mode === UI_DISPLAY_MODES.RESULTS ? h(ResultsView, { state, now, onCommand }) : h(SetupView, { state, now, onCommand, transportKind, onUploadPhotos, uploadStatus });
   const gameplay = mode === UI_DISPLAY_MODES.GAMEPLAY;

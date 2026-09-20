@@ -1,5 +1,6 @@
 import { createMockTransport } from "./mock-transport.js";
 import { normalizeServerSnapshot } from "./server-snapshot.js";
+import { normalizeFrontendSnapshot } from "./contracts.js";
 
 /**
  * The browser only talks to this small transport interface. The laptop server
@@ -10,7 +11,9 @@ function apiUrl(baseUrl, path) {
   return `${String(baseUrl || "").replace(/\/+$/, "")}${path}`;
 }
 
-export function createHttpTransport({ baseUrl = "", fetchImpl = globalThis.fetch, eventSourceFactory = globalThis.EventSource, normalizeSnapshot = normalizeServerSnapshot } = {}) {
+const normalizeTransportSnapshot = (snapshot) => normalizeFrontendSnapshot(normalizeServerSnapshot(snapshot));
+
+export function createHttpTransport({ baseUrl = "", fetchImpl = globalThis.fetch, eventSourceFactory = globalThis.EventSource, normalizeSnapshot = normalizeTransportSnapshot } = {}) {
   if (typeof fetchImpl !== "function") throw new Error("The local HTTP transport requires fetch");
 
   let source;

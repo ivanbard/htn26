@@ -27,7 +27,7 @@ export const FRONTEND_SNAPSHOT_FIELD_CONTRACT = Object.freeze({
   floorPlan: "object",
   burgerLevel: "object",
   players: "array",
-  order: "object",
+  order: "object-or-null",
   stations: "array",
   score: "object",
   clock: "object",
@@ -62,6 +62,7 @@ function describeValue(value) {
 }
 
 function fieldIsValid(value, expectedType) {
+  if (expectedType === "object-or-null") return value === null || isRecord(value);
   return expectedType === "array" ? Array.isArray(value) : isRecord(value);
 }
 
@@ -327,12 +328,86 @@ export function validateFrontendSnapshot(snapshot) {
   return { valid: errors.length === 0, missing, invalid, errors };
 }
 
-/**
- * Return a shallow copy without adding defaults or coercing authoritative data.
- * Unknown top-level fields and all nested values are retained.
- */
+function normalizedRectangle(item, scaleX, scaleY) {
+  if (!isRecord(item)) return item;
+  return {
+    ...item,
+    x: Number(item.x) * scaleX,
+    y: Number(item.y) * scaleY,
+    width: Number(item.width) * scaleX,
+    height: Number(item.height) * scaleY,
+  };
+}
+
+function normalizedPoint(item, scaleX, scaleY) {
+  if (!isRecord(item)) return item;
+  return { ...item, x: Number(item.x) * scaleX, y: Number(item.y) * scaleY };
+}
+
+function isLaptopServerSnapshot(snapshot) {
+  return snapshot?.source === "pi-server-simulator"
+    || (snapshot?.floorPlan?.units === "m" && snapshot?.players?.some((player) => isRecord(player?.simulatedLocation)));
+}
+
+function normalizeLaptopFloorPlan(floorPlan) {
+  if (floorPlan?.coordinateSpace != null) return floorPlan;
+  const width = Number(floorPlan?.width);
+  const height = Number(floorPlan?.height);
+  if (!isFinitePositive(width) || !isFinitePositive(height)) return floorPlan;
+  const scaleX = 100 / width;
+  const scaleY = 100 / height;
+  return {
+    ...floorPlan,
+    coordinateSpace: ROOM_COORDINATE_SPACE,
+    width: 100,
+    height: 100,
+    walls: Array.isArray(floorPlan.walls)
+      ? floorPlan.walls.map((wall) => normalizedRectangle(wall, scaleX, scaleY))
+      : floorPlan.walls,
+    stations: Array.isArray(floorPlan.stations)
+      ? floorPlan.stations.map((station) => normalizedRectangle(station, scaleX, scaleY))
+      : floorPlan.stations,
+    placementInstructions: Array.isArray(floorPlan.placementInstructions)
+      ? floorPlan.placementInstructions.map((instruction) => normalizedPoint(instruction, scaleX, scaleY))
+      : floorPlan.placementInstructions,
+  };
+}
+
+function stationPosition(stationId, floorPlan) {
+  const physicalStationId = String(stationId || "center").startsWith("stove-") ? "stove" : stationId;
+  const station = floorPlan?.stations?.find((candidate) => candidate.id === physicalStationId);
+  if (!station) return { x: 50, y: 50 };
+  return {
+    x: Number(station.x) + (Number(station.width) / 2),
+    y: Number(station.y) + (Number(station.height) / 2),
+  };
+}
+
 export function normalizeFrontendSnapshot(snapshot) {
-  return isRecord(snapshot) ? { ...snapshot } : snapshot;
+  if (!isRecord(snapshot) || !isLaptopServerSnapshot(snapshot)) return isRecord(snapshot) ? { ...snapshot } : snapshot;
+  const floorPlan = normalizeLaptopFloorPlan(snapshot.floorPlan);
+  const scaleX = floorPlan === snapshot.floorPlan ? 1 : 100 / Number(snapshot.floorPlan?.width);
+  const scaleY = floorPlan === snapshot.floorPlan ? 1 : 100 / Number(snapshot.floorPlan?.height);
+  const placementInstructions = Array.isArray(snapshot.burgerLevel?.placementInstructions)
+    ? snapshot.burgerLevel.placementInstructions.map((instruction) => normalizedPoint(instruction, scaleX, scaleY))
+    : snapshot.burgerLevel?.placementInstructions;
+  return {
+    ...snapshot,
+    floorPlan,
+    burgerLevel: isRecord(snapshot.burgerLevel)
+      ? { ...snapshot.burgerLevel, placementInstructions }
+      : snapshot.burgerLevel,
+    players: Array.isArray(snapshot.players) ? snapshot.players.map((player) => {
+      if (!isRecord(player) || player.position != null) return player;
+      const stationId = player.simulatedLocation?.stationId || player.currentStation || "center";
+      return {
+        ...player,
+        position: stationPosition(stationId, floorPlan),
+        location: player.simulatedLocation?.label || stationId,
+        positionSource: player.simulatedLocation?.source || "action-inference",
+      };
+    }) : snapshot.players,
+  };
 }
 
 export function validateAndNormalizeSnapshot(snapshot) {

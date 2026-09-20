@@ -122,9 +122,8 @@ export function createInitialMockState(now = Date.now()) {
     ],
     gold: { total: 0, earned: 0, lastChange: 0 },
     tips: { total: 0, earned: 0, lastChange: 0 },
+    penalties: { total: 0, lastChange: 0 },
     score: { value: 0, delivered: 0 },
-    gold: { total: 0, earned: 0, lastChange: 0 },
-    tips: { total: 0, earned: 0, lastChange: 0 },
     clock: { status: "ready", remainingSeconds: 240, totalSeconds: 240 },
     submissions: [],
     serving: { lastEvent: null, gooseQueue: 4, location: "SERVING" },
@@ -183,9 +182,8 @@ function startGame(state, now) {
     setup: { phase: SETUP_PHASES.RUNNING, message: "Burger game running. Badge events drive player state and inferred positions." },
     gold: { total: 0, earned: 0, lastChange: 0 },
     tips: { total: 0, earned: 0, lastChange: 0 },
+    penalties: { total: 0, lastChange: 0 },
     score: { value: 0, delivered: 0 },
-    gold: { total: 0, earned: 0, lastChange: 0 },
-    tips: { total: 0, earned: 0, lastChange: 0 },
     clock: { ...state.clock, status: "running", remainingSeconds: state.clock.totalSeconds },
     order: { ...withPrimaryOrder(orders, state.order) },
     orders,
@@ -272,18 +270,23 @@ function recordDelivery(state, success, now, orderId) {
   const nextOrders = success
     ? orders.map((order, index) => index === targetIndex ? { ...order, status: "completed" } : { ...order })
     : orders.map((order) => ({ ...order }));
+  const goldTotal = Number(state.gold?.total || 0) + (success ? gold : 0);
+  const tipsTotal = Number(state.tips?.total || 0) + (success ? tip : 0);
+  const penaltiesTotal = Number(state.penalties?.total || 0) + (success ? 0 : penalty);
   return withUpdate(state, {
-    score: {
-      ...state.score,
-      value: Number(state.score?.value || 0) + (success ? gold : -penalty),
-      delivered: Number(state.score?.delivered || 0) + (success ? 1 : 0),
-    },
     gold: success
-      ? { ...state.gold, total: Number(state.gold?.total || 0) + gold, earned: Number(state.gold?.earned || 0) + gold, lastChange: gold }
+      ? { total: goldTotal, earned: Number(state.gold?.earned || 0) + gold, lastChange: gold }
       : { ...state.gold, lastChange: 0 },
     tips: success
-      ? { ...state.tips, total: Number(state.tips?.total || 0) + tip, earned: Number(state.tips?.earned || 0) + tip, lastChange: tip }
+      ? { total: tipsTotal, earned: Number(state.tips?.earned || 0) + tip, lastChange: tip }
       : { ...state.tips, lastChange: 0 },
+    penalties: success
+      ? { ...state.penalties, lastChange: 0 }
+      : { total: penaltiesTotal, lastChange: -penalty },
+    score: {
+      value: goldTotal + tipsTotal - penaltiesTotal,
+      delivered: Number(state.score?.delivered || 0) + (success ? 1 : 0),
+    },
     order: { ...withPrimaryOrder(nextOrders, state.order) },
     orders: nextOrders,
     serving: { ...state.serving, lastEvent: event },
