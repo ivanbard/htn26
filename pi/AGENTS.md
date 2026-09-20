@@ -2,26 +2,23 @@
 
 Read [`../README.md`](../README.md), [`../updates/UPDATE_v1.md`](../updates/UPDATE_v1.md), [`../updates/UPDATE_v1.1.md`](../updates/UPDATE_v1.1.md), and [`../FLOW.md`](../FLOW.md) before changing Pi behavior.
 
-Use [`README.md`](README.md), [`difficulty/README.md`](difficulty/README.md),
-[`master/README.md`](master/README.md), and [`slave/README.md`](slave/README.md)
-as the implementation owners for the Pi components.
+Use [`README.md`](README.md), [`master/README.md`](master/README.md), and [`slave/README.md`](slave/README.md) as the implementation owners for the Pi components.
 
-The current authoritative server and UI run on the captain's laptop, with
-phone photographs used only for setup inference. QNX may host only the optional
-label-only difficulty sidecar; QNX authoritative execution, portable-engine
-integration, and multi-camera workers remain future boundaries.
+The current development flow sends phone setup photos to root `server/` on the
+laptop. Pi-side setup inference, multi-camera tracking, and a QNX difficulty
+sidecar are future boundaries, not current validated behavior.
 
-Keep authoritative game state, timers, order and recipe selection, scoring,
-inventory, layout, badge state, and submission decisions in `server/`. Treat
-`master/` as a future portable engine unless the product contract explicitly
-adopts it. The difficulty sidecar may return only `easy`, `normal`, or `hectic`
-with model/source metadata and latency; follow `difficulty/README.md`.
+Keep authoritative game state, timers, order evaluation, and submission decisions in the master Pi.
+
+A future difficulty sidecar may recommend bounded adjustments through an
+adapter but must not duplicate rules, mutate authoritative state directly, or
+own HTTP/photo/layout routes.
 
 Keep camera, inference, and worker code behind the adapter seams owned by the relevant Pi README.
 
 Do not add cloud dependencies or let worker telemetry mutate game state directly.
 
-Run the sidecar, master, and worker validation commands documented by their nearest README after changes.
+Run the master and worker validation commands documented by their nearest README after changes.
 
 Host-side tests do not prove QNX, AI-module qualification, phone-camera, or deployed hardware behavior.
 

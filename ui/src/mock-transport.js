@@ -30,7 +30,7 @@ function burgerLevel(status = "not-generated") {
   return { status, recipe: "BURGER", placementInstructions: cloneState(PLACEMENT_INSTRUCTIONS) };
 }
 
-// Mirrors pi/server/src/projection.mjs BURGER_RECIPES exactly (id, dish name,
+// Mirrors server/src/projection.mjs BURGER_RECIPES exactly (id, dish name,
 // components, gold) — the mock is a stand-in for that authoritative Pi
 // projection, so it uses the same four recipes and the same gold values
 // rather than inventing its own catalog.
@@ -44,7 +44,7 @@ const RECIPE_BY_ID = new Map(BURGER_RECIPES.map((recipe) => [recipe.id, recipe])
 
 // README.md "Submission behavior": "The authoritative Pi projection applies
 // the configured penalty, tip, or bonus-gold result for the submitted
-// order." The gold/tip side of that is implemented in pi/server's
+// order." The gold/tip side of that is implemented in server's
 // projection.mjs (ported below in orderTip()); no file in this repo defines
 // a penalty amount, so this is this mock's own reasonable stand-in for that
 // documented-but-unspecified value, not a value read from server code.
@@ -61,7 +61,7 @@ function makeMockOrder(id, recipe, remainingSeconds, totalSeconds = 120) {
     goldValue: recipe.gold,
     remainingSeconds,
     totalSeconds,
-    // Same 3-segment patience meter as pi/server's projection.mjs, computed
+    // Same 3-segment patience meter as server's projection.mjs, computed
     // the same way: ceil((remaining / total) * 3), clamped to [0, 3].
     patience: { segments: 3, filledSegments: orderPatienceSegments(remainingSeconds, totalSeconds) },
   };
@@ -72,7 +72,7 @@ function orderPatienceSegments(remainingSeconds, totalSeconds) {
   return Math.max(0, Math.min(3, Math.ceil((remainingSeconds / totalSeconds) * 3)));
 }
 
-// Identical formula to pi/server/src/projection.mjs's submit(): gold is
+// Identical formula to server/src/projection.mjs's submit(): gold is
 // worth 10% of a tip, plus up to 5 more for a plate turned in with a full
 // patience meter — so a same-tick (3/3 segments) submission tips the most,
 // and it never rounds down to nothing.
@@ -222,7 +222,7 @@ function hasActiveRound(state) {
 }
 
 // README.md "Submission behavior": a correct submission "reports its
-// score"; a failed one "applies a penalty and has no retry." pi/server's
+// score"; a failed one "applies a penalty and has no retry." server's
 // submit() implements the success side (gold from the matched recipe, a tip
 // from remaining patience) — ported via orderTip()/RECIPE_BY_ID above so
 // this mock computes the same numbers the authoritative Pi would. The
