@@ -46,6 +46,7 @@ export const FRONTEND_SNAPSHOT_CONTRACT = Object.freeze({
   floorPlan: Object.freeze({
     coordinateSpace: ROOM_COORDINATE_SPACE,
     dimensions: Object.freeze({ width: "finite-positive", height: "finite-positive" }),
+    layoutFromImage: "optional-boolean",
   }),
 });
 
@@ -145,6 +146,16 @@ function pointErrors(point, path) {
 export function validateFloorPlanContract(floorPlan) {
   if (!isRecord(floorPlan)) return [];
   const errors = [];
+
+  if (Object.prototype.hasOwnProperty.call(floorPlan, "layoutFromImage")
+    && typeof floorPlan.layoutFromImage !== "boolean") {
+    errors.push(invalidField(
+      "floorPlan.layoutFromImage",
+      "boolean",
+      describeValue(floorPlan.layoutFromImage),
+      "floorPlan.layoutFromImage must be a boolean when supplied.",
+    ));
+  }
 
   if (floorPlan.coordinateSpace !== ROOM_COORDINATE_SPACE) {
     errors.push(invalidField(
