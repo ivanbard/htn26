@@ -34,7 +34,10 @@ If all players are shaking at the same time we submit
 
 I don't care how players join so long as they get unique player numbers
 Ignore events sent before game starts. Actually, revision to v1, we should click game start on the host badge, and it broadcasts that to all badges, telling them to wipe their memory etc. The laptop server hears it on serial, applies the authoritative start transition, and owns the game countdown shown by the UI.
-After four minutes the host badge should broadcast game end; the laptop server applies the authoritative end transition and both sides wipe round state.
+After four minutes the host badge should broadcast game end; the badges clear
+their active round state and the laptop server applies the authoritative end
+transition. The server's retained results and history contract is owned by
+[`pi/server/README.md`](../pi/server/README.md).
 There's no retry, a failed order causes a penalty and the plate still gets consumed
 hopefully that shouldn't happen but it should keep trying to reconnect
 that shouldn't happen but assume it doesn't we can fix later

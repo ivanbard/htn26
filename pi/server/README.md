@@ -83,8 +83,11 @@ been approved. After normal floorplan approval, the HTTP setup command
 production timer. Pressing START on the physical host badge and receiving its
 native `GAME|START_GAME` record starts production play.
 
-`END` marks active orders cancelled, sets the timer to ended/zero, and clears
-player and station round state. Natural timeout performs the same cleanup.
+`END` cancels active orders and future order scheduling, sets the timer to
+ended/zero, and clears player and station round state. It retains order,
+submission, and event history plus the accumulated score, gold, tips, and
+penalties for the results view until the next start or reset. Natural timeout
+performs the same cleanup.
 `RESET` returns to ready state with no active order and zeroed money while
 retaining the selected floorplan and badge assignments.
 

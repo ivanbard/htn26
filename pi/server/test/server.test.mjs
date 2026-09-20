@@ -73,12 +73,6 @@ async function readyProjection(now = 1_000) {
   return projection;
 }
 
-function withoutGatewayHealth(state) {
-  const comparable = structuredClone(state);
-  delete comparable.health.gateway;
-  return comparable;
-}
-
 test("fixture parser accepts noisy and chunk-framed gateway records", async () => {
   const fixture = await readFile(new URL("./fixtures/gateway-events.ndjson", import.meta.url));
   const records = [];
@@ -560,7 +554,7 @@ test("legacy tip frames remain parseable but cannot change server money", () => 
 test("duplicate plate transfers swap both carried states without loss", async () => {
   const now = 2_000;
   const projection = await readyProjection(now);
-  projection.command("START_GAME", {}, now);
+  projection.ingestHostControl({ control: "START", framing: "legacy-game", durationSeconds: 240 }, now);
   const event = (mac, sequence, player, action) => projection.ingestBadgeEvent({
     senderMac: mac,
     sequence,
@@ -580,15 +574,18 @@ test("duplicate plate transfers swap both carried states without loss", async ()
   assert.deepEqual(state.players[0].inventory, ["BUN"]);
   assert.equal(state.players[1].heldItem, "BUN");
   assert.deepEqual(state.players[1].inventory, ["BUN"]);
-  assert.equal(state.players[0].actionState, "transferred");
-  assert.equal(state.players[1].actionState, "transferred");
-  assert.deepEqual(state.players.slice(0, 2).map((player) => player.location), ["bump-middle", "bump-middle"]);
+  assert.match(state.players[0].actionState, /^transferred with /);
+  assert.match(state.players[1].actionState, /^transferred with /);
+  assert.deepEqual(
+    state.players.slice(0, 2).map((player) => player.simulatedLocation.stationId),
+    ["center", "center"],
+  );
 });
 
 test("transfer snapshots preserve distinct chopped and cooked meat states", async () => {
   const now = 2_500;
   const projection = await readyProjection(now);
-  projection.command("START_GAME", {}, now);
+  projection.ingestHostControl({ control: "START", framing: "legacy-game", durationSeconds: 240 }, now);
   const event = (mac, sequence, player, action) => projection.ingestBadgeEvent({
     senderMac: mac,
     sequence,
@@ -610,26 +607,37 @@ test("transfer snapshots preserve distinct chopped and cooked meat states", asyn
   assert.deepEqual(state.players[1].inventory, ["CHOPPED_MEAT"]);
 });
 
-test("serial lifecycle and development commands share projection behavior", async () => {
+test("native and development host lifecycle controls share round-state behavior", async () => {
   const now = 3_000;
   const serialProjection = await readyProjection(now);
   const developmentProjection = await readyProjection(now);
 
-  const started = serialProjection.ingestGameLifecycle({ type: "START_GAME", durationSeconds: 240, playerCount: 3 }, now);
+  const started = serialProjection.ingestHostControl({ control: "START", framing: "legacy-game", durationSeconds: 240 }, now);
   assert.equal(started.accepted, true);
-  developmentProjection.command("START_GAME", { roundSeconds: 240 }, now);
-  assert.deepEqual(
-    withoutGatewayHealth(serialProjection.snapshot(now)),
-    withoutGatewayHealth(developmentProjection.snapshot(now)),
-  );
+  const simulatedStart = developmentProjection.ingestHostControl({ control: "START", durationSeconds: 240 }, now);
+  assert.equal(simulatedStart.accepted, true);
+  for (const projection of [serialProjection, developmentProjection]) {
+    const state = projection.snapshot(now);
+    assert.equal(state.timer.status, "running");
+    assert.equal(state.timer.totalSeconds, 240);
+    assert.equal(state.activeOrders.length, 1);
+  }
 
-  const ended = serialProjection.ingestGameLifecycle({ type: "GAME_END", playerCount: 3 }, now);
+  const ended = serialProjection.ingestHostControl({ control: "END", framing: "legacy-game" }, now);
   assert.equal(ended.accepted, true);
-  developmentProjection.command("END_GAME", {}, now);
-  assert.deepEqual(
-    withoutGatewayHealth(serialProjection.snapshot(now)),
-    withoutGatewayHealth(developmentProjection.snapshot(now)),
-  );
+  const simulatedEnd = developmentProjection.ingestHostControl({ control: "END" }, now);
+  assert.equal(simulatedEnd.accepted, true);
+  const serialEnd = serialProjection.snapshot(now);
+  const developmentEnd = developmentProjection.snapshot(now);
+  for (const state of [serialEnd, developmentEnd]) {
+    assert.equal(state.timer.status, "ended");
+    assert.equal(state.timer.remainingSeconds, 0);
+    assert.deepEqual(state.activeOrders, []);
+    assert.ok(state.players.every((player) => player.heldItem === "EMPTY"));
+    assert.deepEqual(state.eventHistory.map((event) => event.type), ["round-started", "order-created", "round-ended"]);
+  }
+  assert.equal(serialEnd.eventHistory[0].startSource, "physical host badge");
+  assert.equal(developmentEnd.eventHistory[0].startSource, "development simulator");
 });
 
 test("HTTP upload, review, approval, serial projection, and browser reads work", async () => {

@@ -1,7 +1,6 @@
 """Offline checks; never opens the badge or modifies the backup."""
 import hashlib
 import json
-from pathlib import Path
 import struct
 import subprocess
 import sys
