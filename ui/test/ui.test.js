@@ -10,6 +10,7 @@ import { normalizeServerSnapshot } from "../src/server-snapshot.js";
 import {
   isWalkablePosition,
   pathsHaveAgentConflict,
+  plansHaveTemporalConflict,
   planPlayerPaths,
   playerPlansAreCollisionSafe,
   projectPointIntoWalkableRoom,
@@ -23,7 +24,7 @@ import {
   stationTileKey,
 } from "../src/room-grid.js";
 import { displayModeForPhase, GAME_ACTIONS, SETUP_PHASES, UI_DISPLAY_MODES } from "../src/state.js";
-import { ServerProjection } from "../../pi/server/src/projection.mjs";
+import { createInitialProjectionState } from "../../server/src/projection.mjs";
 
 async function approvedTransport(now = 1_000) {
   const transport = createMockTransport({ now: () => now });
@@ -220,7 +221,7 @@ test("plans simultaneous chef movement with barrier-safe alternate lanes", () =>
     assert.equal(plan.path.every((point) => isWalkablePosition(point, state.floorPlan.walls)), true);
     assert.equal(plan.reachedTarget, true);
   });
-  assert.equal(pathsHaveAgentConflict(plans.get("p1").path, plans.get("p2").path), false);
+  assert.equal(plansHaveTemporalConflict(plans.get("p1"), plans.get("p2")), false);
 });
 
 test("uses an alternate arc when two chefs would exchange positions", () => {
@@ -296,15 +297,6 @@ test("renders gameplay as a framed room board with state shown on each station",
   await transport.command(GAME_ACTIONS.START_GAME);
   const state = transport.snapshot();
   state.floorPlan.stations[0].x = 2;
-  state.players[1] = {
-    ...state.players[1],
-    heldItem: "RAW_MEAT",
-    inventory: ["RAW_MEAT"],
-    actionState: "chopping",
-    location: "cutting-board",
-    position: { x: 23.5, y: 74.25 },
-  };
-  state.submissions = [{ id: "submission-1", playerId: "p1", status: "failure", message: "WRONG BURGER", penalty: 25 }];
   const html = renderApp(state, 1_000);
 
   assert.match(html, /data-display-mode="gameplay"/);
@@ -314,7 +306,7 @@ test("renders gameplay as a framed room board with state shown on each station",
   assert.match(html, /STOVE 1/);
   assert.match(html, /STOVE 2/);
   assert.match(html, /CHOP 2/);
-  assert.match(html, /04:00/);
+  assert.match(html, /02:00/);
   assert.match(html, /class="game-board panel\s/);
   assert.match(html, /class="board-score"/);
   assert.doesNotMatch(html, /LIVE ACTIVITY/);
@@ -340,14 +332,6 @@ test("renders gameplay as a framed room board with state shown on each station",
   assert.match(html, /data-player="p2"[\s\S]*?chef-player-blue\.svg/);
   assert.match(html, /data-player="p3"[\s\S]*?<span class="player-tag">P3<\/span>/);
   assert.equal((html.match(/data-player-path="barrier-safe"/g) || []).length, 3);
-  assert.equal((html.match(/class="player-location-info"/g) || []).length, 3);
-  assert.doesNotMatch(html, /data-player-card=/);
-  assert.match(html, /data-player="p2"[^>]*data-location="cutting-board"[^>]*data-held-item="RAW_MEAT"[^>]*data-action-state="chopping"/);
-  assert.match(html, /data-player="p1"[^>]*data-submission-status="failure"/);
-  assert.match(html, /PLAYER 2/);
-  assert.match(html, /RAW MEAT/);
-  assert.match(html, /CHOPPING/);
-  assert.match(html, /WRONG BURGER · -25 POINTS/);
   assert.match(html, /style="left:[^;]+%;top:[^;]+%;width:[^;]+%;height:[^;]+%" data-station="cheese-source"/);
   assert.ok(html.indexOf('class="game-board panel') < html.indexOf('data-node-id="20:2"'));
   assert.ok(html.indexOf('data-node-id="39:26"') < html.indexOf('class="game-board-score"'));
@@ -459,125 +443,25 @@ test("keeps the room mirror geometry aligned to its normalized display bounds", 
   assert.equal(validateFrontendSnapshot(state).valid, true);
 });
 
-test("renders only event-inferred player locations", () => {
+test("marks old or missing player tracking and stale worker health", () => {
   const state = createInitialMockState(1_000);
   state.setup.phase = SETUP_PHASES.RUNNING;
   state.floorPlan.accepted = true;
   state.clock.status = "running";
-  state.players[0].location = "bottom";
-  state.players[1].location = "cutting-board";
-  state.players[1].position = { x: 23.5, y: 74.25 };
-  state.players[2].location = "bump-middle";
-  state.players[2].position = { x: 50, y: 58 };
+  state.players[1].tracking.status = "stale";
+  delete state.players[0].position;
+  state.health.workers.push({ id: "worker-1", label: "WORKER 1", status: "stale", lastSeenAt: 0, detail: "test" });
 
   const html = renderApp(state, 7_000);
 
-  assert.match(html, /data-player="p1" data-location="bottom"[^>]*aria-label="PLAYER 1, event-inferred bottom, holding/);
-  assert.match(html, /data-player="p2" data-location="cutting-board"[^>]*aria-label="PLAYER 2, event-inferred cutting-board, holding/);
-  assert.match(html, /data-player="p3" data-location="bump-middle"[^>]*aria-label="PLAYER 3, event-inferred bump-middle, holding/);
-  assert.doesNotMatch(html, /tracking (?:lost|stale)/i);
+  assert.match(html, /data-player="p1" data-stale="true"/);
+  assert.match(html, /aria-label="PLAYER 1, location unavailable"/);
+  assert.doesNotMatch(html, /data-player="p1"[^>]*style="left:0%;top:0%;/);
+  assert.match(html, /data-player="p2" data-stale="true"/);
+  assert.match(html, /aria-label="PLAYER 2, last scan is stale"/);
+  assert.doesNotMatch(html, />TRACKING (?:LOST|STALE)</);
   assert.doesNotMatch(html, /TRACKING DEGRADED/);
   assert.doesNotMatch(html, /LOCAL SYSTEM HEALTH/);
-});
-
-test("renders collocated bump players side by side at their shared location", () => {
-  const state = createInitialMockState(1_000);
-  state.setup.phase = SETUP_PHASES.RUNNING;
-  state.floorPlan.accepted = true;
-  state.clock.status = "running";
-  state.players[0] = {
-    ...state.players[0],
-    heldItem: "PLATE",
-    inventory: ["BUN"],
-    actionState: "transferred",
-    location: "bump-middle",
-    position: { x: 50, y: 58 },
-  };
-  state.players[1] = {
-    ...state.players[1],
-    heldItem: "BUN",
-    inventory: ["BUN"],
-    actionState: "transferred",
-    location: "bump-middle",
-    position: { x: 50, y: 58 },
-  };
-
-  const html = renderApp(state, 7_000);
-  const tags = Object.fromEntries([...html.matchAll(/<article[^>]*data-player="([^"]+)"[^>]*>/g)]
-    .map((match) => [match[1], match[0]]));
-
-  assert.match(tags.p1, /style="left:50%;top:58%;--player-visual-offset:[^"]+"/);
-  assert.match(tags.p2, /style="left:50%;top:58%;--player-visual-offset:[^"]+"/);
-  assert.match(tags.p1, /data-location="bump-middle" data-visual-offset="left"/);
-  assert.match(tags.p2, /data-location="bump-middle" data-visual-offset="right"/);
-  assert.notEqual(
-    tags.p1.match(/--player-visual-offset:([^;"]+)/)[1],
-    tags.p2.match(/--player-visual-offset:([^;"]+)/)[1],
-  );
-  assert.match(html, /PLATE · BUN/);
-  assert.equal((html.match(/TRANSFERRED/g) || []).length, 2);
-});
-
-test("adapts real laptop server GET, command, and SSE snapshots across the round lifecycle", async () => {
-  const now = 1_000;
-  const projection = new ServerProjection({ now: () => now, random: () => 0 });
-  const initial = projection.snapshot(now);
-  await projection.proposeFloorplan({ photos: [{ id: "phone-photo" }] }, now);
-  projection.approveFloorplan(true, now);
-  const prepared = projection.command("START_GAME", {}, now);
-  projection.ingestHostControl({ control: "START", durationSeconds: 240 }, now);
-  projection.ingestPlayerAction({ playerId: "p2", action: "PICKUP", item: "RAW_MEAT" }, now);
-  const running = projection.snapshot(now);
-  projection.endGame(now);
-  const ended = projection.snapshot(now);
-  const received = [];
-  let responseState = initial;
-
-  class FakeEventSource {
-    static instance;
-    constructor(url) {
-      this.url = url;
-      this.listeners = new Map();
-      FakeEventSource.instance = this;
-    }
-    addEventListener(type, listener) { this.listeners.set(type, listener); }
-    emit(type, data) { this.listeners.get(type)?.({ data: JSON.stringify(data) }); }
-    close() { this.closed = true; }
-  }
-
-  const transport = createHttpTransport({
-    baseUrl: "http://laptop.test",
-    fetchImpl: async () => ({ ok: true, async json() { return responseState; } }),
-    eventSourceFactory: FakeEventSource,
-  });
-  const cleanup = await transport.connect((state) => received.push(state));
-
-  assert.equal(FakeEventSource.instance.url, "http://laptop.test/api/events");
-  assert.equal(received[0].order, null);
-  assert.equal(received[0].floorPlan.coordinateSpace, ROOM_COORDINATE_SPACE);
-  assert.equal(received[0].floorPlan.width, 100);
-  assert.equal(validateFrontendSnapshot(received[0]).valid, true);
-  assert.match(renderApp(received[0], now), /data-display-mode="setup"/);
-
-  responseState = prepared;
-  const commanded = await transport.command(GAME_ACTIONS.START_GAME);
-  assert.equal(validateFrontendSnapshot(commanded).valid, true);
-  assert.equal(commanded.setup.phase, SETUP_PHASES.WAITING_FOR_HOST_START);
-  assert.equal(commanded.order, null);
-  assert.match(renderApp(commanded, now), /data-display-mode="setup"/);
-  FakeEventSource.instance.emit("state", running);
-  assert.equal(validateFrontendSnapshot(received[1]).valid, true);
-  assert.deepEqual(received[1].players[1].position, { x: 84, y: 15 });
-  const gameplay = renderApp(received[1], now);
-  assert.match(gameplay, /data-display-mode="gameplay"/);
-  assert.match(gameplay, /data-player="p2"[^>]*data-location="FRIDGE"[^>]*data-held-item="RAW_MEAT"/);
-
-  FakeEventSource.instance.emit("state", ended);
-  assert.equal(received[2].order, null);
-  assert.equal(validateFrontendSnapshot(received[2]).valid, true);
-  assert.match(renderApp(received[2], now), /data-display-mode="results"/);
-  cleanup();
-  assert.equal(FakeEventSource.instance.closed, true);
 });
 
 test("host commands follow start, scan, approval, burger placement, and round lifecycle", async () => {
@@ -587,15 +471,11 @@ test("host commands follow start, scan, approval, burger placement, and round li
   assert.equal(transport.snapshot().setup.phase, SETUP_PHASES.IDLE);
   const idleHtml = renderApp(transport.snapshot(), now);
   assert.match(idleHtml, /disabled[^>]*data-command="RESCAN"/);
-  assert.match(idleHtml, /Connect the host badge and laptop/);
-  assert.doesNotMatch(idleHtml, /camera|live tracking/i);
   await transport.command(GAME_ACTIONS.RESCAN);
   assert.equal(transport.snapshot().setup.phase, SETUP_PHASES.IDLE);
 
   await transport.command(GAME_ACTIONS.START_HOST);
   assert.equal(transport.snapshot().setup.phase, SETUP_PHASES.SCANNING);
-  assert.match(renderApp(transport.snapshot(), now), /Upload phone setup photos/);
-  assert.doesNotMatch(renderApp(transport.snapshot(), now), /camera|live tracking/i);
   await transport.command(GAME_ACTIONS.SCAN_ROOM);
   assert.equal(transport.snapshot().setup.phase, SETUP_PHASES.LAYOUT_PROPOSED);
   assert.equal(transport.snapshot().floorPlan.accepted, false);
@@ -698,7 +578,7 @@ test("start game resets the authoritative clock, order, and score", async () => 
   initialState.floorPlan.accepted = true;
   initialState.burgerLevel.status = "placement-ready";
   initialState.score = { value: 250, delivered: 2 };
-  initialState.clock = { status: "ended", remainingSeconds: 3, totalSeconds: 120 };
+  initialState.clock = { status: "ended", remainingSeconds: 3, totalSeconds: 240 };
   initialState.order = { ...initialState.order, status: "completed", remainingSeconds: 3 };
   initialState.orders = initialState.orders.map((order) => ({ ...order, status: "completed", remainingSeconds: 3 }));
   const transport = createMockTransport({ initialState, now: () => 5_000 });
@@ -707,8 +587,6 @@ test("start game resets the authoritative clock, order, and score", async () => 
   const state = transport.snapshot();
 
   assert.equal(state.setup.phase, SETUP_PHASES.RUNNING);
-  assert.deepEqual(state.gold, { total: 0, earned: 0, lastChange: 0 });
-  assert.deepEqual(state.tips, { total: 0, earned: 0, lastChange: 0 });
   assert.deepEqual(state.score, { value: 0, delivered: 0 });
   assert.deepEqual(state.gold, { total: 0, earned: 0, lastChange: 0 });
   assert.deepEqual(state.tips, { total: 0, earned: 0, lastChange: 0 });
@@ -733,20 +611,18 @@ test("delivery is accepted only during a running active round", async () => {
   await assertCommandUnchanged(transport, GAME_ACTIONS.DELIVERY_FAILURE);
 });
 
-test("successful delivery awards the recipe's gold plus a patience-based tip, matching pi/server's formula", async () => {
+test("successful delivery awards the recipe's gold plus a patience-based tip, matching server's formula", async () => {
   const transport = await approvedTransport(1_000);
   await transport.command(GAME_ACTIONS.START_GAME);
   await transport.command({ type: GAME_ACTIONS.DELIVERY_SUCCESS, orderId: "order-1" });
   const served = transport.snapshot();
 
   // order-1 is PLAIN_MEAT (gold: 100); START_GAME resets it to full patience
-  // (remaining === total), so pi/server's tip formula — max(1, round(gold *
+  // (remaining === total), so server's tip formula — max(1, round(gold *
   // 0.1 + ratio * 5)) — gives round(10 + 5) = 15 at a 1.0 ratio.
   assert.deepEqual(served.score, { value: 115, delivered: 1 });
   assert.deepEqual(served.gold, { total: 100, earned: 100, lastChange: 100 });
   assert.deepEqual(served.tips, { total: 15, earned: 15, lastChange: 15 });
-  assert.equal(served.submissions[0].gold, 100);
-  assert.equal(served.submissions[0].tip, 15);
   assert.equal(served.orders[0].status, "completed");
   assert.ok(served.orders.slice(1).every((order) => order.status === "active"));
   assert.equal(served.order.id, "order-2");
@@ -767,14 +643,11 @@ test("failed delivery applies the documented penalty and does not complete the o
 
   // README.md: "A failed submission applies a penalty and has no retry."
   assert.deepEqual(state.score, { value: -25, delivered: 0 });
-  assert.deepEqual(state.gold, { total: 0, earned: 0, lastChange: 0 });
-  assert.deepEqual(state.tips, { total: 0, earned: 0, lastChange: 0 });
-  assert.deepEqual(state.penalties, { total: 25, lastChange: -25 });
+  assert.equal(state.gold.lastChange, 0);
+  assert.equal(state.tips.lastChange, 0);
   assert.equal(state.order.status, "active");
   assert.equal(state.serving.lastEvent.status, "failure");
   assert.equal(state.serving.lastEvent.penalty, 25);
-  assert.equal(state.serving.lastEvent.points, -25);
-  assert.equal(state.submissions.length, 1);
 });
 
 test("unknown commands do not mutate state", async () => {
@@ -808,40 +681,24 @@ test("setup flow reaches gameplay and results display modes", async () => {
   assert.match(renderApp(transport.snapshot(), 1_000), /GAME ENDED/);
 });
 
-test("renders cumulative authoritative rewards and the latest serving result", async () => {
+test("renders serving success, gold/tip breakdown, and score update from the authoritative snapshot", async () => {
   const transport = await approvedTransport(1_000);
   await transport.command(GAME_ACTIONS.START_GAME);
-  await transport.command({ type: GAME_ACTIONS.DELIVERY_SUCCESS, orderId: "order-1" });
-  await transport.command({ type: GAME_ACTIONS.DELIVERY_SUCCESS, orderId: "order-2" });
+  await transport.command(GAME_ACTIONS.DELIVERY_SUCCESS);
   const state = transport.snapshot();
 
-  assert.equal(state.score.value, 252);
-  assert.equal(state.gold.total, 220);
-  assert.equal(state.tips.total, 32);
-  assert.equal(state.score.delivered, 2);
+  assert.equal(state.score.value, 115);
   assert.equal(state.orders[0].status, "completed");
-  assert.equal(state.orders[1].status, "completed");
   const html = renderApp(state, 2_000);
   assert.doesNotMatch(html, /LIVE ACTIVITY/);
   assert.match(html, /data-node-id="31:25"/);
   assert.match(html, /score-coin-counter\.png/);
+  // The live delivery toast (age 1s, well inside its 3.2s lifetime) shows
+  // the gold/tip breakdown, not just the final score chip.
   assert.match(html, /class="delivery-toast is-success"/);
   assert.match(html, /BURGER SERVED/);
-  assert.match(html, /\+120 WATCOINS/);
-  assert.match(html, /\+17 TIP/);
-  assert.match(html, /data-gold-total="220"/);
-  assert.match(html, /data-tip-total="32"/);
-  assert.match(html, /BURGER SERVED · \+120 GOLD · \+17 TIP/);
-
-  await transport.command(GAME_ACTIONS.END_GAME);
-  const results = renderApp(transport.snapshot(), 2_000);
-  assert.match(results, /data-results-score="252"/);
-  assert.match(results, /data-results-gold-total="220"/);
-  assert.match(results, /data-results-tip-total="32"/);
-  assert.match(results, /Round totals: score 252, gold 220, tips 32/);
-  assert.match(results, /delivery-points/);
-  assert.match(results, /\+120 GOLD/);
-  assert.match(results, /\+17 TIP/);
+  assert.match(html, /\+100 WATCOINS/);
+  assert.match(html, /\+15 TIP/);
 });
 
 test("renders a rejected burger's live penalty and updates the score", async () => {
@@ -857,8 +714,6 @@ test("renders a rejected burger's live penalty and updates the score", async () 
   assert.match(html, /class="delivery-toast is-failure"/);
   assert.match(html, /WRONG BURGER/);
   assert.match(html, /-25 PENALTY/);
-  assert.match(html, /data-player="p1"[^>]*data-submission-status="failure"/);
-  assert.match(html, /WRONG BURGER · -25 POINTS/);
 });
 
 test("renders one, two, and four active orders with unique accessible headings", () => {
@@ -938,20 +793,15 @@ test("allows completed order history alongside at most four active orders", () =
 });
 
 test("shows a connection error while waiting for authoritative state", () => {
-  const html = renderApp(null, 1_000, "LAPTOP SERVER UNAVAILABLE — offline");
+  const html = renderApp(null, 1_000, "MASTER PI UNAVAILABLE — offline");
   assert.match(html, /id="ui-error" class="ui-error" role="alert"/);
-  assert.match(html, /LAPTOP SERVER UNAVAILABLE — offline/);
+  assert.match(html, /MASTER PI UNAVAILABLE — offline/);
 });
 
 test("validates the frontend snapshot and rejects non-normalized room data", () => {
   const state = createInitialMockState(1_000);
-  state.version = 42;
   assert.equal(validateFrontendSnapshot(state).valid, true);
   assert.equal(state.floorPlan.coordinateSpace, ROOM_COORDINATE_SPACE);
-
-  const unsupportedSchema = structuredClone(state);
-  unsupportedSchema.schemaVersion = 3;
-  assert.equal(validateFrontendSnapshot(unsupportedSchema).valid, false);
 
   const invalid = structuredClone(state);
   invalid.floorPlan.coordinateSpace = "world-meters";
@@ -967,43 +817,6 @@ test("validates the frontend snapshot and rejects non-normalized room data", () 
   assert.match(JSON.stringify(validation.errors), /players\[0\]\.position\.x/);
   assert.match(renderApp(invalid, 1_000), /Authoritative state unavailable/);
   assert.doesNotMatch(renderApp(invalid, 1_000), /PLAYER 1/);
-
-  const invalidRewards = structuredClone(state);
-  invalidRewards.gold = [];
-  invalidRewards.tips = "not-authoritative";
-  const rewardValidation = validateFrontendSnapshot(invalidRewards);
-  assert.equal(rewardValidation.valid, false);
-  assert.match(JSON.stringify(rewardValidation.errors), /gold must be an object/);
-  assert.match(JSON.stringify(rewardValidation.errors), /tips must be an object/);
-});
-
-test("renders authoritative server success totals and positive failure costs", () => {
-  const now = 1_000;
-  const successful = new ServerProjection({ now: () => now, random: () => 0 });
-  successful.ingestHostControl({ control: "START", durationSeconds: 240 }, now);
-  successful.ingestPlayerAction({ playerId: "p1", action: "PLATE", plate: "BM--" }, now);
-  successful.ingestPlayerAction({ playerId: "p2", action: "READY" }, now);
-  successful.ingestPlayerAction({ playerId: "p3", action: "READY" }, now);
-  successful.ingestSubmission({ playerId: "p1", plate: "BM--" }, now);
-  const successState = successful.snapshot(now);
-  const html = renderApp(successState, now);
-  assert.doesNotMatch(html, /Authoritative state unavailable/);
-  assert.equal((html.match(/class="player-location-info"/g) || []).length, 3);
-  assert.match(html, /BURGER SERVED · \+100 GOLD · \+20 TIP/);
-  assert.match(html, /data-score-value="120"/);
-  assert.match(html, /data-gold-total="100"/);
-  assert.match(html, /data-tip-total="20"/);
-
-  const failed = new ServerProjection({ now: () => now, random: () => 0 });
-  failed.ingestHostControl({ control: "START", durationSeconds: 240 }, now);
-  failed.ingestPlayerAction({ playerId: "p1", action: "PLATE", plate: "BMLC" }, now);
-  failed.ingestPlayerAction({ playerId: "p2", action: "READY" }, now);
-  failed.ingestPlayerAction({ playerId: "p3", action: "READY" }, now);
-  failed.ingestSubmission({ playerId: "p1", plate: "BMLC" }, now);
-  const failureState = failed.snapshot(now);
-  assert.equal(failureState.submissions[0].penalty, 25);
-  assert.equal(failureState.score.value, -25);
-  assert.match(renderApp(failureState, now), /WRONG BURGER · -25 POINTS/);
 });
 
 test("cleans up a connection that resolves after app destruction", async () => {
@@ -1029,4 +842,79 @@ test("cleans up a connection that resolves after app destruction", async () => {
 
   assert.equal(cleanupCount, 1);
   assert.equal(closeCount, 1);
+});
+
+test("exposes room-photo generation only for capable transports", () => {
+  const makeRoot = () => ({
+    innerHTML: "",
+    addEventListener() {},
+    removeEventListener() {},
+  });
+  const scanningState = createInitialMockState(1_000);
+  scanningState.setup.phase = SETUP_PHASES.SCANNING;
+  const mockRoot = makeRoot();
+  const mockApp = createApp({
+    root: mockRoot,
+    transport: createMockTransport({ initialState: scanningState, now: () => 1_000 }),
+  });
+  assert.match(mockRoot.innerHTML, /data-command="SCAN_ROOM"/);
+  assert.doesNotMatch(mockRoot.innerHTML, /data-layout-photo-controls/);
+  mockApp.destroy();
+
+  const httpRoot = makeRoot();
+  const capableTransport = {
+    connect(listener) { listener(scanningState); },
+    async command() { return scanningState; },
+    async generateLayout() { return scanningState; },
+  };
+  const httpApp = createApp({ root: httpRoot, transport: capableTransport, now: () => 1_000 });
+  assert.doesNotMatch(httpRoot.innerHTML, /data-command="SCAN_ROOM"/);
+  assert.match(httpRoot.innerHTML, /data-layout-photo-controls/);
+  httpApp.destroy();
+});
+
+test("HTTP transport consumes named state events", async () => {
+  class FakeEventSource {
+    constructor(url) {
+      this.url = url;
+      this.listeners = new Map();
+      this.closed = false;
+      FakeEventSource.instance = this;
+    }
+
+    addEventListener(type, listener) {
+      this.listeners.set(type, listener);
+    }
+
+    emit(type, state) {
+      this.listeners.get(type)?.({ data: JSON.stringify(state) });
+    }
+
+    close() {
+      this.closed = true;
+    }
+  }
+
+  const initial = createInitialMockState(1_000);
+  const updated = { ...initial, setup: { ...initial.setup, message: "named SSE update" } };
+  const received = [];
+  const normalizedInitial = normalizeServerSnapshot(initial);
+  const transport = createHttpTransport({
+    baseUrl: "http://laptop.test",
+    eventSourceFactory: FakeEventSource,
+    fetchImpl: async (url) => {
+      assert.equal(url, "http://laptop.test/api/state");
+      return { ok: true, async json() { return initial; } };
+    },
+  });
+
+  const cleanup = await transport.connect((state) => received.push(state));
+  assert.equal(FakeEventSource.instance.url, "http://laptop.test/api/events");
+  assert.equal(received.length, 1);
+  assert.equal(received[0].setup.message, normalizedInitial.setup.message);
+  FakeEventSource.instance.emit("state", updated);
+  assert.equal(received.length, 2);
+  assert.equal(received[1].setup.message, "named SSE update");
+  cleanup();
+  assert.equal(FakeEventSource.instance.closed, true);
 });

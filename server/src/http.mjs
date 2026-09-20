@@ -8,7 +8,9 @@ const MAX_PHOTO_BYTES = 12 * 1024 * 1024;
 
 function json(value) { return JSON.stringify(value); }
 function publicError(message) { return { error: message }; }
-function contentType(req) { return String(req.headers["content-type"] || "").toLowerCase(); }
+function contentType(req) { return String(req.headers["content-type"] || ""); }
+function mediaType(type) { return type.split(";", 1)[0].trim().toLowerCase(); }
+function elapsedMs(start) { return Math.max(0, Number(process.hrtime.bigint() - start) / 1_000_000); }
 
 function send(res, status, body, headers = {}) {
   const payload = Buffer.isBuffer(body) ? body : Buffer.from(typeof body === "string" ? body : json(body));
@@ -231,9 +233,10 @@ events.onerror = () => { element('status').textContent += ' (live event stream r
 </html>`;
 }
 
-export function createHttpServer({ projection, photoStore, bindOrigin = process.env.HTN26_CORS_ORIGIN || "*" } = {}) {
+export function createHttpServer({ projection, photoStore, layoutSubmissionStore, roomLayoutGenerator, bindOrigin = process.env.HTN26_CORS_ORIGIN || "*" } = {}) {
   if (!projection) throw new Error("projection is required");
   if (!photoStore) throw new Error("photoStore is required");
+  if (!layoutSubmissionStore) throw new Error("layoutSubmissionStore is required");
   const clients = new Set();
   const unsubscribe = projection.subscribe((state) => {
     const packet = `event: state\ndata: ${json(state)}\n\n`;
@@ -245,15 +248,67 @@ export function createHttpServer({ projection, photoStore, bindOrigin = process.
   async function uploadPhotos(req, res) {
     const body = await readBody(req, MAX_REQUEST_BYTES);
     const type = contentType(req);
-    const uploads = type.startsWith("multipart/form-data")
+    const mime = mediaType(type);
+    const uploads = mime === "multipart/form-data"
       ? parseMultipart(body, type)
-      : [{ filename: req.headers["x-photo-name"] || "room-photo", mime: type.split(";")[0] || "application/octet-stream", bytes: body }];
+      : [{ filename: req.headers["x-photo-name"] || "room-photo", mime: mime || "application/octet-stream", bytes: body }];
     if (!uploads.length) throw Object.assign(new Error("no photo parts found"), { statusCode: 400 });
     if (photoStore.photos.length + uploads.length > 4) throw Object.assign(new Error("at most four room photos are supported"), { statusCode: 409 });
     const saved = [];
     for (const upload of uploads) saved.push(await photoStore.save(upload.bytes, upload));
     projection.setPhotos(photoStore.photos, Date.now());
     return { photos: photoStore.list(), accepted: saved.map((photo) => photo.id), count: photoStore.photos.length, reviewReady: photoStore.photos.length >= 3 };
+  }
+
+  function timingHeader(metrics = {}) {
+    const entries = [["preprocess", metrics.preprocessMs], ["openai", metrics.requestMs], ["validation", metrics.validationMs], ["total", metrics.totalMs]]
+      .filter(([, value]) => value !== null && value !== undefined && value !== "" && Number.isFinite(Number(value)))
+      .map(([name, value]) => `${name};dur=${Number(value).toFixed(1)}`);
+    return entries.length ? { "server-timing": entries.join(", "), "x-htn26-layout-metrics": JSON.stringify(metrics) } : {};
+  }
+
+  async function generateRoomLayout(req, res, headers) {
+    const totalStart = process.hrtime.bigint();
+    const preprocessHeader = req.headers["x-htn26-photo-preprocess-ms"];
+    const preprocessMs = preprocessHeader !== undefined && String(preprocessHeader).trim() !== "" && Number.isFinite(Number(preprocessHeader))
+      ? Math.max(0, Number(preprocessHeader))
+      : null;
+    const body = await readBody(req, MAX_REQUEST_BYTES);
+    const type = contentType(req);
+    const mime = mediaType(type);
+    const uploads = mime === "multipart/form-data"
+      ? parseMultipart(body, type)
+      : [{ filename: req.headers["x-photo-name"] || "room-photo", mime: mime || "application/octet-stream", bytes: body }];
+    if (uploads.length < 3 || uploads.length > 5) throw Object.assign(new Error("upload 3 to 5 room photos"), { statusCode: 400 });
+    const submission = await layoutSubmissionStore.create(uploads, { preprocessMs });
+    const auditHeaders = {
+      "x-htn26-layout-request-id": submission.requestId,
+      "x-htn26-layout-audit-folder": submission.folder,
+    };
+    try {
+      const result = await roomLayoutGenerator?.generate(uploads.map((upload, index) => ({ ...upload, id: submission.photos[index].id })), { preprocessMs });
+      if (!result?.layout) throw new Error("no layout returned");
+      const completed = await layoutSubmissionStore.finish(submission.requestId, {
+        status: "success",
+        metrics: result.metrics,
+        finalizeMetrics: () => ({ totalMs: (preprocessMs ?? 0) + elapsedMs(totalStart) }),
+      });
+      projection.proposeRoomLayout(result.layout, Date.now(), { photoCount: submission.photoCount });
+      if (process.env.NODE_ENV !== "production") console.debug("[htn26] room layout generation", { requestId: submission.requestId, ...completed.metrics });
+      send(res, 200, result.layout, { ...headers, ...auditHeaders, ...timingHeader(completed.metrics) });
+    } catch (error) {
+      const metrics = {
+        preprocessMs,
+        ...error?.metrics,
+      };
+      const completed = await layoutSubmissionStore.finish(submission.requestId, {
+        status: "failure",
+        metrics,
+        finalizeMetrics: () => ({ totalMs: (preprocessMs ?? 0) + elapsedMs(totalStart) }),
+      });
+      if (process.env.NODE_ENV !== "production") console.debug("[htn26] room layout generation failed", { requestId: submission.requestId, reason: error?.name || "provider", ...completed.metrics });
+      send(res, Number(error?.statusCode) || 503, { error: "Room layout generation is unavailable. Try again." }, { ...headers, ...auditHeaders, ...timingHeader(completed.metrics) });
+    }
   }
 
   async function handle(req, res) {
@@ -271,7 +326,9 @@ export function createHttpServer({ projection, photoStore, bindOrigin = process.
     try {
       if (req.method === "GET" && url.pathname === "/api/state") { send(res, 200, projection.snapshot(), headers); return; }
       if (req.method === "GET" && url.pathname === "/api/floorplan") { send(res, 200, projection.snapshot().floorPlan, headers); return; }
-      if (req.method === "GET" && url.pathname === "/api/photos") { send(res, 200, { photos: photoStore.list(), count: photoStore.photos.length, reviewReady: photoStore.photos.length >= 3 }, headers); return; }
+      if (req.method === "GET" && url.pathname === "/api/layout") { send(res, 200, projection.snapshot().roomLayout || null, headers); return; }
+      if (req.method === "GET" && url.pathname === "/api/layout/submissions") { send(res, 200, { submissions: layoutSubmissionStore.list() }, headers); return; }
+      if (req.method === "GET" && url.pathname === "/api/photos") { send(res, 200, { photos: photoStore.list(), count: photoStore.photos.length, reviewReady: photoStore.photos.length >= 3 }, { ...headers, deprecation: "true", link: "</api/layout/generate>; rel=\"successor-version\"" }); return; }
       if (req.method === "GET" && url.pathname === "/api/orders") { const state = projection.snapshot(); send(res, 200, { order: state.order, activeOrders: state.activeOrders, orders: state.orders }, headers); return; }
       if (req.method === "GET" && url.pathname === "/api/gold") { send(res, 200, projection.snapshot().gold, headers); return; }
       if (req.method === "GET" && url.pathname === "/api/tips") { send(res, 200, projection.snapshot().tips, headers); return; }
@@ -290,11 +347,14 @@ export function createHttpServer({ projection, photoStore, bindOrigin = process.
         return;
       }
       if (req.method === "POST" && url.pathname === "/api/photos") {
-        send(res, 201, await uploadPhotos(req, res), headers); return;
+        send(res, 201, await uploadPhotos(req, res), { ...headers, deprecation: "true", link: "</api/layout/generate>; rel=\"successor-version\"" }); return;
+      }
+      if (req.method === "POST" && url.pathname === "/api/layout/generate") {
+        await generateRoomLayout(req, res, headers); return;
       }
       if (req.method === "POST" && ["/api/floorplan/review", "/api/floorplan/propose", "/api/floorplan"].includes(url.pathname)) {
         const payload = parseJsonBody(await readBody(req));
-        if (!photoStore.photos.length && !payload.allowEmpty) throw Object.assign(new Error("upload 3-4 still room photos before review (or use allowEmpty for a local fixture)"), { statusCode: 400 });
+        if (!photoStore.photos.length && !payload.allowEmpty) throw Object.assign(new Error("upload room photos before deterministic floorplan review (or use allowEmpty for a local fixture)"), { statusCode: 400 });
         const proposed = await projection.proposeFloorplan({ photos: photoStore.photos, readPhoto: (photo) => photoStore.read(photo), room: payload.room });
         send(res, 200, proposed, headers); return;
       }
@@ -305,13 +365,9 @@ export function createHttpServer({ projection, photoStore, bindOrigin = process.
       if (req.method === "POST" && url.pathname === "/api/command") {
         const payload = parseJsonBody(await readBody(req));
         const type = commandType(payload);
-        if (type === "SCAN_ROOM" && !photoStore.photos.length) {
-          send(res, 400, publicError("upload 3-4 room photos before scanning"), headers); return;
-        }
         if (type === "SCAN_ROOM") {
-          projection.command(type, payload);
-          send(res, 200, await projection.proposeFloorplan({ photos: photoStore.photos, readPhoto: (photo) => photoStore.read(photo) }), headers);
-          return;
+          const snapshot = await projection.proposeFloorplan({ photos: [] });
+          send(res, 200, snapshot, headers); return;
         }
         send(res, 200, projection.command(type, payload), headers); return;
       }

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createFloorplanProvider } from "./src/provider.mjs";
@@ -6,7 +7,22 @@ import { ServerProjection } from "./src/projection.mjs";
 import { createSerialStreamAdapter } from "./src/protocol.mjs";
 import { openSerialDevice } from "./src/serial-device.mjs";
 import { PhotoStore, createHttpServer } from "./src/http.mjs";
+import { createRoomLayoutGenerator } from "./src/layout-generator.mjs";
+import { LayoutSubmissionStore } from "./src/layout-submission-store.mjs";
 import { DifficultySidecarClient } from "./src/difficulty-sidecar.mjs";
+
+function loadDotEnv(file = path.join(path.dirname(fileURLToPath(import.meta.url)), ".env")) {
+  if (!fs.existsSync(file)) return;
+  for (const line of fs.readFileSync(file, "utf8").split(/\r?\n/)) {
+    const match = line.match(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/);
+    if (!match) continue;
+    let value = match[2];
+    if ((value.startsWith("\\\"") && value.endsWith("\\\"")) || (value.startsWith("'") && value.endsWith("'"))) value = value.slice(1, -1);
+    if (process.env[match[1]] == null) process.env[match[1]] = value;
+  }
+}
+
+loadDotEnv();
 
 function parseArgs(argv) {
   const options = {};
@@ -28,7 +44,10 @@ export async function createRuntime({ env = process.env, now = () => Date.now(),
   const directory = dataDir || env.HTN26_DATA_DIR || path.join(path.dirname(fileURLToPath(import.meta.url)), "data");
   const photoStore = new PhotoStore({ directory });
   await photoStore.init();
+  const layoutSubmissionStore = new LayoutSubmissionStore({ directory, now });
+  await layoutSubmissionStore.init();
   const provider = createFloorplanProvider({ env, fetchImpl, now });
+  const roomLayoutGenerator = createRoomLayoutGenerator({ env, fetchImpl, now });
   const configuredDifficultySidecar = difficultySidecar === undefined && env.HTN26_DIFFICULTY_SIDECAR_URL
     ? new DifficultySidecarClient({
       baseUrl: env.HTN26_DIFFICULTY_SIDECAR_URL,
@@ -44,8 +63,7 @@ export async function createRuntime({ env = process.env, now = () => Date.now(),
     orderIntervalMaxSeconds: Number(env.HTN26_ORDER_INTERVAL_MAX_SECONDS) || 35,
     orderPatienceSeconds: Number(env.HTN26_ORDER_PATIENCE_SECONDS) || undefined,
     maxActiveOrders: Number(env.HTN26_MAX_ACTIVE_ORDERS) || 3,
-    locationHoldSeconds: env.HTN26_PLAYER_LOCATION_HOLD_SECONDS == null
-      ? undefined : Number(env.HTN26_PLAYER_LOCATION_HOLD_SECONDS),
+    locationHoldSeconds: env.HTN26_PLAYER_LOCATION_HOLD_SECONDS == null ? undefined : Number(env.HTN26_PLAYER_LOCATION_HOLD_SECONDS),
     authoritativeEngine,
     difficultySidecar: configuredDifficultySidecar,
   });
@@ -66,15 +84,17 @@ export async function createRuntime({ env = process.env, now = () => Date.now(),
       onError: (error) => console.error(`serial device ${env.HTN26_SERIAL_DEVICE}: ${error.message}`),
     })
     : null;
-  const server = createHttpServer({ projection, photoStore });
+  const server = createHttpServer({ projection, photoStore, layoutSubmissionStore, roomLayoutGenerator });
   const interval = setInterval(() => projection.snapshot(now()), 250);
   interval.unref?.();
   return {
     directory,
     provider,
-    difficultySidecar: configuredDifficultySidecar,
     projection,
     photoStore,
+    layoutSubmissionStore,
+    roomLayoutGenerator,
+    difficultySidecar: configuredDifficultySidecar,
     serialAdapter,
     serialDevice,
     server,
@@ -87,33 +107,19 @@ export async function createRuntime({ env = process.env, now = () => Date.now(),
 }
 
 export function usage() {
-  return `HTN26 laptop server simulator\n\n` +
-    `  node pi/server/server.mjs [--host HOST] [--port PORT] [--serial DEVICE]\n\n` +
+  return `HTN26 server (portable/QNX-oriented)\n\n` +
+    `  node server/server.mjs [--host HOST] [--port PORT] [--serial DEVICE]\n\n` +
     `Environment: HTN26_BIND_HOST, HTN26_PORT, HTN26_SERIAL_DEVICE, HTN26_DATA_DIR,\n` +
-    `OPENAI_API_KEY (optional; server-side only), HTN26_ORDER_INTERVAL_MIN_SECONDS,\n` +
-    `HTN26_ORDER_INTERVAL_MAX_SECONDS, HTN26_ORDER_PATIENCE_SECONDS,\n` +
-    `HTN26_MAX_ACTIVE_ORDERS, HTN26_PLAYER_LOCATION_HOLD_SECONDS,\n` +
-    `HTN26_DIFFICULTY_SIDECAR_URL, HTN26_DIFFICULTY_SIDECAR_TIMEOUT_MS.\n`;
+    `OPENAI_API_KEY (optional; server-side only), OPENAI_LAYOUT_TIMEOUT_MS,\n` +
+    `HTN26_ORDER_INTERVAL_MIN_SECONDS,\n` +
+    `HTN26_ORDER_INTERVAL_MAX_SECONDS, HTN26_MAX_ACTIVE_ORDERS.\n`;
 }
 
 export function startupGuide(baseUrl) {
-  return `\nHTN26 development simulator guide\n` +
-    `Open ${baseUrl}/ for the plain live state view.\n\n` +
-    `Production rounds start only when the physical host emits HTN26|GAME|START_GAME|240|3.\n` +
-    `The canonical HOST records below are explicit local development simulation.\n\n` +
-    `Paste these development examples in that page's browser console:\n` +
-    `const serial = line => fetch('/api/serial', {method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({line})}).then(r => r.json());\n` +
-    `await serial('HTN26|1|HOST|RESET');\n` +
-    `await serial('HTN26|1|HOST|START|240|3');\n` +
-    `await serial('HTN26|1|GATEWAY|UP|1|0');\n` +
-    `await serial('HTN26|1|PLAYER|1|PLATE|BM--');\n` +
-    `await Promise.all([serial('HTN26|1|PLAYER|2|READY'), serial('HTN26|1|PLAYER|3|READY'), serial('HTN26|1|SUBMIT|1|BM--')]);\n\n` +
-    `Query the same authoritative state shown on the page:\n` +
-    `await fetch('/api/timer').then(r => r.json());\n` +
-    `await fetch('/api/orders').then(r => r.json());\n` +
-    `await fetch('/api/players').then(r => r.json());\n` +
-    `await fetch('/api/submissions').then(r => r.json());\n` +
-    `await fetch('/api/money').then(r => r.json());\n`;
+  return `HTN26 development simulator guide at ${baseUrl}/\\n` +
+    `GET /api/timer\\nGET /api/orders\\nGET /api/players\\nGET /api/submissions\\nGET /api/money\\n` +
+    `HTN26|1|PLAYER|2|READY\\nHTN26|1|PLAYER|3|READY\\nHTN26|1|SUBMIT|1|BM--\\n` +
+    `HTN26|GAME|START_GAME|240|3\\nDevelopment simulator`;
 }
 
 export async function main(argv = process.argv.slice(2), env = process.env) {
@@ -124,11 +130,10 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
   const port = options.port || Number(env.HTN26_PORT) || 8787;
   await new Promise((resolve) => runtime.server.listen(port, host, resolve));
   const address = runtime.server.address();
-  console.log(`HTN26 laptop server listening on http://${host}:${address.port}`);
+  console.log(`HTN26 server listening on http://${host}:${address.port}`);
   if (runtime.serialDevice) console.log(`HTN26 serial input: ${runtime.serialDevice.path}`);
   else console.log("HTN26 serial input disabled; set HTN26_SERIAL_DEVICE or pass --serial DEVICE");
   console.log(`Floorplan provider: ${env.OPENAI_API_KEY ? "optional OpenAI with local fallback" : "local deterministic fallback (set OPENAI_API_KEY on the server to opt in)"}`);
-  console.log(startupGuide(`http://${host}:${address.port}`));
   const shutdown = async () => { await runtime.close(); process.exit(0); };
   process.once("SIGINT", shutdown);
   process.once("SIGTERM", shutdown);
