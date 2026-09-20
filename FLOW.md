@@ -28,7 +28,8 @@ and then possible orders are just varations on the toppings
 
 ## UI
 
-So the UI should look similar to the overcooked game (there's no washing dishes)
-it should show the fixed player icons, held items, and action state; the setup camera does not track live player locations
-it also shows the orders
-and because this is waterloo, the customers next to serving should be a line of like standing geese (like waterloo mascot)
+The current simulator UI is deliberately plain text. It shows each fixed player
+only under the server-inferred station or center/default, with held items and
+explicit action state; the setup camera does not track live player locations.
+It also shows the orders. A possible future designed UI can use Waterloo geese
+as the customers next to serving without changing these state boundaries.

@@ -53,7 +53,9 @@ The setup photographs define the level layout only.
 
 The v1 product does not use the phone camera to maintain live player locations.
 
-The UI keeps player icons at the bottom of the screen and reports each player's held item and action state instead of claiming live locations.
+The plain simulator UI lists each player only under the server-inferred station
+or center/default location, with their held item and explicit action state,
+instead of claiming camera-tracked live locations.
 
 ## Hardware and ownership
 
@@ -151,6 +153,9 @@ When both badges have plates, their plate items are swapped.
 
 When neither badge has a plate, their held items are swapped.
 
+A badge-to-badge transfer returns both players to the simulator's inferred
+center/default location immediately.
+
 The owning badge component README defines the event representation for these interactions.
 
 ## Host start and end lifecycle
@@ -159,7 +164,8 @@ Events received before the host starts the game are ignored.
 
 Pressing START on the host badge begins the round.
 
-The host start action broadcasts the start state to all badges and reaches the Pi and UI through the gateway serial path.
+The host start action broadcasts the start state to all badges and reaches the
+laptop server and UI through the gateway serial path.
 
 Starting a round clears prior badge and game state before play begins.
 
@@ -167,7 +173,8 @@ The host badge shows a countdown timer during the round.
 
 A round lasts approximately four minutes.
 
-After the round duration, the host badge broadcasts game end to all badges and the Pi and UI.
+After the round duration, the host badge broadcasts game end to all badges and
+the laptop server and UI.
 
 Game end wipes held items, plates, timers, and other round state on every badge and in the authoritative game state.
 
@@ -191,7 +198,9 @@ A failed submission applies a penalty and has no retry.
 
 The badges broadcast the submission result and drop any remaining held items as part of the submission transition.
 
-The UI displays orders, player icons, held items, chopping state, cooking progress, and the submission result.
+The UI displays orders, station-grouped player names, held items, explicit
+chopping/action state, cooking progress, and the submission result without a
+separate global player-card list.
 
 The authoritative laptop-server projection applies the configured penalty, tip, or bonus-gold result for the submitted order; the UI displays that result and does not independently validate or score the plate.
 

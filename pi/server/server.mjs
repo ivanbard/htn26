@@ -86,9 +86,11 @@ export function usage() {
 }
 
 export function startupGuide(baseUrl) {
-  return `\nHTN26 local simulator guide\n` +
+  return `\nHTN26 development simulator guide\n` +
     `Open ${baseUrl}/ for the plain live state view.\n\n` +
-    `Paste these examples in that page's browser console:\n` +
+    `Production rounds start only when the physical host emits HTN26|GAME|START_GAME|240|3.\n` +
+    `The canonical HOST records below are explicit local development simulation.\n\n` +
+    `Paste these development examples in that page's browser console:\n` +
     `const serial = line => fetch('/api/serial', {method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({line})}).then(r => r.json());\n` +
     `await serial('HTN26|1|HOST|RESET');\n` +
     `await serial('HTN26|1|HOST|START|240|3');\n` +
@@ -111,7 +113,7 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
   const port = options.port || Number(env.HTN26_PORT) || 8787;
   await new Promise((resolve) => runtime.server.listen(port, host, resolve));
   const address = runtime.server.address();
-  console.log(`HTN26 Pi server listening on http://${host}:${address.port}`);
+  console.log(`HTN26 laptop server listening on http://${host}:${address.port}`);
   if (runtime.serialDevice) console.log(`HTN26 serial input: ${runtime.serialDevice.path}`);
   else console.log("HTN26 serial input disabled; set HTN26_SERIAL_DEVICE or pass --serial DEVICE");
   console.log(`Floorplan provider: ${env.OPENAI_API_KEY ? "optional OpenAI with local fallback" : "local deterministic fallback (set OPENAI_API_KEY on the server to opt in)"}`);

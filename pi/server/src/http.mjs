@@ -156,15 +156,14 @@ export function browserDocument() {
       <input id="serial-line" name="line" size="64" value="HTN26|1|HOST|START|240|3">
       <button type="submit">Send</button>
     </form>
-    <button type="button" data-line="HTN26|1|HOST|START|240|3">Start round</button>
+    <button type="button" data-line="HTN26|1|HOST|START|240|3">Start simulated round (development only)</button>
     <button type="button" data-line="HTN26|1|HOST|END">End round</button>
     <button type="button" data-line="HTN26|1|HOST|RESET">Reset round</button>
     <pre id="serial-result" aria-live="polite"></pre>
   </section>
-  <section aria-labelledby="players-heading"><h2 id="players-heading">Players and actions</h2><ul id="players"></ul></section>
   <section aria-labelledby="locations-heading">
-    <h2 id="locations-heading">Inferred station occupancy</h2>
-    <p>Locations below are temporary server inferences from actions, not camera tracking.</p>
+    <h2 id="locations-heading">Players by inferred station</h2>
+    <p>Each player appears only below their temporary server-inferred action location, not a camera-tracked location.</p>
     <h3>Pantry</h3><ul id="location-pantry"></ul>
     <h3>Fridge</h3><ul id="location-fridge"></ul>
     <h3>Cutting Board</h3><ul id="location-cutting-board"></ul>
@@ -195,10 +194,13 @@ const render = state => {
   list('orders', active.map(order => order.recipeName + ' [' + order.components.join(', ') + '] - ' + order.remainingSeconds + 's - patience ' + order.patience.filledSegments + '/3'));
   element('round').textContent = 'Round: ' + state.timer.status + ' | ' + state.timer.remainingSeconds + '/' + state.timer.totalSeconds + ' seconds';
   element('status').textContent = state.setup.message;
-  list('players', state.players.map(player => player.name + ': held=' + player.heldItem + ', plate=' + (player.hasPlate ? (player.plate.join(', ') || 'empty') : 'none') + ', action=' + player.actionState));
   for (const stationId of ['pantry', 'fridge', 'cutting-board', 'stove-left', 'stove-right', 'serving', 'center']) {
     const players = state.players.filter(player => (player.simulatedLocation?.stationId || 'center') === stationId);
-    list('location-' + stationId, players.length ? players.map(player => player.name + ' - ' + player.actionState) : ['(no players)']);
+    list('location-' + stationId, players.length ? players.map(player => {
+      const held = player.hasPlate ? 'PLATE [' + (player.plate.join(', ') || 'empty') + ']' : player.heldItem;
+      const action = player.processing?.type === 'chop' ? 'CHOPPING' : 'NOT CHOPPING / ' + String(player.actionState || 'idle').toUpperCase();
+      return player.name + ': held=' + held + ', action=' + action;
+    }) : ['(no players)']);
   }
   list('stations', state.stations.map(station => station.label + ': ' + station.status + ', item=' + (station.item || 'empty') + ', progress=' + Math.round(station.progress * 100) + '%, remaining=' + station.remainingSeconds + 's'));
   list('submissions', (state.submissions || []).slice(-10).reverse().map(value => value.status + ': ' + value.message + ' (gold ' + value.gold + ', tip ' + value.tip + ', penalty ' + value.penalty + ')'));

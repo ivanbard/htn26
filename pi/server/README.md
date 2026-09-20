@@ -23,10 +23,12 @@ tips, penalties, and net money are at the bottom. The page consumes
 `GET /api/state` and `GET /api/events`; it never runs game rules or decrements a
 clock itself.
 
-The page includes a serial-line form and start/end/reset buttons. The startup
-log also prints copy-paste browser-console examples using the canonical
-`HTN26|1|...` protocol, followed by examples for querying timer, orders,
-players, submissions, and money.
+The page includes a serial-line form and development-only simulated
+start/end/reset buttons. The startup log labels its copy-paste
+browser-console examples using the canonical `HTN26|1|...` protocol as local
+development simulation, followed by examples for querying timer, orders,
+players, submissions, and money. Production starts only from the physical
+host's native `HTN26|GAME|START_GAME|240|3` serial record.
 
 To listen on a trusted local network:
 
@@ -54,10 +56,12 @@ Configuration:
 
 ## Canonical serial protocol v1
 
-Every canonical record is printable, pipe-delimited, newline-terminated on a
-physical stream, and starts with `HTN26|1|`. The development endpoint accepts
-one record as `POST /api/serial` with `{ "line": "..." }`. Prefix logging noise
-is tolerated because the parser searches for `HTN26|` in each line.
+Every canonical record is printable, pipe-delimited, newline-terminated, and
+starts with `HTN26|1|`. The development endpoint accepts one record as
+`POST /api/serial` with `{ "line": "..." }`. Prefix logging noise is tolerated
+because the parser searches for `HTN26|` in each line. Canonical host lifecycle
+injection is a development simulator interface; the native `GAME` lifecycle
+below is the production physical-host authority.
 
 ### Host lifecycle
 
@@ -68,13 +72,16 @@ HTN26|1|HOST|END
 HTN26|1|HOST|RESET
 ```
 
-`START` clears prior round inventory, plates, stations, orders, submissions,
-economy, and history, then starts a clean round for the three fixed players.
+Canonical `START` clears prior round inventory, plates, stations, orders,
+submissions, economy, and history, then starts a development-simulated round
+for the three fixed players.
 The duration/count form requires 1-3600 seconds and exactly three players. The
 short form uses `HTN26_ROUND_SECONDS`. For local serial simulation, host START
 accepts the deterministic four-station fixture if a floorplan has not already
-been approved. The HTTP setup command `START_GAME` still requires normal
-floorplan approval.
+been approved. After normal floorplan approval, the HTTP setup command
+`START_GAME` prepares `waiting-for-host-start` state but does not start the
+production timer. Pressing START on the physical host badge and receiving its
+native `GAME|START_GAME` record starts production play.
 
 `END` marks active orders cancelled, sets the timer to ended/zero, and clears
 player and station round state. Natural timeout performs the same cleanup.
@@ -122,14 +129,17 @@ reported diagnostic only: it cannot overwrite the server's stove timer.
 `CHECK` likewise reads the authoritative station phase.
 `DONE` is a diagnostic completion report: it cannot finish chopping before the
 server's three-second deadline. The server timer completes the chop even if no
-`DONE` report arrives.
+`DONE` report arrives, and accepts one matching report at or after that
+deadline as acknowledgement of the already-completed chop.
 
 A plate summary always has four fixed `BMLC` columns: bun, cooked meat, sliced
 lettuce, and sliced cheese. A dash means absent, so a plain burger is `BM--`
 and a fully topped burger is `BMLC`. `PLATE|NEW` takes an empty plate or moves a
 currently held platable item onto one. Duplicate and raw plate items are
 rejected. `TRANSFER` applies the v1 merge/swap rules to the two authoritative
-player inventories. `READY` remains visible for the 0.5-second shake window.
+player inventories. A transfer or paired native bump moves both inferred player
+locations immediately to center/default. `READY` remains visible for the
+0.5-second shake window.
 
 Player actions received while no round is running are recorded as ignored and
 do not mutate inventory. `LEAVE` starts the same documented return delay for
@@ -153,10 +163,12 @@ station for 2 seconds by default, then the server returns the player to
 inspectable, and `HTN26_PLAYER_LOCATION_HOLD_SECONDS` changes it. Chopping stays
 at Cutting Board through its three-second operation and then uses the return
 delay. A later action moves the player immediately to its newly inferred
-station. Occupancy is stored per player, so any station can list multiple
-players at once. The plain page shows player names and authoritative action
-text under Pantry, Fridge, Cutting Board, Stove 1, Stove 2, Serving, and the
-center/default group.
+station. A transfer/bump moves both participants to center/default immediately.
+Occupancy is stored per player, so any station can list multiple players at
+once. The plain page has no separate global player-card list: each player
+appears only under Pantry, Fridge, Cutting Board, Stove 1, Stove 2, Serving, or
+center/default with their name, authoritative held item, and explicit action
+state such as `CHOPPING` or `NOT CHOPPING`.
 
 ### Submission
 
@@ -169,15 +181,18 @@ The last field is normally the submitted `BMLC` plate summary; recipe IDs are
 also accepted as assertions. `SUBMIT` counts as the submitting player's shake;
 the other two fixed players must each have sent `READY` within the same
 0.5-second server window. Arrival order does not matter: an early `SUBMIT` is
-held only until that window closes. The submitter must hold an authoritative server
-plate, and the submitted summary or recipe must match that plate. The server
-never constructs inventory from the submission payload. Once consensus and the
-assertion pass, the server matches its plate against active orders and clears
-all three players' held state. A successful early order awards recipe gold and
-a positive server-calculated tip. A wrong or already expired order applies a
-penalty. Missing consensus, missing inventory, and assertion mismatches are
-rejected without scoring. The browser cannot provide a score or validation
-result.
+held only until that window closes. The submitter must hold an authoritative
+server plate. At the shared submission boundary the server atomically snapshots
+and consumes that plate before waiting for consensus or checking the submitted
+summary. The summary or recipe is only a consistency assertion; the server
+never constructs inventory from it. Deferred scoring uses the retained plate
+snapshot, and consensus expiry or assertion rejection never restores stale
+inventory. Once consensus and the assertion pass, the server matches the
+snapshot against active orders and clears all three players' held state. A
+successful early order awards recipe gold and a positive server-calculated tip.
+A wrong or already expired order applies a penalty. Missing consensus, missing
+inventory, and assertion mismatches are rejected without scoring. The browser
+cannot provide a score or validation result.
 
 ## Legacy badge compatibility
 
@@ -206,12 +221,15 @@ fixed-player `E|P<player>:<action>` vocabulary is translated:
 - `DROP:<snapshot>`, paired `X:<snapshot>`, `READY`, and `SUB:<BMLC>` map to
   drop, transfer, shake readiness, and submission.
 
-The encoded player number in an `E` event wins over radio arrival order. Legacy
-`N`, `M`, `B`, and `H` fixture intents remain parse-compatible. Legacy
+The encoded player number in an `E` event wins over radio arrival order, but a
+sender cannot replace a badge already assigned to that fixed player. An
+unassigned fourth legacy badge cannot submit as player 1. Legacy `N`, `M`, `B`,
+and `H` fixture intents remain parse-compatible. Legacy
 `B|TIP:<amount>` claims are recorded diagnostically and ignored; only a
-successful authoritative submission can award a tip. `GW` status and `GAME`
-lifecycle records map to the same internal operations as canonical records.
-USB chunks can split records at any byte boundary.
+successful authoritative submission can award a tip. `GW` records update
+health. Native `GAME|START_GAME` and `GAME|GAME_END` records from the physical
+host are parsed and processed as the authoritative production lifecycle. USB
+chunks can split records at any byte boundary.
 
 The host and player badge profiles themselves are owned by
 [`../../badge/master/README.md`](../../badge/master/README.md),
@@ -234,7 +252,9 @@ and native radio profiles.
   minimum positive tip for a successful active order.
 - Submission requires the submitter's authoritative plate plus all three fixed
   players' fresh 0.5-second shake state. A submitted BMLC/recipe value is only
-  a consistency assertion and cannot create or replace server inventory.
+  a consistency assertion and cannot create or replace server inventory. The
+  submitter's plate is consumed immediately and its snapshot is retained for
+  deferred consensus/scoring.
 - `money.net = gold + tips - penalties`; `score.value` mirrors net money.
 - Chopping takes 3 seconds. Releasing/failing before completion loses progress
   while retaining the raw item.
@@ -263,7 +283,9 @@ The complete authoritative snapshot is available at `GET /api/state` and as
 - `GET /api/health`
 
 Commands use `{ "type": "START_HOST|SCAN_ROOM|APPROVE_LAYOUT|START_GAME|END_GAME|RESET_GAME" }`
-at `POST /api/command`. Badge assignment uses
+at `POST /api/command`. After approval, `START_GAME` prepares and waits for the
+physical native `GAME|START_GAME` record rather than starting a production
+round. Badge assignment uses
 `POST /api/players/assign`. `POST /api/serial` is a local development
 diagnostic and passes its line through the exact same parser/dispatcher as the
 physical stream.
@@ -324,12 +346,13 @@ node --test test/*.test.mjs
 ```
 
 Tests cover canonical and legacy protocol parsing, chunked/noisy serial input,
-deduplication, native `GAME`/fixed-player `E` lifecycle processing, lifecycle
-timing and cleanup, natural orders, all four patience states,
-expiration/wrong-order penalties, authoritative three-player submissions,
-early gold/tips, chopping/cooking, player plates, browser HTML, SSE/JSON
-projections, and diagnostic serial injection. They are laptop-hosted simulator
-tests only. They do not prove
+deduplication, native physical-host `GAME` authority and fixed-player `E`
+processing, lifecycle timing and cleanup, natural orders, all four patience
+states, expiration/wrong-order penalties, immediate plate consumption with
+deferred three-player consensus, early gold/tips, authoritative chopping and
+cooking acknowledgements, bump location reset, legacy sender isolation, player
+plates, browser HTML, SSE/JSON projections, and diagnostic serial injection.
+They are laptop-hosted simulator tests only. They do not prove
 physical badge/NFC/radio/USB behavior, phone-camera capture, OpenAI
 connectivity, or any possible future QNX deployment.
 

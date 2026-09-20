@@ -52,9 +52,14 @@ async function approveAndStart(base) {
   assert.equal(review.data.floorPlan.stations.length, 4);
   const approval = await post(base, "/api/floorplan/approve", { approved: true });
   assert.equal(approval.response.status, 200);
-  const started = await post(base, "/api/command", { type: "START_GAME" });
+  const prepared = await post(base, "/api/command", { type: "START_GAME" });
+  assert.equal(prepared.response.status, 200);
+  assert.equal(prepared.data.setup.phase, "waiting-for-host-start");
+  assert.equal(prepared.data.timer.status, "ready");
+  const started = await post(base, "/api/serial", { line: "HTN26|GAME|START_GAME|240|3" });
   assert.equal(started.response.status, 200);
-  return started.data;
+  assert.equal(started.data.result.ok, true);
+  return started.data.state;
 }
 
 test("fixture parser accepts noisy and chunk-framed gateway records", async () => {
@@ -131,8 +136,12 @@ test("projection keeps four recipes, validates submissions, and computes gold/ti
   await projection.proposeFloorplan({ photos: [{ id: "fixture" }] }, now);
   projection.approveFloorplan(true, now);
   projection.command("START_GAME", {}, now);
+  assert.equal(projection.snapshot(now).setup.phase, "waiting-for-host-start");
+  assert.equal(projection.snapshot(now).timer.status, "ready");
+  projection.ingestHostControl({ control: "START", durationSeconds: 240, framing: "legacy-game" }, now);
   assert.equal(projection.snapshot(now).timer.totalSeconds, 240);
   assert.equal(projection.snapshot(now).timer.remainingSeconds, 240);
+  assert.equal(projection.snapshot(now).eventHistory[0].startSource, "physical host badge");
   projection.ingestPlayerAction({ playerId: "p1", action: "PLATE", plate: "BMLC" }, now);
   readyOtherPlayers(projection, "p1", now);
   const wrong = projection.ingestBadgeEvent({ senderMac: MAC, sequence: 1, type: "B", value: "SUBMIT:CHEESE_LETTUCE_MEAT" }, now);
@@ -229,6 +238,9 @@ test("server owns chopping, two-stove cooking phases, and player plate inventory
   assert.equal(projection.snapshot(now).players[0].processing.type, "chop");
   now += GAME_TIMINGS.chopSeconds * 1_000;
   assert.equal(projection.snapshot(now).players[0].heldItem, "CHOPPED_MEAT");
+  const completed = projection.ingestPlayerAction({ playerId: "p1", action: "CHOP", phase: "DONE", item: "CHOPPED_MEAT" }, now);
+  assert.equal(completed.accepted, true);
+  assert.match(completed.detail, /confirmed completed chop/);
   projection.ingestPlayerAction({ playerId: "p1", action: "STOVE", side: "LEFT", operation: "PLACE" }, now);
   now += GAME_TIMINGS.cookSeconds * 1_000;
   assert.equal(projection.snapshot(now).stations.find((station) => station.id === "stove-left").status, "done");
@@ -260,6 +272,13 @@ test("action-inferred station occupancy allows groups and returns players to cen
   state = projection.snapshot(now);
   assert.deepEqual(state.players.slice(0, 2).map((player) => player.currentStation), ["center", "center"]);
 
+  projection.ingestPlayerAction({ playerId: "p1", action: "AT_STATION", station: "PANTRY" }, now);
+  projection.ingestPlayerAction({ playerId: "p2", action: "AT_STATION", station: "FRIDGE" }, now);
+  projection.ingestPlayerAction({ playerId: "p1", action: "TRANSFER", targetPlayerId: "p2" }, now);
+  state = projection.snapshot(now);
+  assert.deepEqual(state.players.slice(0, 2).map((player) => player.currentStation), ["center", "center"]);
+  assert.ok(state.players.slice(0, 2).every((player) => player.simulatedLocation.returnAt === null));
+
   projection.ingestPlayerAction({ playerId: "p1", action: "PLATE", plate: "BM--" }, now);
   submitWithTeam(projection, "p1", "BM--", now);
   assert.equal(projection.snapshot(now).players[0].currentStation, "serving");
@@ -282,7 +301,16 @@ test("submissions require authoritative inventory, matching assertions, and thre
   assert.equal(result.accepted, true);
   assert.equal(result.pending, true);
   assert.match(result.detail, /waiting for/);
-  assert.equal(projection.snapshot(now).players[0].hasPlate, true);
+  assert.equal(projection.snapshot(now).players[0].hasPlate, false);
+  now += 501;
+  let state = projection.snapshot(now);
+  assert.deepEqual(state.submissions, []);
+  assert.equal(state.players[0].hasPlate, false);
+  assert.equal(state.players[0].actionState, "submission consensus expired");
+
+  projection.ingestPlayerAction({ playerId: "p1", action: "PLATE", plate: "BM--" }, now);
+  result = projection.ingestSubmission({ playerId: "p1", plate: "BM--" }, now);
+  assert.equal(result.pending, true);
   projection.ingestPlayerAction({ playerId: "p2", action: "READY" }, now);
   assert.deepEqual(projection.snapshot(now).submissions, []);
   projection.ingestPlayerAction({ playerId: "p3", action: "READY" }, now);
@@ -296,8 +324,9 @@ test("submissions require authoritative inventory, matching assertions, and thre
   assert.equal(result.accepted, false);
   assert.match(result.detail, /assertion/);
   assert.equal(projection.snapshot(now).money.net, moneyBeforeMismatch);
-  assert.equal(projection.snapshot(now).players[0].hasPlate, true);
+  assert.equal(projection.snapshot(now).players[0].hasPlate, false);
 
+  projection.ingestPlayerAction({ playerId: "p1", action: "PLATE", plate: "BM-C" }, now);
   const moneyBeforeCorrect = projection.snapshot(now).money.net;
   result = submitWithTeam(projection, "p1", "BM-C", now);
   assert.equal(result.accepted, true);
@@ -326,6 +355,21 @@ test("legacy fixed-player actions update the encoded player rather than arrival 
   assert.equal(projection.snapshot(now).players[0].heldItem, "EMPTY");
 });
 
+test("an unassigned legacy badge cannot submit as a fixed player", () => {
+  const now = 52_000;
+  const projection = new ServerProjection({ now: () => now, random: () => 0 });
+  projection.ingestHostControl({ control: "START", durationSeconds: 120 }, now);
+  for (const player of [1, 2, 3]) {
+    projection.ingestBadgeEvent({ senderMac: `AA:BB:CC:DD:EE:0${player}`, sequence: player, type: "E", value: `P${player}:READY` }, now);
+  }
+  projection.ingestPlayerAction({ playerId: "p1", action: "PLATE", plate: "BM--" }, now);
+  const result = projection.ingestBadgeEvent({ senderMac: "AA:BB:CC:DD:EE:04", sequence: 4, type: "B", value: "SUBMIT:BM--" }, now);
+  assert.equal(result.accepted, false);
+  assert.match(result.detail, /not assigned/);
+  assert.equal(projection.snapshot(now).players[0].hasPlate, true);
+  assert.deepEqual(projection.snapshot(now).submissions, []);
+});
+
 test("native GAME and complete E event path is parsed and projected by the laptop runtime", async () => {
   let now = 55_000;
   await withRuntime(async (_base, runtime) => {
@@ -350,7 +394,9 @@ test("native GAME and complete E event path is parsed and projected by the lapto
     assert.equal(state.players[0].heldItem, "RAW_MEAT");
     assert.equal(state.eventHistory.at(-1).type, "rejected-action");
     now += GAME_TIMINGS.chopSeconds * 1_000;
-    assert.equal(runtime.projection.snapshot(now).players[0].heldItem, "CHOPPED_MEAT");
+    state = event(1, "CH:D:M");
+    assert.equal(state.players[0].heldItem, "CHOPPED_MEAT");
+    assert.match(state.eventHistory.at(-1).message, /confirmed completed chop/);
 
     state = event(1, "ST:L:P");
     assert.equal(state.stations.find((station) => station.id === "stove-left").status, "cooking");
@@ -392,6 +438,7 @@ test("native GAME and complete E event path is parsed and projected by the lapto
     state = event(2, "X:HK");
     assert.equal(state.players[0].heldItem, "RAW_CHEESE");
     assert.deepEqual(state.players[1].plate, ["BUN"]);
+    assert.deepEqual(state.players.slice(0, 2).map((player) => player.currentStation), ["center", "center"]);
     state = event(3, "ST:R:C:EMPTY");
     assert.equal(state.players[2].actionState, "checked stove 2: idle");
     event(3, "PU:M");
@@ -425,6 +472,7 @@ test("HTTP upload, review, approval, serial projection, and browser reads work",
     assert.equal(initial.timer.totalSeconds, 240);
     const state = await approveAndStart(base);
     assert.equal(state.setup.phase, "running");
+    assert.equal(state.eventHistory[0].startSource, "physical host badge");
     assert.equal(state.floorPlan.room.widthMeters, 10);
     assert.equal(state.floorPlan.stations.length, 4);
     const serial = await post(base, "/api/serial", { line: `noise HTN26|RX|${MAC}|-40|OC1|99|N|ING:MEAT` });
@@ -451,9 +499,13 @@ test("plain browser view and diagnostic endpoint use the same canonical state", 
   const html = browserDocument();
   assert.match(html, /Orders \/ new orders/);
   assert.match(html, /Round and timer/);
-  assert.match(html, /Players and actions/);
+  assert.match(html, /Players by inferred station/);
   for (const heading of ["Pantry", "Fridge", "Cutting Board", "Stove 1", "Stove 2", "Serving", "Center \/ default"]) assert.match(html, new RegExp(heading));
-  assert.match(html, /temporary server inferences from actions/);
+  assert.match(html, /temporary server-inferred action location/);
+  assert.doesNotMatch(html, /id="players(?:-heading)?"/);
+  assert.match(html, /held=/);
+  assert.match(html, /NOT CHOPPING/);
+  assert.match(html, /CHOPPING/);
   assert.match(html, /Net money/);
   assert.match(html, /HTN26\|1\|HOST\|START\|240\|3/);
   assert.doesNotMatch(html, /<style\b|stylesheet/i);
@@ -463,6 +515,8 @@ test("plain browser view and diagnostic endpoint use the same canonical state", 
   assert.match(guide, /HTN26\|1\|PLAYER\|2\|READY/);
   assert.match(guide, /HTN26\|1\|PLAYER\|3\|READY/);
   assert.match(guide, /HTN26\|1\|SUBMIT\|1\|BM--/);
+  assert.match(guide, /development simulator/i);
+  assert.match(guide, /HTN26\|GAME\|START_GAME\|240\|3/);
 
   await withRuntime(async (base) => {
     const page = await fetch(`${base}/`).then((response) => response.text());
@@ -470,6 +524,7 @@ test("plain browser view and diagnostic endpoint use the same canonical state", 
     let injected = await post(base, "/api/serial", { line: "HTN26|1|HOST|START|240|3" });
     assert.equal(injected.data.result.ok, true);
     assert.equal(injected.data.state.timer.status, "running");
+    assert.match(injected.data.state.setup.message, /Development simulator/);
     injected = await post(base, "/api/serial", { line: "HTN26|1|PLAYER|1|PLATE|BM--" });
     assert.deepEqual(injected.data.state.players[0].plate, ["BUN", "MEAT"]);
     await post(base, "/api/serial", { line: "HTN26|1|PLAYER|2|READY" });
