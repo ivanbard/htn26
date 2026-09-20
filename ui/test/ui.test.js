@@ -410,6 +410,7 @@ test("ships every room and team asset used by the board", () => {
     "player-plate.svg",
     "floor-tile.svg",
     "hazard-warning.svg",
+    "fire.svg",
     "chop-knife.png",
     "game-room-background.png",
   ]) {
@@ -641,8 +642,8 @@ test("renders gameplay as a framed room board with state shown on each station",
   assert.match(html, /STOVE 1/);
   assert.match(html, /STOVE 2/);
   assert.match(html, /CHOP 2/);
-  // 01:00 is the first (plain meat) order's patience; the round clock itself is 04:00.
-  assert.match(html, /01:00/);
+  // Per-order countdown text is hidden; only the round clock remains numeric.
+  assert.doesNotMatch(html, />01:00</);
   assert.match(html, /class="hud-timer-value">04:00</);
   assert.match(html, /class="game-board panel\s/);
   assert.match(html, /class="board-score"/);
@@ -656,7 +657,7 @@ test("renders gameplay as a framed room board with state shown on each station",
   // A round opens with ONE order; more arrive over time (see order-pacing.test.js).
   assert.equal((html.match(/data-node-id="39:26"/g) || []).length, 1);
   assert.match(html, /data-order-count="1"/);
-  assert.match(html, /id="hud-title-order-1"[^>]*>PLAIN MEAT BURGER/);
+  assert.match(html, /data-order-id="order-1"[^>]*aria-label="PLAIN MEAT BURGER order"/);
   assert.match(html, /data-ingredient-slot="1"/);
   assert.match(html, /data-node-id="20:2"/);
   assert.match(html, /class="game-board-score"/);
@@ -702,6 +703,9 @@ test("makes raw, cooking, cooked, and burnt meat states explicit on the station 
   assert.match(html, /data-station="stove1"[^>]*>[\s\S]*?data-cook-progress="40"/);
   assert.match(html, /data-station="stove1"[^>]*>[\s\S]*?meat_raw\.png/);
   assert.match(html, /data-station="stove2"[^>]*>[\s\S]*?meat_burnt\.png/);
+  assert.match(stationHtml(html, "stove2"), /class="station-hazard station-hazard-fire"/);
+  assert.match(stationHtml(html, "stove2"), /fire\.svg/);
+  assert.doesNotMatch(stationHtml(html, "stove2"), /hazard-warning\.svg/);
 });
 
 test("renders server-owned station timing and cooking warning state for the projector", () => {
@@ -727,8 +731,9 @@ test("renders server-owned station timing and cooking warning state for the proj
   const html = renderApp(state, 1_000);
 
   assert.match(html, /data-station="stove1"[^>]*>[\s\S]*?data-station-warning="true"/);
+  assert.match(html, /class="station-hazard station-hazard-warning"/);
   assert.match(html, /hazard-warning\.svg/);
-  assert.match(html, /class="station-steam"/);
+  assert.doesNotMatch(html, /class="station-steam"/);
   assert.match(html, /MEAT IS NEARLY BURNT/);
   assert.match(html, /class="station-progress-track"[^>]*data-progress="90"/);
   assert.match(html, /aria-valuemax="100"/);
@@ -1065,7 +1070,7 @@ test("renders a rejected burger's live penalty and updates the score", async () 
   assert.doesNotMatch(html, /WRONG BURGER|PENALTY/);
 });
 
-test("renders one, two, and four active orders with unique accessible headings", () => {
+test("renders one, two, and four active orders with accessible labels", () => {
   for (const count of [1, 2, 4]) {
     const state = createInitialMockState(1_000);
     state.setup.phase = SETUP_PHASES.RUNNING;
@@ -1077,8 +1082,9 @@ test("renders one, two, and four active orders with unique accessible headings",
 
     assert.match(html, new RegExp(`data-order-count="${count}"`));
     assert.equal((html.match(/data-order-id="order-/g) || []).length, count);
-    assert.equal((html.match(/id="hud-title-order-/g) || []).length, count);
-    assert.equal((html.match(/aria-label="\d{2}:\d{2} remaining"/g) || []).length, count);
+    assert.equal((html.match(/aria-label="[^"]+ order"/g) || []).length, count);
+    assert.equal((html.match(/class="hud-order-time"/g) || []).length, 0);
+    assert.equal((html.match(/class="hud-order-main"><div class="hud-order-heading"/g) || []).length, 0);
     assert.equal((html.match(/role="progressbar"/g) || []).length, count);
     const progressValues = [...html.matchAll(/class="hud-order-progress"[^>]*aria-valuenow="(\d+)"/g)].map((match) => Number(match[1]));
     assert.equal(progressValues.length, count);
@@ -1102,7 +1108,7 @@ test("uses active order order and left-aligns the queue after completed orders l
   assert.match(styles, /\.game-board-orders[\s\S]*justify-content:\s*start/);
 });
 
-test("renders readable burger stacks and full-width time remaining rails", () => {
+test("renders burgers above ingredient lists and full-width colour-changing rails", () => {
   const state = createInitialMockState(1_000);
   state.setup.phase = SETUP_PHASES.RUNNING;
   state.floorPlan.accepted = true;
@@ -1121,7 +1127,8 @@ test("renders readable burger stacks and full-width time remaining rails", () =>
   assert.equal((html.match(/class="hud-order-progress"/g) || []).length, 4);
   assert.match(html, /class="hud-order hud-order-compact is-warning"[^>]*data-order-id="order-1"/);
   assert.match(html, /class="hud-order hud-order-compact is-critical"[^>]*data-order-id="order-2"/);
-  assert.equal((html.match(/class="hud-order-time-icon"/g) || []).length, 4);
+  assert.equal((html.match(/class="hud-order-time-icon"/g) || []).length, 0);
+  assert.match(html, /class="hud-order-preview"[\s\S]*class="burger-preview-art"[\s\S]*class="hud-order-main"[\s\S]*class="hud-ingredient-slots"[\s\S]*class="hud-order-progress"/);
 });
 
 test("falls back to the legacy single order when an orders array is absent", () => {

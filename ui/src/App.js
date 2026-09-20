@@ -60,6 +60,7 @@ const STATION_ASSETS = Object.freeze({
   STOVE: "/assets/stove.png",
 });
 const HAZARD_ASSET = "/assets/hazard-warning.svg";
+const FIRE_ASSET = "/assets/fire.svg";
 
 const cx = (...values) => values.filter(Boolean).join(" ");
 const finite = (value, fallback = 0) => Number.isFinite(Number(value)) ? Number(value) : fallback;
@@ -285,6 +286,7 @@ function PlateIngredients({ ingredients, className, label, stage }) {
 function stationWarning(runtimeStation, progress) {
   if (!runtimeStation) return false;
   const status = upper(runtimeStation.status || runtimeStation.phase || runtimeStation.processing);
+  if (/BURNT|BURNED/.test(status)) return false;
   const explicitWarning = runtimeStation.warning === true
     || runtimeStation.danger === true
     || runtimeStation.hazard === true;
@@ -328,9 +330,10 @@ function StationContents({ station, runtimeStation, serving }) {
   const comboSprite = station.kind === "assembly" ? plateSprite(ingredients) : null;
   const hasComboPlate = Boolean(comboSprite);
   const isWarning = isWorkstation && stationWarning(runtimeStation, progress);
+  const isBurnt = isWorkstation && visualState === "burnt";
   const stateLabel = station.kind === "ingredient"
     ? "SOURCE"
-    : isWarning && visualState !== "burnt" ? "WARNING" : cookingStateLabel(visualState);
+    : isWarning ? "WARNING" : cookingStateLabel(visualState);
   const timingLabel = Number.isFinite(Number(remaining)) && Number(remaining) > 0 ? ` · ${seconds(remaining)}` : "";
   // Only stoves and chopping boards run timers, so only they get a progress
   // bar: never pantry/fridge/ingredient sources or the assembly counter, even
@@ -352,9 +355,11 @@ function StationContents({ station, runtimeStation, serving }) {
     // ingredient. A cut-out copy of it is layered above the item so the knife
     // reads as cutting it.
     station.kind === "chop" && ingredients.length > 0 && h("img", { className: "station-knife", src: "/assets/chop-knife.png", alt: "" }),
-    isWarning && h("div", { className: "station-hazard", role: "img", "aria-label": runtimeStation.warningMessage || "Cooking warning: remove the food soon" },
+    isWarning && h("div", { className: "station-hazard station-hazard-warning", role: "img", "aria-label": runtimeStation.warningMessage || "Cooking warning: remove the food soon" },
       h("img", { src: HAZARD_ASSET, alt: "Cooking warning" }),
-      h("span", { className: "station-steam", "aria-hidden": true }, h("i"), h("i"), h("i")),
+    ),
+    isBurnt && h("div", { className: "station-hazard station-hazard-fire", role: "img", "aria-label": "Food burnt" },
+      h("img", { src: FIRE_ASSET, alt: "Food burnt" }),
     ),
     isWorkstation && ingredients.length > 0 && h("span", { className: "station-item-label", title: ingredients.join(" + "), "data-station-item": ingredients.join("+") }, ingredients.join(" + ")),
     h("span", { className: "room-station-state" }, stateLabel, timingLabel),
@@ -653,19 +658,6 @@ function TimerCard({ state, compact = false }) {
   );
 }
 
-function OrderTimerIcon() {
-  return h("span", { className: "hud-order-time-icon", "aria-hidden": true },
-    h("svg", { viewBox: "0 0 32 32", focusable: "false" },
-      h("rect", { x: "11", y: "2.5", width: "10", height: "4", rx: "2", fill: "none" }),
-      h("path", { d: "M8.5 9 5.8 6.3M23.5 9l2.7-2.7", fill: "none" }),
-      h("circle", { cx: "16", cy: "18", r: "10.5", fill: "none" }),
-      h("line", { x1: "16", y1: "18", x2: "16", y2: "11.5" }),
-      h("line", { x1: "16", y1: "18", x2: "21.5", y2: "21" }),
-      h("circle", { cx: "16", cy: "18", r: "1.5", fill: "currentColor", stroke: "none" }),
-    ),
-  );
-}
-
 function IngredientIcon({ value, stage = "raw" }) {
   // Every caller (.station-plate img, .hud-ingredient-slot img) already sets
   // its own explicit width/height/object-fit for this <img> based on its own
@@ -714,19 +706,10 @@ function OrderCard({ order, compact = false, tourTarget = false }) {
     : order.patience?.filledSegments != null && Number.isFinite(segments)
       ? segments <= 1 ? "is-critical" : segments === 2 ? "is-warning" : "is-healthy"
       : "is-healthy";
-  const titleId = `hud-title-${String(order.id || "order").replaceAll(/[^a-zA-Z0-9_-]/g, "-")}`;
-  return h("section", { className: cx("hud-order", compact && "hud-order-compact", urgency, tourTarget && "is-tour-target"), "data-node-id": "39:26", "data-order-id": order.id, "data-tour-target": tourTarget ? "order" : undefined, "aria-labelledby": titleId },
+  return h("section", { className: cx("hud-order", compact && "hud-order-compact", urgency, tourTarget && "is-tour-target"), "data-node-id": "39:26", "data-order-id": order.id, "data-tour-target": tourTarget ? "order" : undefined, "aria-label": `${orderTitle(order)} order` },
     h(BurgerPreview, { order, components }),
     h("div", { className: "hud-order-main" },
-      h("div", { className: "hud-order-heading" },
-        h("h2", { id: titleId }, orderTitle(order)),
-        h("span", { className: "hud-order-recipe-count" }, `${components.length || 1} ITEMS`),
-      ),
       h("div", { className: "hud-ingredient-slots", "aria-label": `Assembly order: ${components.map((item) => upper(item)).join(", ")}` }, components.map((item, index) => h("div", { key: `${item}-${index}`, className: "hud-ingredient-slot", "data-ingredient-slot": index + 1, "aria-label": `${index + 1}. ${upper(item)}` }, h(IngredientIcon, { value: item, stage: "plated" })))),
-    ),
-    h("div", { className: "hud-order-time", "aria-label": `${seconds(order.remainingSeconds)} remaining` },
-      h(OrderTimerIcon),
-      h("strong", null, seconds(order.remainingSeconds)),
     ),
     h("div", { className: "hud-order-progress", role: "progressbar", "aria-label": `${orderTitle(order)} time remaining`, "aria-valuemin": 0, "aria-valuemax": 100, "aria-valuenow": Math.round(progress) }, h("span", { style: { width: `${progress}%` } })),
   );

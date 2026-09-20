@@ -39,7 +39,7 @@ test("the order strip uses the four-slot layout and identical card classes for 1
 
 test("no stylesheet rule sizes the order strip by how many orders are open", () => {
   assert.doesNotMatch(css, /\.orders-[123]\b/);
-  assert.match(css, /\.game-board-orders\.orders-4 \{ grid-template-columns: repeat\(4, minmax\(0, 1fr\)\); \}/);
+  assert.match(css, /\.game-board-orders\.orders-4 \{ grid-template-columns: repeat\(4, clamp\(120px, 12cqw, 180px\)\); \}/);
 });
 
 async function serverRound() {

@@ -457,6 +457,10 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--yellow); ou
   pointer-events: none;
 }
 
+.station-hazard-warning {
+  animation: station-hazard-flash .7s steps(1, end) infinite;
+}
+
 .station-hazard > img {
   position: relative;
   z-index: 2;
@@ -467,35 +471,14 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--yellow); ou
   filter: drop-shadow(0 2px 1px rgba(56, 17, 11, .46));
 }
 
-.station-steam {
-  position: absolute;
-  z-index: 1;
-  top: 57%;
-  left: 28%;
-  display: flex;
-  width: 44%;
-  height: 78%;
-  justify-content: space-between;
-  pointer-events: none;
+@keyframes station-hazard-flash {
+  0%, 49% { opacity: 1; }
+  50%, 99% { opacity: 0; }
+  100% { opacity: 1; }
 }
 
-.station-steam i {
-  display: block;
-  width: 18%;
-  height: 70%;
-  border-left: clamp(2px, .18cqw, 4px) solid #fff8e8;
-  border-radius: 50%;
-  filter: drop-shadow(0 1px 1px rgba(37, 20, 15, .55));
-  transform: rotate(12deg);
-  animation: cooking-steam 1.15s ease-in-out infinite;
-}
-
-.station-steam i:nth-child(2) { height: 92%; transform: translateY(-8%) rotate(-8deg); animation-delay: -.35s; }
-.station-steam i:nth-child(3) { height: 74%; transform: translateY(4%) rotate(14deg); animation-delay: -.7s; }
-
-@keyframes cooking-steam {
-  0%, 100% { opacity: .55; transform: translateY(4%) rotate(12deg); }
-  50% { opacity: 1; transform: translateY(-8%) rotate(-10deg); }
+@media (prefers-reduced-motion: reduce) {
+  .station-hazard-warning { animation: none; }
 }
 
 .tracked-player {
@@ -1127,7 +1110,7 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--yellow); ou
 
 .player-setup-continue {
   align-self: center;
-  width: min(100%, 420px);
+  width: 100%;
   background: #3d5597;
   box-shadow: 0 5px 0 #1f326c;
   color: #fff;
@@ -1494,33 +1477,24 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--yellow); ou
   border: 0;
 }
 .game-board-canvas { position: relative; width: 100%; height: 100%; min-height: 0; overflow: hidden; aspect-ratio: auto; background: #0c1824; }
-.game-board-orders { position: absolute; z-index: 8; top: 2.2%; left: 3%; right: 3%; display: grid; width: auto; justify-content: start; gap: clamp(.35rem, .65vw, .75rem); pointer-events: none; }
+.game-board-orders { position: absolute; z-index: 8; top: 2.2%; left: 3%; right: 18%; display: grid; width: auto; justify-content: start; gap: clamp(.3rem, .5vw, .6rem); pointer-events: none; }
 /* Every count uses this four-slot grid, so an order card never changes size. */
-.game-board-orders.orders-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.game-board-orders.orders-4 { grid-template-columns: repeat(4, clamp(120px, 12cqw, 180px)); }
 .orders-empty { grid-column: 1 / -1; justify-self: center; border: 3px solid #276d3f; border-radius: 999px; background: #eaffd9; padding: .7rem 1.2rem; color: #185c3c; font-size: clamp(.7rem, 1.1vw, 1rem); font-weight: 950; box-shadow: 0 5px 0 rgba(47, 93, 50, .45); }
-.hud-order { min-height: clamp(84px, 8.5vw, 128px); grid-template-columns: clamp(46px, 4.2vw, 76px) minmax(0, 1fr) clamp(60px, 5.5vw, 96px); align-items: center; gap: clamp(.35rem, .65vw, .75rem); border-width: clamp(2px, .22vw, 4px); border-radius: clamp(14px, 1.35vw, 24px); padding: clamp(.5rem, .75vw, .9rem); }
-.hud-order-compact { min-height: clamp(84px, 8.5vw, 128px); grid-template-columns: clamp(46px, 4.2vw, 76px) minmax(0, 1fr) clamp(60px, 5.5vw, 96px); gap: clamp(.35rem, .65vw, .75rem); border-radius: clamp(14px, 1.35vw, 24px); padding: clamp(.5rem, .75vw, .9rem); }
-.hud-order-preview { position: relative; display: grid; min-width: 0; min-height: 0; aspect-ratio: 1 / 1.12; place-items: center; overflow: hidden; border: 2px solid #e7d9c5; border-radius: clamp(8px, .8vw, 14px); background: #fffaf0; box-shadow: 0 3px 6px rgba(51, 36, 23, .16); }
+.hud-order { min-height: clamp(88px, 7vw, 112px); grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(26px, 1fr) auto auto; align-items: stretch; gap: clamp(.2rem, .35vw, .4rem); border-width: clamp(2px, .18vw, 3px); border-radius: clamp(10px, 1vw, 18px); padding: clamp(.35rem, .5vw, .6rem); }
+.hud-order-compact { min-height: clamp(88px, 7vw, 112px); grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(26px, 1fr) auto auto; gap: clamp(.2rem, .35vw, .4rem); border-radius: clamp(10px, 1vw, 18px); padding: clamp(.35rem, .5vw, .6rem); }
+.hud-order-preview { position: relative; display: grid; width: fit-content; min-width: 0; min-height: 0; place-items: center; align-self: center; justify-self: center; overflow: hidden; border: 1px solid #e7d9c5; border-radius: clamp(6px, .6vw, 10px); background: #fffaf0; padding: clamp(2px, .25vw, 4px) clamp(5px, .45vw, 8px); box-shadow: 0 2px 4px rgba(51, 36, 23, .14); }
 /* A single pre-drawn pixel-art icon, not an assembled stack — image-rendering:
    pixelated keeps its native chunky-pixel look crisp instead of the browser
    smoothing it while it's scaled up from its small source resolution. */
-.burger-preview-art { width: 82%; height: 82%; object-fit: contain; image-rendering: pixelated; filter: drop-shadow(0 2px 2px rgba(51, 36, 23, .2)); }
-.hud-order-main { min-width: 0; }
-.hud-order-heading { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: .35rem; margin-bottom: clamp(.25rem, .4vw, .45rem); }
-.hud-order-main h2 { min-width: 0; overflow: hidden; margin: 0; font-size: clamp(.68rem, .95vw, 1.25rem); line-height: 1; text-align: left; text-overflow: ellipsis; text-transform: uppercase; white-space: nowrap; }
-.hud-order-recipe-count { display: none; }
+.burger-preview-art { width: clamp(18px, 2.5cqw, 36px); height: auto; object-fit: contain; image-rendering: pixelated; filter: drop-shadow(0 1px 1px rgba(51, 36, 23, .2)); }
+.hud-order-main { min-width: 0; width: 100%; }
 .hud-ingredient-slots { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: clamp(.18rem, .35vw, .42rem); }
-.hud-ingredient-slot { display: grid; min-width: 0; height: clamp(30px, 2.7vw, 46px); place-items: center; border: 2px solid rgba(227, 217, 201, .92); border-radius: clamp(7px, .65vw, 12px); background: #fffefa; box-shadow: 0 4px 6px rgba(51, 36, 23, .15), inset 0 -2px 3px rgba(255, 255, 255, .7); }
+.hud-ingredient-slot { display: grid; min-width: 0; height: clamp(22px, 2vw, 32px); place-items: center; border: 1px solid rgba(227, 217, 201, .92); border-radius: clamp(5px, .5vw, 9px); background: #fffefa; box-shadow: 0 2px 4px rgba(51, 36, 23, .15), inset 0 -1px 2px rgba(255, 255, 255, .7); }
 .hud-ingredient-slot img { width: 72%; height: 72%; object-fit: contain; }
-.hud-order-time { display: flex; min-width: 0; align-items: center; justify-content: flex-end; gap: clamp(.2rem, .35vw, .4rem); color: #2f9d59; }
-.hud-order-time-icon { display: block; flex: 0 0 auto; width: clamp(18px, 2.15vw, 34px); height: clamp(18px, 2.15vw, 34px); color: inherit; }
-.hud-order-time-icon svg { display: block; width: 100%; height: 100%; overflow: visible; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
-.hud-order-time strong { min-width: 0; font-size: clamp(.78rem, 1.15vw, 1.5rem); font-variant-numeric: tabular-nums; font-weight: 950; letter-spacing: -.045em; line-height: 1; white-space: nowrap; }
-.hud-order-progress { grid-column: 1 / -1; align-self: end; width: 100%; height: clamp(5px, .48vw, 8px); overflow: hidden; border: 1px solid rgba(199, 181, 166, .55); border-radius: 999px; background: #e0d6c9; }
+.hud-order-progress { grid-column: 1 / -1; align-self: end; width: 100%; height: clamp(4px, .38vw, 6px); overflow: hidden; border: 1px solid rgba(199, 181, 166, .55); border-radius: 999px; background: #e0d6c9; }
 .hud-order-progress span { display: block; height: 100%; border-radius: inherit; background: #45b96b; transition: width .2s linear, background-color .2s ease; }
-.hud-order.is-warning .hud-order-time { color: #d08e1f; }
 .hud-order.is-warning .hud-order-progress span { background: #d08e1f; }
-.hud-order.is-critical .hud-order-time { color: #d11a2e; }
 .hud-order.is-critical .hud-order-progress span { background: #d11a2e; }
 .game-board-score, .game-board-timer { position: absolute; z-index: 9; bottom: 2.4%; width: clamp(120px, 15%, 300px); pointer-events: none; }
 .game-board-score { left: 2.4%; }
@@ -1613,7 +1587,7 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--yellow); ou
   .setup-stage:not(:last-child)::after { display: none; }
   .setup-workspace { flex: none; min-height: auto; }
   .game-board-orders.orders-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-  .hud-order, .hud-order-compact { grid-template-columns: 46px minmax(0, 1fr) 62px; }
+  .hud-order, .hud-order-compact { grid-template-columns: minmax(0, 1fr); }
 }
 
 @media (max-width: 720px) {
@@ -1636,12 +1610,8 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--yellow); ou
   }
   .game-board-score { left: 1.4%; }
   .game-board-timer { right: 1.4%; }
-  .hud-order, .hud-order-compact { min-height: 72px; grid-template-columns: 38px minmax(0, 1fr) 50px; gap: .25rem; padding: .35rem; }
+  .hud-order, .hud-order-compact { min-height: 104px; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(38px, 1fr) auto auto; gap: .25rem; padding: .35rem; }
   .hud-order-preview { border-width: 1px; }
-  .hud-order-recipe-count { display: none; }
-  .hud-order-main h2 { font-size: .58rem; }
-  .hud-order-time-icon { width: 16px; height: 16px; }
-  .hud-order-time strong { font-size: .7rem; }
   .hud-ingredient-slot { height: 24px; border-width: 1px; }
   .hud-order-progress { height: 4px; }
 }
@@ -1737,21 +1707,18 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--yellow); ou
    the board rather than inheriting a viewport-sized desktop minimum. */
 @container (max-width: 760px) {
   .game-board-orders.orders-4 {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 4px;
   }
 
   .hud-order,
   .hud-order-compact {
-    min-height: 78px;
-    grid-template-columns: 32px minmax(0, 1fr) 44px;
+    min-height: 72px;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(20px, 1fr) auto auto;
     gap: 3px;
-    border-radius: 10px;
+    border-radius: 8px;
     padding: 4px;
-  }
-
-  .hud-order-main h2 {
-    font-size: clamp(6px, 1.15cqw, 10px);
-    letter-spacing: -.06em;
   }
 
   .hud-ingredient-slots {
@@ -1759,23 +1726,11 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--yellow); ou
   }
 
   .hud-ingredient-slot {
-    height: clamp(18px, 4.8cqw, 32px);
+    height: clamp(16px, 3.5cqw, 24px);
     border-width: 1px;
-    border-radius: 5px;
+    border-radius: 4px;
   }
 
-  .hud-order-time {
-    gap: 2px;
-  }
-
-  .hud-order-time-icon {
-    width: 16px;
-    height: 16px;
-  }
-
-  .hud-order-time strong {
-    font-size: clamp(8px, 1.25cqw, 13px);
-  }
 }
 
 .tracked-player {
@@ -1800,8 +1755,9 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--yellow); ou
 
   .hud-order,
   .hud-order-compact {
-    min-height: 54px;
-    grid-template-columns: 20px minmax(0, 1fr) 24px;
+    min-height: 50px;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(14px, 1fr) auto auto;
     gap: 2px;
     border-radius: 8px;
     padding: 3px;
@@ -1812,13 +1768,9 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--yellow); ou
     border-radius: 4px;
   }
 
-  .burger-preview-art { width: 90%; height: 90%; }
-  .hud-order-main h2 { margin-bottom: 2px; font-size: 6px; }
+  .burger-preview-art { width: 16px; height: auto; }
   .hud-ingredient-slots { gap: 1px; }
-  .hud-ingredient-slot { height: 14px; border-width: 1px; border-radius: 3px; }
-  .hud-order-time { gap: 1px; }
-  .hud-order-time-icon { width: 12px; height: 12px; }
-  .hud-order-time strong { font-size: 6px; }
+  .hud-ingredient-slot { height: 12px; border-width: 1px; border-radius: 3px; }
   .hud-order-progress { height: 2px; }
   .room-stage-gameplay { top: 30%; }
 }
