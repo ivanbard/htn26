@@ -76,7 +76,7 @@ export function createApp({ root, transport, now = () => Date.now() }) {
     }
     unsubscribe = resolvedCleanup;
   }).catch((error) => {
-    connectionError = `LAPTOP SERVER UNAVAILABLE — ${error.message}`;
+    connectionError = `MASTER PI UNAVAILABLE — ${error.message}`;
     render(state);
   });
 

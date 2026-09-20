@@ -17,7 +17,6 @@ local WARNING_MS = 3000
 local ITEMS = {
 	BUN = true,
 	RAW_MEAT = true,
-	CHOPPED_MEAT = true,
 	MEAT = true,
 	RAW_LETTUCE = true,
 	LETTUCE = true,
@@ -29,7 +28,6 @@ local ITEMS = {
 local ITEM_SHORT = {
 	BUN = "B",
 	RAW_MEAT = "R",
-	CHOPPED_MEAT = "D",
 	MEAT = "M",
 	BURNT = "X",
 	RAW_LETTUCE = "Q",
@@ -41,7 +39,6 @@ local ITEM_SHORT = {
 local SHORT_ITEM = {
 	B = "BUN",
 	R = "RAW_MEAT",
-	D = "CHOPPED_MEAT",
 	M = "MEAT",
 	X = "BURNT",
 	Q = "RAW_LETTUCE",
@@ -203,7 +200,7 @@ local function finish_chop(state, now)
 	end
 	local item = state.chop.item
 	if item == "RAW_MEAT" then
-		state.hand = "CHOPPED_MEAT"
+		state.hand = "MEAT"
 	elseif item == "RAW_LETTUCE" then
 		state.hand = "LETTUCE"
 	elseif item == "RAW_CHEESE" then
@@ -250,8 +247,8 @@ local function stove_action(state, index, now)
 	end
 	local stove = state.stoves[index]
 	local phase = stove_phase(stove, now)
-	if state.hand == "CHOPPED_MEAT" and phase == "EMPTY" then
-		stove.item, stove.started = "CHOPPED_MEAT", now
+	if state.hand == "MEAT" and phase == "EMPTY" then
+		stove.item, stove.started = "MEAT", now
 		state.hand = nil
 		return true, "PUT"
 	end
@@ -322,8 +319,8 @@ local function apply_transfer(state, peer)
 			local letter = plate_letter(peer.hand)
 			if not state.plate[letter] then
 				state.plate[letter] = true
-				return true, "MERGE_IN"
 			end
+			return true, "MERGE_IN"
 		end
 		if peer.hand then
 			state.plate, state.hand = nil, peer.hand
@@ -333,11 +330,8 @@ local function apply_transfer(state, peer)
 	end
 	if not local_plate and peer_plate then
 		if state.hand and is_platable(state.hand) then
-			local letter = plate_letter(state.hand)
-			if not peer.plate[letter] then
-				state.hand = nil
-				return true, "MERGE_OUT"
-			end
+			state.hand = nil
+			return true, "MERGE_OUT"
 		end
 		if state.hand then
 			state.plate, state.hand = peer.plate, nil
@@ -372,7 +366,7 @@ local function event_payload(sequence, player, action)
 	if not printable_action(action) then
 		return nil, "BAD_ACTION"
 	end
-	local payload = string.format("OC2|%06d|E|P%d:%s", sequence, player, action)
+	local payload = string.format("OC1|%06d|E|P%d:%s", sequence, player, action)
 	if #payload > RADIO_BYTES then
 		return nil, "TOO_LONG"
 	end
@@ -383,7 +377,7 @@ local function parse_event(payload)
 	if type(payload) ~= "string" or #payload > RADIO_BYTES then
 		return nil
 	end
-	local sequence, player, action = string.match(payload, "^OC2|(%d+)|E|P([1-3]):(.+)$")
+	local sequence, player, action = string.match(payload, "^OC1|(%d+)|E|P([1-3]):(.+)$")
 	if not sequence then
 		return nil
 	end
@@ -398,15 +392,15 @@ local function parse_control(payload)
 	if type(payload) ~= "string" or #payload > RADIO_BYTES then
 		return nil
 	end
-	local sequence, code = string.match(payload, "^OC2|(%d+)|G|([SE])$")
+	local sequence, code = string.match(payload, "^OC1|(%d+)|G|([SE])$")
 	if sequence then
 		return tonumber(sequence), code
 	end
-	sequence, code = string.match(payload, "^OC2|(%d+)|G|(START)$")
+	sequence, code = string.match(payload, "^OC1|(%d+)|G|(START)$")
 	if sequence then
 		return tonumber(sequence), "S"
 	end
-	sequence = string.match(payload, "^OC2|(%d+)|G|(END)$")
+	sequence = string.match(payload, "^OC1|(%d+)|G|(END)$")
 	if sequence then
 		return tonumber(sequence), "E"
 	end

@@ -1,7 +1,8 @@
 import { SETUP_PHASES } from "./state.js";
 
 /**
- * The schema version shared by the laptop server and offline mock.
+ * The version emitted by the current master-Pi/mock snapshot shape.
+ * Version is checked when supplied, but is not fabricated for legacy snapshots.
  */
 export const FRONTEND_SNAPSHOT_VERSION = 2;
 export const SNAPSHOT_VERSION = FRONTEND_SNAPSHOT_VERSION;
@@ -27,22 +28,20 @@ export const FRONTEND_SNAPSHOT_FIELD_CONTRACT = Object.freeze({
   floorPlan: "object",
   burgerLevel: "object",
   players: "array",
-  order: "object-or-null",
+  order: "object",
   stations: "array",
   score: "object",
   clock: "object",
   serving: "object",
   health: "object",
   orders: "array",
-  gold: "object",
-  tips: "object",
 });
 
 export const FRONTEND_SNAPSHOT_CONTRACT = Object.freeze({
-  schemaVersion: FRONTEND_SNAPSHOT_VERSION,
+  version: FRONTEND_SNAPSHOT_VERSION,
   requiredTopLevelFields: FRONTEND_SNAPSHOT_FIELDS,
   fields: FRONTEND_SNAPSHOT_FIELD_CONTRACT,
-  optionalTopLevelFields: Object.freeze(["orders", "gold", "tips"]),
+  optionalTopLevelFields: Object.freeze(["orders"]),
   maxActiveOrders: 4,
   floorPlan: Object.freeze({
     coordinateSpace: ROOM_COORDINATE_SPACE,
@@ -62,7 +61,6 @@ function describeValue(value) {
 }
 
 function fieldIsValid(value, expectedType) {
-  if (expectedType === "object-or-null") return value === null || isRecord(value);
   return expectedType === "array" ? Array.isArray(value) : isRecord(value);
 }
 
@@ -199,7 +197,7 @@ export function validateFloorPlanContract(floorPlan) {
 
 /**
  * Validate only the stable top-level boundary of a snapshot.
- * Nested payloads remain extensible so existing laptop-server data is preserved.
+ * Nested payloads remain extensible so existing master-Pi data is preserved.
  */
 export function validateFrontendSnapshot(snapshot) {
   const missing = [];
@@ -270,30 +268,15 @@ export function validateFrontendSnapshot(snapshot) {
     }
   }
 
-  for (const field of ["gold", "tips"]) {
-    if (Object.prototype.hasOwnProperty.call(snapshot, field) && !isRecord(snapshot[field])) {
-      const error = invalidField(field, "object", describeValue(snapshot[field]), `Invalid optional field: ${field} must be an object.`);
-      invalid.push(error);
-      errors.push(error);
-    }
-  }
-
-  if (Object.prototype.hasOwnProperty.call(snapshot, "schemaVersion")
-    && (snapshot.schemaVersion !== FRONTEND_SNAPSHOT_VERSION
-      || !Number.isInteger(snapshot.schemaVersion))) {
+  if (Object.prototype.hasOwnProperty.call(snapshot, "version")
+    && (snapshot.version !== FRONTEND_SNAPSHOT_VERSION
+      || !Number.isInteger(snapshot.version))) {
     const error = invalidField(
-      "schemaVersion",
+      "version",
       FRONTEND_SNAPSHOT_VERSION,
-      describeValue(snapshot.schemaVersion),
+      describeValue(snapshot.version),
       `Unsupported snapshot version: expected ${FRONTEND_SNAPSHOT_VERSION}.`,
     );
-    invalid.push(error);
-    errors.push(error);
-  }
-
-  if (Object.prototype.hasOwnProperty.call(snapshot, "version")
-    && (!Number.isInteger(snapshot.version) || snapshot.version < 1)) {
-    const error = invalidField("version", "positive integer revision", describeValue(snapshot.version), "Snapshot revision must be a positive integer.");
     invalid.push(error);
     errors.push(error);
   }
@@ -328,86 +311,12 @@ export function validateFrontendSnapshot(snapshot) {
   return { valid: errors.length === 0, missing, invalid, errors };
 }
 
-function normalizedRectangle(item, scaleX, scaleY) {
-  if (!isRecord(item)) return item;
-  return {
-    ...item,
-    x: Number(item.x) * scaleX,
-    y: Number(item.y) * scaleY,
-    width: Number(item.width) * scaleX,
-    height: Number(item.height) * scaleY,
-  };
-}
-
-function normalizedPoint(item, scaleX, scaleY) {
-  if (!isRecord(item)) return item;
-  return { ...item, x: Number(item.x) * scaleX, y: Number(item.y) * scaleY };
-}
-
-function isLaptopServerSnapshot(snapshot) {
-  return snapshot?.source === "pi-server-simulator"
-    || (snapshot?.floorPlan?.units === "m" && snapshot?.players?.some((player) => isRecord(player?.simulatedLocation)));
-}
-
-function normalizeLaptopFloorPlan(floorPlan) {
-  if (floorPlan?.coordinateSpace != null) return floorPlan;
-  const width = Number(floorPlan?.width);
-  const height = Number(floorPlan?.height);
-  if (!isFinitePositive(width) || !isFinitePositive(height)) return floorPlan;
-  const scaleX = 100 / width;
-  const scaleY = 100 / height;
-  return {
-    ...floorPlan,
-    coordinateSpace: ROOM_COORDINATE_SPACE,
-    width: 100,
-    height: 100,
-    walls: Array.isArray(floorPlan.walls)
-      ? floorPlan.walls.map((wall) => normalizedRectangle(wall, scaleX, scaleY))
-      : floorPlan.walls,
-    stations: Array.isArray(floorPlan.stations)
-      ? floorPlan.stations.map((station) => normalizedRectangle(station, scaleX, scaleY))
-      : floorPlan.stations,
-    placementInstructions: Array.isArray(floorPlan.placementInstructions)
-      ? floorPlan.placementInstructions.map((instruction) => normalizedPoint(instruction, scaleX, scaleY))
-      : floorPlan.placementInstructions,
-  };
-}
-
-function stationPosition(stationId, floorPlan) {
-  const physicalStationId = String(stationId || "center").startsWith("stove-") ? "stove" : stationId;
-  const station = floorPlan?.stations?.find((candidate) => candidate.id === physicalStationId);
-  if (!station) return { x: 50, y: 50 };
-  return {
-    x: Number(station.x) + (Number(station.width) / 2),
-    y: Number(station.y) + (Number(station.height) / 2),
-  };
-}
-
+/**
+ * Return a shallow copy without adding defaults or coercing authoritative data.
+ * Unknown top-level fields and all nested values are retained.
+ */
 export function normalizeFrontendSnapshot(snapshot) {
-  if (!isRecord(snapshot) || !isLaptopServerSnapshot(snapshot)) return isRecord(snapshot) ? { ...snapshot } : snapshot;
-  const floorPlan = normalizeLaptopFloorPlan(snapshot.floorPlan);
-  const scaleX = floorPlan === snapshot.floorPlan ? 1 : 100 / Number(snapshot.floorPlan?.width);
-  const scaleY = floorPlan === snapshot.floorPlan ? 1 : 100 / Number(snapshot.floorPlan?.height);
-  const placementInstructions = Array.isArray(snapshot.burgerLevel?.placementInstructions)
-    ? snapshot.burgerLevel.placementInstructions.map((instruction) => normalizedPoint(instruction, scaleX, scaleY))
-    : snapshot.burgerLevel?.placementInstructions;
-  return {
-    ...snapshot,
-    floorPlan,
-    burgerLevel: isRecord(snapshot.burgerLevel)
-      ? { ...snapshot.burgerLevel, placementInstructions }
-      : snapshot.burgerLevel,
-    players: Array.isArray(snapshot.players) ? snapshot.players.map((player) => {
-      if (!isRecord(player) || player.position != null) return player;
-      const stationId = player.simulatedLocation?.stationId || player.currentStation || "center";
-      return {
-        ...player,
-        position: stationPosition(stationId, floorPlan),
-        location: player.simulatedLocation?.label || stationId,
-        positionSource: player.simulatedLocation?.source || "action-inference",
-      };
-    }) : snapshot.players,
-  };
+  return isRecord(snapshot) ? { ...snapshot } : snapshot;
 }
 
 export function validateAndNormalizeSnapshot(snapshot) {

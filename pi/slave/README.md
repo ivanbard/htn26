@@ -1,7 +1,7 @@
 # Camera Worker Pi
 
 This directory contains the portable worker core for a future multi-camera
-deployment. The current v1 uses the production laptop plus Apple-phone still
+deployment. The current v1 uses the captain's laptop plus Apple-phone still
 photographs for setup, not a Raspberry Pi worker or live player-location
 tracking. The core does not run game rules, ingest badge events, or own
 authoritative state.

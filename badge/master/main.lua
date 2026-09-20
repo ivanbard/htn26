@@ -146,20 +146,20 @@ local function printable_value(value)
   return true
 end
 
--- This is the sequence-first OC2 payload consumed by pi/common/protocol.cpp:
--- OC2|<sequence>|<type>|<value>. The value cannot contain a pipe, newline, or
+-- This is the sequence-first OC1 payload consumed by pi/common/protocol.cpp:
+-- OC1|<sequence>|<type>|<value>. The value cannot contain a pipe, newline, or
 -- other control character so the surrounding serial fields stay unambiguous.
 local function valid_player_packet(payload)
   if type(payload) ~= "string" or #payload < 9 or #payload > MAX_RADIO_PAYLOAD then
     return false
   end
-  if string.sub(payload, 1, 4) ~= "OC2|" then return false end
+  if string.sub(payload, 1, 4) ~= "OC1|" then return false end
   if string.find(payload, string.char(0), 1, true) ~= nil then return false end
   if string.find(payload, "\r", 1, true) ~= nil then return false end
   if string.find(payload, "\n", 1, true) ~= nil then return false end
 
   local sequence, event_type, value = string.match(payload,
-    "^OC2|([^|]+)|([NMBHE])|([^|]+)$")
+    "^OC1|([^|]+)|([NMBHE])|([^|]+)$")
   if sequence == nil or not valid_sequence(sequence) or
       not printable_value(value) then
     return false
@@ -182,7 +182,7 @@ end
 local function lifecycle_radio_frame(kind)
   control_sequence = control_sequence + 1
   local code = kind == "START_GAME" and "S" or "E"
-  return string.format("OC2|%06d|G|%s", control_sequence, code)
+  return string.format("OC1|%06d|G|%s", control_sequence, code)
 end
 
 local function enqueue_packet(mac, rssi, payload)

@@ -81,7 +81,7 @@ Keep platform-independent game logic separated from QNX-specific device code whe
 
 ---
 
-## Possible future QNX AI qualification
+## AI requirement
 
 At least one AI component must use a qualifying open-source AI module available from:
 

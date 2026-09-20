@@ -30,7 +30,7 @@ void require(bool condition, const std::string &message) {
 }
 
 std::string rx(unsigned sequence, char type, const std::string &value) {
-  return std::string("serial-prefix HTN26|RX|aa:bb:cc:dd:ee:ff|-53|OC2|") +
+  return std::string("serial-prefix HTN26|RX|aa:bb:cc:dd:ee:ff|-53|OC1|") +
          (sequence < 10     ? "000"
           : sequence < 100  ? "00"
           : sequence < 1000 ? "0"
@@ -53,7 +53,7 @@ MasterConfig test_config() {
 
 void test_protocol_validation() {
   const auto parsed = htn26::protocol::parse_gateway_rx_line(
-      "[gateway] INFO HTN26|RX|aa:bb:cc:dd:ee:ff|-53|OC2|0042|N|ING:TOM\n");
+      "[gateway] INFO HTN26|RX|aa:bb:cc:dd:ee:ff|-53|OC1|0042|N|ING:TOM\n");
   require(parsed.ok, "noisy serial RX line should parse");
   require(parsed.intent.sender_mac == "AA:BB:CC:DD:EE:FF",
           "MAC should be normalized");
@@ -62,21 +62,21 @@ void test_protocol_validation() {
           "parsed badge fields should match");
 
   const auto fixed_player = htn26::protocol::parse_gateway_rx_line(
-      "HTN26|RX|aa:bb:cc:dd:ee:ff|-53|OC2|000043|E|P2:PU:R");
+      "HTN26|RX|aa:bb:cc:dd:ee:ff|-53|OC1|000043|E|P2:PU:R");
   require(fixed_player.ok && fixed_player.intent.type == 'E' &&
               fixed_player.intent.value == "P2:PU:R",
           "current fixed-player event payload should remain parseable");
 
   require(!htn26::protocol::parse_gateway_rx_line(
-               "HTN26|RX|AA:BB:CC:DD:EE:FF|-53|OC1|0042|N|ING:TOM")
+               "HTN26|RX|AA:BB:CC:DD:EE:FF|-53|OC2|0042|N|ING:TOM")
                .ok,
           "unsupported protocol must be rejected");
   require(!htn26::protocol::parse_gateway_rx_line(
-               "HTN26|RX|not-a-mac|-53|OC2|0042|N|ING:TOM")
+               "HTN26|RX|not-a-mac|-53|OC1|0042|N|ING:TOM")
                .ok,
           "invalid MAC must be rejected");
   require(!htn26::protocol::parse_gateway_rx_line(
-               "HTN26|RX|AA:BB:CC:DD:EE:FF|-53|OC2|0042|N|bad|extra")
+               "HTN26|RX|AA:BB:CC:DD:EE:FF|-53|OC1|0042|N|bad|extra")
                .ok,
           "extra fields must be rejected");
 

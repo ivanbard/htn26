@@ -165,7 +165,7 @@ ParseResult parse_gateway_rx_line(std::string_view line) {
     result.error = "invalid RSSI";
     return result;
   }
-  if (fields[4] != "OC2") {
+  if (fields[4] != "OC1") {
     result.error = "unsupported badge protocol";
     return result;
   }

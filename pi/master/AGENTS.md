@@ -4,11 +4,9 @@ The master implementation contract is [`README.md`](README.md).
 
 Read [`../../README.md`](../../README.md), [`../../updates/UPDATE_v1.1.md`](../../updates/UPDATE_v1.1.md), and [`../common/AGENTS.md`](../common/AGENTS.md) before changing engine or parser behavior.
 
-Keep this subtree internally authoritative for its portable-engine state
-transitions, but do not describe it as the current production authority. The
-laptop-hosted `pi/server` owns that role; the possible future engine-adapter
-boundary is documented by [`../server/README.md`](../server/README.md) and
-[`README.md`](README.md).
+Keep this subtree authoritative for its portable engine contract. The current
+v1 laptop simulator and possible future engine-adapter boundary are documented
+by [`../server/README.md`](../server/README.md) and [`README.md`](README.md).
 
 Keep shared wire fields in `../common/` and platform details behind the adapter interfaces described in the component README.
 

@@ -33,25 +33,24 @@ class LuaTestMixin:
 class GatewayProtocolTests(LuaTestMixin, unittest.TestCase):
     def test_accepts_pi_protocol_payloads(self):
         self.run_lua(
-            'assert(gateway_test.valid_player_packet("OC2|1|N|ING:TOM"))\n'
-            'assert(gateway_test.valid_player_packet("OC2|0042|M|CHOP"))\n'
-            'assert(gateway_test.valid_player_packet("OC2|000043|E|P2:PU:R"))\n'
-            'assert(gateway_test.valid_player_packet("OC2|4294967295|H|READY"))'
+            'assert(gateway_test.valid_player_packet("OC1|1|N|ING:TOM"))\n'
+            'assert(gateway_test.valid_player_packet("OC1|0042|M|CHOP"))\n'
+            'assert(gateway_test.valid_player_packet("OC1|000043|E|P2:PU:R"))\n'
+            'assert(gateway_test.valid_player_packet("OC1|4294967295|H|READY"))'
         )
 
     def test_rejects_malformed_payloads_and_wrong_framing(self):
         payloads = (
             "",
             "HELLO1:hi",
-            "OC1|1|N|ING:TOM",
-            "OC2|",
-            "OC2|1|N|",
-            "OC2|x|N|ING:TOM",
-            "OC2|1|X|CUSTOM",
-            "OC2|1|N|ING|TOM",
-            "OC2|1|N|ING:TOM\n",
-            "OC2|4294967296|N|TOO_BIG",
-            "OC2|1|N|bad\rvalue",
+            "OC1|",
+            "OC1|1|N|",
+            "OC1|x|N|ING:TOM",
+            "OC1|1|X|CUSTOM",
+            "OC1|1|N|ING|TOM",
+            "OC1|1|N|ING:TOM\n",
+            "OC1|4294967296|N|TOO_BIG",
+            "OC1|1|N|bad\rvalue",
         )
         for payload in payloads:
             with self.subTest(payload=payload):
@@ -61,12 +60,12 @@ class GatewayProtocolTests(LuaTestMixin, unittest.TestCase):
                 )
         self.run_lua(
             "assert(not gateway_test.valid_player_packet("
-            '"OC2|1|N|ING:" .. string.char(0) .. "TOM"))'
+            '"OC1|1|N|ING:" .. string.char(0) .. "TOM"))'
         )
 
     def test_enforces_radio_payload_size_boundary(self):
         self.run_lua(
-            'local payload = "OC2|1|N|" .. string.rep("X", 36)\n'
+            'local payload = "OC1|1|N|" .. string.rep("X", 36)\n'
             "assert(#payload == 44)\n"
             "assert(gateway_test.valid_player_packet(payload))\n"
             'assert(not gateway_test.valid_player_packet(payload .. "X"))'
@@ -86,9 +85,9 @@ class GatewayProtocolTests(LuaTestMixin, unittest.TestCase):
 
     def test_serial_frame_preserves_sender_rssi_and_payload(self):
         self.run_lua(
-            'local payload = "OC2|0042|N|ING:TOM"\n'
+            'local payload = "OC1|0042|N|ING:TOM"\n'
             'assert(gateway_test.serial_rx_frame("AA:BB:CC:DD:EE:FF", -48, payload) == '
-            '"HTN26|RX|AA:BB:CC:DD:EE:FF|-48|OC2|0042|N|ING:TOM")'
+            '"HTN26|RX|AA:BB:CC:DD:EE:FF|-48|OC1|0042|N|ING:TOM")'
         )
 
     def test_lifecycle_frames_are_stable_and_bounded(self):
@@ -97,8 +96,8 @@ class GatewayProtocolTests(LuaTestMixin, unittest.TestCase):
             'local finish = gateway_test.serial_end_frame()\n'
             'assert(start == "HTN26|GAME|START_GAME|240|3")\n'
             'assert(finish == "HTN26|GAME|GAME_END|3")\n'
-            'assert(gateway_test.lifecycle_radio_frame("START_GAME") == "OC2|000001|G|S")\n'
-            'assert(gateway_test.lifecycle_radio_frame("GAME_END") == "OC2|000002|G|E")\n'
+            'assert(gateway_test.lifecycle_radio_frame("START_GAME") == "OC1|000001|G|S")\n'
+            'assert(gateway_test.lifecycle_radio_frame("GAME_END") == "OC1|000002|G|E")\n'
             'assert(#start <= 44 and #finish <= 44)\n'
             'assert(#gateway_test.lifecycle_radio_frame("START_GAME") <= 44)'
         )
@@ -128,7 +127,7 @@ class GatewayProtocolTests(LuaTestMixin, unittest.TestCase):
             'assert(text == "Last: none")\n'
             'local sender = "AA:BB:CC:DD:EE:FF"\n'
             'local rssi = -48\n'
-            'local payload = "OC2|0042|N|" .. string.rep("X", 36)\n'
+            'local payload = "OC1|0042|N|" .. string.rep("X", 36)\n'
             'text = gateway_test.format_last_event(sender, rssi, payload)\n'
             'assert(string.find(text, "AA:BB:CC:DD:EE:FF", 1, true) ~= nil)\n'
             'assert(string.find(text, "RSSI -48 dBm", 1, true) ~= nil)\n'
@@ -168,16 +167,16 @@ class HostLifecycleTests(LuaTestMixin, unittest.TestCase):
             "on_enter({})\n"
             "on_button(8, 1)\n"
             'assert(logs[2] == "HTN26|GAME|START_GAME|240|3")\n'
-            'assert(logs[3] == "HTN26|HOST|CONTROL|OC2|000001|G|S")\n'
-            'assert(broadcasts[1] == "OC2|000001|G|S")\n'
+            'assert(logs[3] == "HTN26|HOST|CONTROL|OC1|000001|G|S")\n'
+            'assert(broadcasts[1] == "OC1|000001|G|S")\n'
             "now = 239999\n"
             "on_tick()\n"
             'assert(logs[4] ~= "HTN26|GAME|GAME_END|3")\n'
             "now = 240000\n"
             "on_tick()\n"
             'assert(logs[5] == "HTN26|GAME|GAME_END|3")\n'
-            'assert(logs[6] == "HTN26|HOST|CONTROL|OC2|000002|G|E")\n'
-            'assert(broadcasts[2] == "OC2|000002|G|E")'
+            'assert(logs[6] == "HTN26|HOST|CONTROL|OC1|000002|G|E")\n'
+            'assert(broadcasts[2] == "OC1|000002|G|E")'
         )
 
 

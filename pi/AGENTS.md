@@ -4,14 +4,10 @@ Read [`../README.md`](../README.md), [`../updates/UPDATE_v1.md`](../updates/UPDA
 
 Use [`README.md`](README.md), [`master/README.md`](master/README.md), and [`slave/README.md`](slave/README.md) as the implementation owners for the Pi components.
 
-The current v1 deployment runs the authoritative server and UI on the
-captain's laptop, with phone photographs used only for setup inference. QNX,
-Pi-hosted execution, portable-engine integration, and multi-camera workers are
-possible future boundaries.
+The current server run, test, and deployment path is the captain's laptop. QNX,
+Pi-hosted execution, and multi-camera workers are possible future boundaries.
 
-Keep current authoritative game state, timers, order evaluation, and submission
-decisions in `server/`. Treat `master/` as a future portable engine unless the
-product contract explicitly adopts it.
+Keep authoritative game state, timers, order evaluation, and submission decisions in the laptop server or a future authoritative-engine adapter.
 
 Keep camera, inference, and worker code behind the adapter seams owned by the relevant Pi README.
 

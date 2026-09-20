@@ -1,6 +1,6 @@
 # Player badge guidance
 
-[`README.md`](README.md) owns the rollback-only Lua player contract. The production/live player is the native role in [`../native/README.md`](../native/README.md); never mix profiles.
+The player app contract is [`README.md`](README.md).
 
 Read [`../badge-app-guide.md`](../badge-app-guide.md) for supported APIs and [`../../README.md`](../../README.md) for current v1 interactions and lifecycle.
 
@@ -14,7 +14,7 @@ Run `python -m unittest discover -s badge/slave/tests -p 'test_*.py'` from the r
 
 Run `python badge/run_local.py` when validating the local transport path.
 
-Offline tests do not prove physical NFC, radio, LEDs, display rendering, or bump behavior. The captain reports the native binary working except that two-badge bumping remains unverified; keep the exact boundary in the native README.
+Physical badge NFC, radio range, LED behavior, and firmware compatibility remain hardware-only checks.
 
 ## Maintaining this file
 
