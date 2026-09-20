@@ -78,6 +78,7 @@ _Static_assert(sizeof(App) == 312, "Update heap report when app size changes");
 #define TAP_ABS_BITS 0x44960000u /* 1200 mg; hardware calibration knob. */
 #define TRANSFER_WAIT_TICKS 40 /* 800 ms peer-transfer handshake window. */
 #define SHAKE_COOLDOWN_TICKS 25
+#define TRANSFER_HELD 0x80u
 
 #define FN(address, result, ...) ((result (*)(__VA_ARGS__))(address))
 #define PRINT FN(0x4211b726, int, const char *, ...)
@@ -246,6 +247,7 @@ static const char *item_name(u8 item) {
     return "EMPTY";
 }
 static const char *selection_name(u8 selected) {
+    selected &= 0x7f;
     if (selected == SELECT_LEFT) return "LEFT";
     if (selected == SELECT_RIGHT) return "RIGHT";
     if (selected == SELECT_DOWN) return "DOWN";
@@ -673,10 +675,28 @@ static void snapshot(App *self, char *target) {
     }
 }
 
+static void send_transfer(App *self) {
+    if (!self->game_active || self->role != ROLE_PLAYER || self->wait_ticks || self->process_ticks)
+        return;
+    char state[6], action[10];
+    snapshot(self, state);
+    FORMAT(action, sizeof(action), "X:%s", state);
+    if (start_action(self, action) == 1 && self->status)
+        LABEL_TEXT(self->status, "TRANSFER SENT - BUMP OTHER BADGE");
+}
+
 static void poll_motion(App *self) {
     if (!self->game_active || self->role != ROLE_PLAYER) return;
     if (self->tap_cooldown) --self->tap_cooldown;
     u32 value = motion();
+    if ((self->selected & TRANSFER_HELD) != 0) {
+        if (!self->tap_cooldown && value > TAP_ABS_BITS) {
+            self->tap_cooldown = 25;
+            self->shake_cooldown = SHAKE_COOLDOWN_TICKS;
+            send_transfer(self);
+        }
+        return;
+    }
     u32 shake_threshold = self->b_held ? DROP_SHAKE_ABS_BITS : SHAKE_ABS_BITS;
     if (self->shake_cooldown) {
         /* A sustained gesture must not become DROP followed by READY after B
@@ -707,13 +727,6 @@ static void poll_motion(App *self) {
             FORMAT(action, sizeof(action), "SUB:%s", summary); start_action(self, action);
         } else {
             mark_ready(self, self->player); render_game(self); start_action(self, "READY");
-        }
-    } else if (!self->tap_cooldown && value > TAP_ABS_BITS) {
-        char state[6], action[10]; snapshot(self, state);
-        FORMAT(action, sizeof(action), "X:%s", state);
-        if (start_action(self, action)) {
-            self->tap_cooldown = 25;
-            self->transfer_ticks = TRANSFER_WAIT_TICKS;
         }
     }
 }
@@ -748,6 +761,10 @@ static void button(App *self, u32 event) {
     if (kind <= 1) {
         if (key == 0) self->a_held = kind == 0;
         if (key == 1) self->b_held = kind == 0;
+        if (key == 6) {
+            if (kind == 0) self->selected |= TRANSFER_HELD;
+            else self->selected &= (u8)~TRANSFER_HELD;
+        }
     }
     if (self->role == ROLE_NONE && kind == 0) {
         if (key == 0) {

@@ -341,6 +341,14 @@ def scenario(nvs_error=0, radio_error=0, nfc_error=0, allocation_failure=False,
                 invoke(0x60, 3); scan('pantry'); acknowledge('PL:--L-')
                 assert_icon('plate')
                 assert any('PLATE: YES B- M- L+ C-' in text for text in texts)
+                # UP is held through the bump; pressing UP alone does not
+                # transfer and A remains reserved for submission.
+                before = len(packets); invoke(0x60, 6); invoke(0x5c)
+                assert len(packets) == before
+                hardware["motion"] = "tap"; invoke(0x5c); hardware["motion"] = "rest"
+                assert packets[-1].endswith(b':X:P--L-')
+                acknowledge('X:P--L-'); invoke(0x60, 0x106)
+                for _ in range(25): invoke(0x5c)
 
                 invoke(0x60, 4); before = len(packets); scan('fridge')
                 assert len(packets) == before and 'UNKNOWN BUTTON COMBO' in texts

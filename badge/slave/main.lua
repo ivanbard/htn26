@@ -481,7 +481,7 @@ local sequence = 0
 local active = false
 local setup_mode = false
 local state = new_state()
-local a_down, b_down, left_down, right_down, down_down = false, false, false, false, false
+local a_down, b_down, left_down, right_down, down_down, up_down = false, false, false, false, false, false
 local nfc_enabled, radio_enabled = false, false
 local nfc_blocked_uid, nfc_clear_at, next_nfc_poll = nil, 0, 0
 local inbox, inbox_count, radio_drop_count = {}, 0, 0
@@ -776,9 +776,12 @@ local function begin_transfer(now)
 	if not active or state.chop then
 		return
 	end
+	if transfer_until >= now then
+		return
+	end
 	transfer_until = now + TRANSFER_MS
 	emit("X:" .. snapshot(state))
-	set_status("TRANSFER READY", "Tap the other badge; A + bump is fallback", 0x8ed8ff)
+	set_status("TRANSFER READY", "Hold UP and bump the other badge", 0x8ed8ff)
 end
 
 local function submit_shake(now)
@@ -786,7 +789,6 @@ local function submit_shake(now)
 		return
 	end
 	if not state.plate then
-		begin_transfer(now)
 		return
 	end
 	local summary = plate_summary(state.plate)
@@ -813,7 +815,7 @@ local function handle_shake(now)
 		if state.plate then
 			submit_shake(now)
 		else
-			begin_transfer(now)
+			ready_shake(now)
 		end
 	else
 		ready_shake(now)
@@ -821,7 +823,7 @@ local function handle_shake(now)
 end
 
 local function handle_tap(now)
-	if active then
+	if active and up_down then
 		begin_transfer(now)
 	end
 end
@@ -1035,7 +1037,7 @@ function on_enter(root)
 	radio_label = badge.ui.label(root, "No host response is required")
 	radio_label:align("center", 0, 48)
 	radio_label:style({ text_font = 14, text_align = "center" })
-	local hint = badge.ui.label(root, "TAP transfer  A+bump fallback  A+shake submit")
+	local hint = badge.ui.label(root, "Hold UP + bump to transfer  A+shake submit")
 	hint:align("bottom_mid", 0, -10)
 	hint:style({ text_font = 14, text_align = "center" })
 
@@ -1094,6 +1096,8 @@ function on_button(button, kind)
 			end
 		elseif button == B.B then
 			b_down = true
+		elseif button == B.UP then
+			up_down = true
 		elseif button == B.START and not active then
 			setup_mode = true
 			set_status("CHOOSE PLAYER " .. tostring(player_no), "LEFT/RIGHT choose; A saves fixed number", 0x8ed8ff)
@@ -1116,6 +1120,8 @@ function on_button(button, kind)
 			a_down = false
 		elseif button == B.B then
 			b_down = false
+		elseif button == B.UP then
+			up_down = false
 		end
 	end
 	if setup_mode and kind == K.PRESSED then
@@ -1157,10 +1163,11 @@ function on_tick()
 	poll_nfc(now)
 	service_chop(now)
 	if active then
-		if badge.sensor.tap() then
+		local tapped = badge.sensor.tap()
+		local shaken = badge.sensor.shake()
+		if up_down and (tapped or shaken) then
 			handle_tap(now)
-		end
-		if badge.sensor.shake() then
+		elseif shaken then
 			handle_shake(now)
 		end
 	end

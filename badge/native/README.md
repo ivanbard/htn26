@@ -133,10 +133,9 @@ does not. Program the four NDEF Text tags as `pantry`, `fridge`,
   inventory is invalid and does not become `READY`. A shake without either
   button broadcasts `READY` for server-side team submission consensus.
 - Bump two badges to merge a platable hand item onto the other plate, or swap
-  inventories when that merge is invalid or both badges have the same plate
-  state. Because advertisements are room-wide, a player applies a peer `X`
-  snapshot only while its own half-second tap window is active; an uninvolved
-  third player ignores the transfer.
+  inventories when that merge is invalid or both badges have the same plate state.
+  Hold UP on both badges and bump them together to emit the short transfer
+  gesture. UP must be held through the bump; pressing UP alone does not transfer.
 
 Invalid station/button combinations show `UNKNOWN BUTTON COMBO` and red LEDs
 for one second. Meat cooks for 15 seconds, is done for two, flashes a three-second

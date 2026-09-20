@@ -79,11 +79,10 @@ stoves.
   host, while the gateway forwards the same event to the authoritative server/UI.
 - Hold **B** and shake to drop the held item or plate.
 - A supported `badge.sensor.tap()` starts plate/item transfer while both badges
-  are tapped. The app also accepts the documented accelerometer fallback: hold
-  **A** and bump/shake when not holding a plate. Both participating badges must
-  be in the short tap window. A plate merges a platable item, two plates swap,
-  and two non-plate hands swap; raw/non-platable items never duplicate onto a
-  plate.
+  are tapped while **UP is held**. Both participating badges must be in the
+  short tap window; pressing UP alone does not transfer. A plate merges a
+  platable item, two plates swap, and two non-plate hands swap; raw/non-platable
+  items never duplicate onto a plate. A remains the submission button.
 - Hold **A** and shake while holding a plate to submit. The submitting plate is
   consumed immediately. Every fixed player broadcasts either `READY` or
   `SUB:<BMLC>` in the 0.5-second window; when all three are observed, every
