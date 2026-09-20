@@ -322,8 +322,8 @@ local function apply_transfer(state, peer)
 			local letter = plate_letter(peer.hand)
 			if not state.plate[letter] then
 				state.plate[letter] = true
+				return true, "MERGE_IN"
 			end
-			return true, "MERGE_IN"
 		end
 		if peer.hand then
 			state.plate, state.hand = nil, peer.hand
@@ -333,8 +333,11 @@ local function apply_transfer(state, peer)
 	end
 	if not local_plate and peer_plate then
 		if state.hand and is_platable(state.hand) then
-			state.hand = nil
-			return true, "MERGE_OUT"
+			local letter = plate_letter(state.hand)
+			if not peer.plate[letter] then
+				state.hand = nil
+				return true, "MERGE_OUT"
+			end
 		end
 		if state.hand then
 			state.plate, state.hand = peer.plate, nil

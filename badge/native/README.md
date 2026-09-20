@@ -63,10 +63,12 @@ apps remain in the repository and in LittleFS only as the explicit
 unmodified-firmware rollback profile; they are not an alternate live profile.
 
 The current native and Lua rollback sources use the OC2 application namespace.
-Before any native factory write, push the current `../master/` app to the host
-and the current `../slave/` app to all three players, then verify that matching
-rollback set is installed. Factory-only deployment leaves LittleFS untouched,
-and the laptop intentionally rejects the older OC1 namespace.
+The backup gate below requires preserving the original device before any
+LittleFS update. Only after that backup and read-only security inspection may
+you push the current `../master/` app to the host and the current `../slave/`
+app to all three players. Verify that matching rollback set before the native
+factory write. Factory-only deployment leaves LittleFS untouched, and the
+laptop intentionally rejects the older OC1 namespace.
 
 Do not mix profiles within a round. Native mode preserves the current OC2
 application payloads, but calls the stock advertising HAL directly. Lua
@@ -154,8 +156,8 @@ never change secure-boot, flash-encryption, security configuration, or eFuses.
 Read security state only with the esptool version's `get-security-info` command.
 If it differs from the inspected disabled state, stop rather than changing it.
 
-Before any write, put the badge in its established bootloader mode and take a
-fresh backup while keeping it there:
+Before any mutation, put the badge in its established bootloader mode and take
+a fresh backup while keeping it there:
 
 ```powershell
 New-Item -ItemType Directory -Force badge-backup
@@ -166,8 +168,15 @@ python -m esptool --chip esp32c3 --port COM4 --before no-reset --after no-reset 
 ```
 
 Verify the partition table and factory hashes against the builder's pinned
-inputs before proceeding. Preserve all three files off the badge. Then write
-**only** the factory application and read it back before booting:
+inputs before proceeding. Preserve all three files off the badge. Only now may
+you leave bootloader mode, boot the unchanged stock firmware, and push the
+current OC2 `../master/` app to the host or `../slave/` app to a player. Verify
+the installed role and repeat this backup-first sequence for every badge; never
+update LittleFS before preserving that badge's original full-device backup.
+
+After all four matching OC2 rollback apps are verified, return each badge to
+bootloader mode. Then write **only** the factory application and read it back
+before booting:
 
 ```powershell
 python -m esptool --chip esp32c3 --port COM4 --baud 460800 --before no-reset --after no-reset write-flash 0x10000 badge/native/build/overcooked-factory.bin

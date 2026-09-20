@@ -28,6 +28,11 @@ session state.
 
 ## Lua rollback install files
 
+During native rollout, preserve the badge's original full-device backup and
+complete the native guide's read-only security inspection before using the IDE
+to update LittleFS. Install and verify the OC2 rollback app only after that
+gate and before the factory-only native write.
+
 The exact badge app files are:
 
 ```text

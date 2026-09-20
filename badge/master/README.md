@@ -24,8 +24,10 @@ the recovered HAL directly. Profile selection is whole-fleet and rollback is
 explicit in the native guide.
 
 Both profiles use OC2. Install this current rollback app before the native
-factory-only deployment so restoring stock firmware cannot expose an older OC1
-app to the OC2-only laptop parser.
+factory-only write so restoring stock firmware cannot expose an older OC1 app
+to the OC2-only laptop parser. During native rollout, first preserve the
+original full-device backup and complete the read-only security inspection in
+the native guide; only then may the IDE push update LittleFS.
 
 The packet bytes, USB serial framing, server ownership, and lifecycle records
 below apply to both profiles. Native mode additionally uses private player-to-

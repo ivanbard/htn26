@@ -50,12 +50,20 @@ fresh per-device backup, read-only security inspection, factory-only write and
 readback, and an explicit factory-only rollback. Never erase the device, write
 other partitions, alter security configuration, or change eFuses.
 
-Before flashing the native candidate, push the current `badge/master/` rollback
-app to the host and the current `badge/slave/` rollback app to all three players.
-Those checked-in apps use the same OC2 application contract as the candidate
-and remain in LittleFS across the factory-only write. The laptop parser
-intentionally rejects OC1, so do not flash over badges whose retained rollback
-apps have not been refreshed and verified as the matching whole-fleet set.
+Preserve this order separately for every badge:
+
+1. Before any mutation, complete the read-only security inspection and fresh
+   full-device, partition-table, and factory backups in the native guide.
+   Verify and preserve those original files off the badge.
+2. Boot the unchanged stock firmware, push the current `badge/master/` rollback
+   app to the host or the current `badge/slave/` rollback app to each player,
+   and verify the matching OC2 app on all four badges.
+3. Return each badge to bootloader mode, write only the pinned native factory
+   candidate, and verify its factory readback as documented.
+
+The checked-in rollback apps remain in LittleFS across the factory-only write.
+The laptop parser intentionally rejects OC1, so do not flash over badges whose
+retained rollback apps have not been refreshed as the matching whole-fleet set.
 
 Do not mix native and Lua badges. Their OC2 application bytes agree, but Lua's
 restricted radio API uses a private `LUA1` carrier wrapper and native mode uses
@@ -68,7 +76,7 @@ revision has offline build/emulator coverage only and still needs a physical
 visual check; offline tests do not establish bump or display acceptance.
 
 For NixOS-WSL, use the interactive backup-first deploy helper from the repository
-root:
+root after the original pre-mutation backup and OC2 rollback installation above:
 
 ```sh
 python -m pip install pyserial esptool
@@ -76,10 +84,12 @@ python badge/native/deploy.py
 ```
 
 The helper lists every discovered serial port with its description, lets you
-choose the port and `host` or `player` role, builds the native image, prints the
-read-only security check, saves full/partition/factory backups, requires typing
-`FLASH`, writes only the factory partition, and verifies the readback. It never
-erases flash or writes the bootloader, partition table, NVS, PHY, or storage.
+choose the port and `host` or `player` role, builds the native image, repeats the
+read-only security check, saves an additional post-LittleFS
+full/partition/factory backup, requires typing `FLASH`, writes only the factory
+partition, and verifies the readback. Its additional backup does not replace
+the preserved pre-mutation backup. It never erases flash or writes the
+bootloader, partition table, NVS, PHY, or storage.
 Backups default to `~/htn26-badge-backups/`. Use `--skip-build` only when the
 candidate image has already been built and `--image PATH` to select a specific
 candidate. Do not run it until the selected badge is in its established

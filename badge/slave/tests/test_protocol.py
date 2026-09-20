@@ -139,6 +139,19 @@ class PlayerBadgeTests(unittest.TestCase):
           assert(player_test.apply_transfer(left, player_test.parse_snapshot(rs)))
           assert(player_test.apply_transfer(right, player_test.parse_snapshot(ls)))
           assert(left.hand == "MEAT" and right.hand == "BUN")
+
+          local duplicate_plate = player_test.new_state()
+          assert(player_test.create_plate(duplicate_plate))
+          assert(player_test.take_source(duplicate_plate, "BUN"))
+          local duplicate_hand = player_test.new_state()
+          assert(player_test.take_source(duplicate_hand, "BUN"))
+          local ps, hs = player_test.snapshot(duplicate_plate), player_test.snapshot(duplicate_hand)
+          local ok, why = player_test.apply_transfer(duplicate_plate, player_test.parse_snapshot(hs))
+          assert(ok and why == "SWAP_HANDS")
+          ok, why = player_test.apply_transfer(duplicate_hand, player_test.parse_snapshot(ps))
+          assert(ok and why == "SWAP_HANDS")
+          assert(duplicate_plate.plate == nil and duplicate_plate.hand == "BUN")
+          assert(duplicate_hand.hand == nil and player_test.plate_summary(duplicate_hand.plate) == "B---")
         """)
 
     def test_three_fixed_ready_window_and_state_discard(self):
