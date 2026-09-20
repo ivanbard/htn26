@@ -1,8 +1,11 @@
 # HTN26 v1 laptop deployment
 
 This guide deploys the current laptop-hosted burger game: the captain's laptop,
-one host badge, and three fixed player badges. QNX and Raspberry Pi hosting are
-possible future targets, not the current run or validation path.
+one host badge, and three fixed player badges. QNX and Raspberry Pi hosting of
+the authoritative server remain possible future targets. An optional QNX Pi
+may instead host the label-only difficulty sidecar documented in
+[`pi/difficulty/README.md`](pi/difficulty/README.md); it is not required for the
+current run, and this revision does not claim QNX validation.
 
 The current setup uploads Apple-phone still photographs to the laptop server.
 The local deterministic floorplan provider remains available as the no-cloud
@@ -12,6 +15,8 @@ fallback.
 
 - `pi/server/`: Node.js game simulator, plain browser view, HTTP/SSE API, and
   host-badge USB-serial boundary.
+- `pi/difficulty/`: optional QNX difficulty sidecar; its owning README defines
+  the label-only contract and QNX deployment assumptions.
 - `ui/`: separate styled UI prototype; it is not the current plain simulator
   page.
 - `badge/native/`: production/live pinned firmware extension used by all four badges.
@@ -251,4 +256,5 @@ The native build requires the pinned Zig 0.14.1 compiler and the payload test's
 Unicorn dependency as documented in its README. These tests do not prove
 physical NFC, badge-to-badge bump behavior, generated-icon appearance,
 four-badge radio and ACK behavior, LED appearance, timing, stock-app
-regressions, phone capture, OpenAI connectivity, or any future QNX deployment.
+regressions, phone capture, OpenAI connectivity, QNX sidecar deployment, or any
+future authoritative-server deployment on QNX.

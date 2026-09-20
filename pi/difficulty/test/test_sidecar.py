@@ -13,7 +13,11 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class FakePredictor:
-    metadata = {"name": "fixture-rtrees", "version": "test-1", "artifact": "fixture.xml"}
+    metadata = {
+        "name": "fixture-rtrees",
+        "version": "test-1",
+        "artifact": "fixture.xml",
+    }
 
     def __init__(self, label="normal"):
         self.label = label
@@ -63,13 +67,23 @@ class ContractTests(unittest.TestCase):
         )
         self.assertEqual(set(result["model"]), {"name", "version", "artifact"})
         self.assertEqual(predictor.values, [0.25, 0.0, 0.5, 0.75])
-        forbidden = {"recipe", "gold", "deadline", "score", "layout", "inventory", "timer"}
+        forbidden = {
+            "recipe",
+            "gold",
+            "deadline",
+            "score",
+            "layout",
+            "inventory",
+            "timer",
+        }
         self.assertTrue(forbidden.isdisjoint(result))
 
     def test_pr22_model_artifact_is_retained(self):
         artifact = ROOT / "difficulty.xml"
         digest = hashlib.sha256(artifact.read_bytes()).hexdigest()
-        self.assertEqual(digest, "ba168304a8b19fac7f4fae9cf81eb069400d1e74cfdd5795cb9d7b11f77ff4e8")
+        self.assertEqual(
+            digest, "ba168304a8b19fac7f4fae9cf81eb069400d1e74cfdd5795cb9d7b11f77ff4e8"
+        )
         self.assertIn(b"opencv_ml_rtrees", artifact.read_bytes()[:200])
 
 
@@ -100,7 +114,9 @@ class HttpTests(unittest.TestCase):
         with urlopen(request, timeout=1) as response:
             result = json.load(response)
         self.assertEqual(result["difficulty"], "easy")
-        self.assertEqual(set(result), {"schemaVersion", "difficulty", "source", "model", "latencyMs"})
+        self.assertEqual(
+            set(result), {"schemaVersion", "difficulty", "source", "model", "latencyMs"}
+        )
 
     def test_http_rejects_unbounded_or_extra_input(self):
         request = Request(
@@ -118,6 +134,7 @@ class OptionalOpenCvSmokeTests(unittest.TestCase):
     def test_artifact_predicts_a_bounded_label_when_opencv_is_installed(self):
         try:
             from pi.difficulty.model import OpenCvDifficultyModel
+
             model = OpenCvDifficultyModel(ROOT / "difficulty.xml")
         except ModuleNotFoundError as error:
             self.skipTest(f"optional local OpenCV runtime unavailable: {error}")
