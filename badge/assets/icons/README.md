@@ -24,12 +24,19 @@ Completed source files:
 | `ing_meat.png` | Raw meat |
 | `ing_meat_chopped.png` | Chopped meat |
 | `ing_meat_cooked.png` | Cooked meat |
+| `ing_meat_burnt.png` | Burnt meat (temporary placeholder source) |
 | `station_plate.png` | Held plate |
 
-There is no separate source PNG for an empty hand or burnt meat. Empty is
-represented by hiding the image while retaining the `HELD: EMPTY` label. The
-native burnt state is a documented deterministic colour transform of the cooked
-meat source.
+There is no source PNG for an empty hand. Empty is represented by hiding the
+image while retaining the `HELD: EMPTY` label.
+
+`ing_meat_burnt.png` is temporarily a byte-for-byte copy of
+`ui/assets/ing_meat_cooked.png` from remote-main commit
+`0822a84190e88651bb448d62bdaa1b80fba8d993` (SHA-256
+`6703951618aa7391d2a505ac465294b223b4aa8c780cc73db012845064fe7430`).
+It gives `BURNT_MEAT` an independent named generation source without inventing
+artwork. Replace that file with the dedicated burnt artwork when it is supplied;
+the generator and native state mapping do not need another transform change.
 
 ## Native production representation
 
@@ -49,15 +56,12 @@ python badge/assets/icons/generate_native_icons.py --check
 generator uses only the Python standard library and validates PNG dimensions,
 format, filters, and CRCs.
 
-Eight ingredient states and the plate use the source pixels directly. The two
-necessary derived images are deterministic:
+Every non-bun descriptor uses its named source pixels directly. The only
+derived image is deterministic:
 
 - **Bun:** crop the visible top/bottom source layers, nearest-neighbour resize
 them to 36×20 and 36×12, then stack them at `(3,5)` and `(3,25)` in a transparent
 42×42 image.
-- **Burnt meat:** preserve the cooked-meat geometry and alpha and multiply each
-RGB channel by exactly `2/5`.
-
 The ten images contain 52,920 bytes of RGB565A8 pixels. `verification.json`
 records the generated-header hash, total payload DROM, and remaining factory
 capacity for each build. The pixels are flash-mapped const data, not 52,920

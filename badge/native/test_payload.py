@@ -1,15 +1,16 @@
 """Execute compiled RV32IMC callbacks with firmware calls stubbed, not hardware."""
-import hashlib
 import struct
 import re
 import sys
-from pathlib import Path
 from build import ROOT, HERE, HOOK, decode
 
 sys.path.insert(0, str(ROOT / "badge/assets/icons"))
-from generate_native_icons import native_icon_data
+from generate_native_icons import encode_rgb565a8, load_rgba_png, native_icon_data
 
-ICON_HASHES = {hashlib.sha256(data).hexdigest(): name for name, _, data in native_icon_data()}
+ICON_DATA = {name: data for name, _, data in native_icon_data()}
+ICON_NAMES_BY_PIXELS = {}
+for icon_name, icon_pixels in ICON_DATA.items():
+    ICON_NAMES_BY_PIXELS.setdefault(icon_pixels, set()).add(icon_name)
 
 sys.path.insert(0, str(ROOT / ".tools/reverse"))
 from unicorn import Uc, UC_ARCH_RISCV, UC_MODE_RISCV32, UC_HOOK_CODE
@@ -31,7 +32,7 @@ def scenario(nvs_error=0, radio_error=0, nfc_error=0, allocation_failure=False,
     label_count = 0
     handler, packets = [], []
     image_object = 0x3FCC2800
-    display = {"hidden": True, "icon": None, "updates": []}
+    display = {"hidden": True, "icons": set(), "updates": []}
     hardware = {"tag": None, "uid": b"\x04\xa1", "motion": "rest", "nfc_text_error": 0,
                 "nfc_text_calls": 0}
 
@@ -94,10 +95,10 @@ def scenario(nvs_error=0, radio_error=0, nfc_error=0, allocation_failure=False,
             assert (magic, color_format, flags, width, height, stride, reserved) == (
                 0x19, 0x14, 0, 42, 42, 84, 0)
             assert data_size == 42 * 42 * 3 and descriptor_reserved == 0
-            digest = hashlib.sha256(bytes(cpu.mem_read(data_pointer, data_size))).hexdigest()
-            assert digest in ICON_HASHES, digest
-            display["icon"] = ICON_HASHES[digest]
-            display["updates"].append(("source", display["icon"]))
+            pixels = bytes(cpu.mem_read(data_pointer, data_size))
+            assert pixels in ICON_NAMES_BY_PIXELS
+            display["icons"] = ICON_NAMES_BY_PIXELS[pixels]
+            display["updates"].append(("source", sorted(display["icons"])))
         elif address in (0x420A73C4, 0x420A6C5C):
             assert a0 == image_object and a1 == 1
             display["hidden"] = address == 0x420A73C4
@@ -207,8 +208,8 @@ def scenario(nvs_error=0, radio_error=0, nfc_error=0, allocation_failure=False,
         incoming(b'OC2|' + packet[4:10] + b'|A|OK'); invoke(0x5c)
 
     def assert_icon(expected):
-        actual = None if display["hidden"] else display["icon"]
-        assert actual == expected, (expected, actual, display["updates"][-6:])
+        actual = set() if display["hidden"] else display["icons"]
+        assert (not expected and not actual) or expected in actual, (expected, actual, display["updates"][-6:])
 
     assert string(invoke(0x08)) == "Overcooked"
     assert string(invoke(0x10)) == "overcooked"
@@ -445,6 +446,7 @@ def scenario(nvs_error=0, radio_error=0, nfc_error=0, allocation_failure=False,
             if not nfc_error:
                 invoke(0x60, 4); scan('stove'); acknowledge('ST:L:X')
                 assert_icon('burnt_meat')
+                assert any('HELD: BURNT MEAT' in text for text in texts)
                 invoke(0x60, 1); hardware["motion"] = "shake"; invoke(0x5c); hardware["motion"] = "rest"
                 acknowledge('DROP:HX'); invoke(0x60, 0x101)
                 assert_icon(None)
@@ -471,6 +473,8 @@ def scenario(nvs_error=0, radio_error=0, nfc_error=0, allocation_failure=False,
 
 
 if __name__ == "__main__":
+    burnt_source = load_rgba_png(ROOT / "badge/assets/icons/ing_meat_burnt.png")
+    assert ICON_DATA["burnt_meat"] == encode_rgb565a8(burnt_source)
     scenario()
     scenario(timeout_recovery=True)
     scenario(timeout_recovery="persistent")

@@ -181,18 +181,6 @@ def build_bun() -> RgbaImage:
     return RgbaImage(WIDTH, HEIGHT, bytes(pixels))
 
 
-def build_burnt_meat() -> RgbaImage:
-    """Darken the cooked-meat asset; geometry and transparency stay unchanged."""
-    cooked = load_rgba_png(HERE / "ing_meat_cooked.png")
-    pixels = bytearray(cooked.pixels)
-    for offset in range(0, len(pixels), 4):
-        if pixels[offset + 3]:
-            pixels[offset] = pixels[offset] * 2 // 5
-            pixels[offset + 1] = pixels[offset + 1] * 2 // 5
-            pixels[offset + 2] = pixels[offset + 2] * 2 // 5
-    return RgbaImage(cooked.width, cooked.height, bytes(pixels))
-
-
 def encode_rgb565a8(image: RgbaImage) -> bytes:
     colors = bytearray(image.width * image.height * 2)
     alpha = bytearray(image.width * image.height)
@@ -210,7 +198,7 @@ def native_icon_data() -> list[tuple[str, str, bytes]]:
         ("raw_meat", "ing_meat.png", load_rgba_png(HERE / "ing_meat.png")),
         ("chopped_meat", "ing_meat_chopped.png", load_rgba_png(HERE / "ing_meat_chopped.png")),
         ("cooked_meat", "ing_meat_cooked.png", load_rgba_png(HERE / "ing_meat_cooked.png")),
-        ("burnt_meat", "ing_meat_cooked.png (RGB channels * 2/5)", build_burnt_meat()),
+        ("burnt_meat", "ing_meat_burnt.png", load_rgba_png(HERE / "ing_meat_burnt.png")),
         ("lettuce", "ing_lettuce.png", load_rgba_png(HERE / "ing_lettuce.png")),
         ("chopped_lettuce", "ing_lettuce_chopped.png", load_rgba_png(HERE / "ing_lettuce_chopped.png")),
         ("cheese", "ing_cheese.png", load_rgba_png(HERE / "ing_cheese.png")),

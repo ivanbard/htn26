@@ -100,12 +100,13 @@ and reset all rerender from the same local state used to form events.
 
 The artwork is generated from `../assets/icons/*.png` as ten 42×42 LVGL
 RGB565A8 descriptors. The bun deterministically stacks the checked-in top and
-bottom assets, and burnt meat darkens the cooked asset's RGB channels by 2/5
-without changing its geometry or alpha. The payload uses one reusable image
-widget rather than ten runtime image objects or the Lua display test's 196-box
-grid. Current build metadata records 55,680 bytes of total payload DROM and a
-308-byte permanent app object; the builder enforces the existing 64 KiB DROM
-page and factory boundaries.
+bottom assets, while `BURNT_MEAT` consumes the independent named
+`../assets/icons/ing_meat_burnt.png` source directly. That source is the
+documented temporary cooked-meat placeholder until dedicated burnt artwork is
+supplied. The payload uses one reusable image widget rather than ten runtime
+image objects or the Lua display test's 196-box grid. Current build metadata
+records 55,695 bytes of total payload DROM and a 308-byte permanent app object;
+the builder enforces the existing 64 KiB DROM page and factory boundaries.
 
 Radio initialization has a fail-closed NVS preflight and never invokes the
 stock erase/recovery branch. The player role then enables NFC; the host role
