@@ -384,6 +384,7 @@ test("returning to the opening screen clears a pre-game placement without interr
   let now = 90_000;
   const options = { provider: new LocalFloorplanProvider({ now: () => now }), now: () => now };
   const setup = new ServerProjection(options);
+  setup.setPhotos([{ id: "fixture", absolutePath: "/tmp/fixture.jpg" }], now);
   await setup.proposeFloorplan({ photos: [{ id: "fixture" }] }, now);
   setup.approveFloorplan(true, now);
   assert.equal(setup.snapshot(now).setup.phase, "burger-placement");

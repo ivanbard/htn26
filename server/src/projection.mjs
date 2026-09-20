@@ -798,11 +798,24 @@ export class ServerProjection {
   resetGame(now = this.now(), { returnToOpening = false } = {}) {
     if (returnToOpening) {
       // A setup may have been left at the placement/tour screen by an earlier
-      // fixture run. Clear its acceptance atomically so the next browser view
-      // is the real opening screen, not the old prepared kitchen.
-      this._state.floorPlan.accepted = false;
+      // fixture run. Restore the presentation state, rather than merely
+      // changing its phase: otherwise old fixture-photo counts make the next
+      // live setup look as if it has already begun.
+      const plan = localPlan({ generatedAt: iso(now), photoCount: 0 });
+      this._state.photos = [];
+      this._state.floorPlan = plan;
       this._state.roomLayout = null;
       this._state.proposedRoomLayout = null;
+      this._state.setup.photoCount = 0;
+      this._state.burgerLevel = { status: "not-generated", recipe: "BURGER", placementInstructions: clone(plan.placementInstructions) };
+      this._state.stations = makeStations();
+      this._state.health.inference = {
+        id: "inference",
+        label: "SETUP INFERENCE",
+        status: "healthy",
+        lastSeenAt: iso(now),
+        detail: plan.reviewMessage,
+      };
     }
     this._roundStartedAt = null;
     this._roundDurationSeconds = this.roundSeconds;
