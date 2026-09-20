@@ -29,6 +29,16 @@ button:focus-visible { outline: 3px solid var(--yellow); outline-offset: 3px; }
 }
 
 /* Keep the room mirror deterministic across the setup and live-game surfaces. */
+.layout-photo-controls { display: flex; flex-wrap: wrap; align-items: end; gap: .75rem; margin-top: .8rem; padding: .75rem; border: 1px solid #2a435a; background: #101c29; }
+.setup-photo-label { display: flex; flex-direction: column; gap: .35rem; color: #a9bac9; font-size: .72rem; font-weight: 800; text-transform: uppercase; letter-spacing: .08em; }
+.setup-photo-label input { max-width: 18rem; color: #fff; font-size: .8rem; text-transform: none; letter-spacing: normal; }
+.room-layout-svg { width: 100%; height: 100%; display: block; background: #0c1824; }
+.room-layout-background { fill: #0c1824; }
+.room-layout-play-area { fill: rgba(87, 227, 137, .12); stroke: #57e389; stroke-width: .006; stroke-dasharray: .018 .012; }
+.room-layout-presentation { fill: rgba(255, 209, 102, .28); stroke: #ffd166; stroke-width: .008; }
+.room-layout-object { fill: rgba(91, 216, 238, .2); stroke: #5bd8ee; stroke-width: .005; }
+.room-layout-station { fill: rgba(255, 157, 69, .72); stroke: #fff2e3; stroke-width: .006; }
+.room-layout-debug-label { fill: #fff; font-size: .025; font-weight: 800; paint-order: stroke; stroke: #081019; stroke-width: .003px; }
 .floor-plan {
   position: relative;
   width: 100%;
@@ -105,7 +115,22 @@ button:focus-visible { outline: 3px solid var(--yellow); outline-offset: 3px; }
 
 .player-marker-orange { --player-color: #ff9d45; border-color: #ff9d45; }
 .player-marker-cyan { --player-color: #5bd8ee; border-color: #5bd8ee; }
+.player-marker-violet { --player-color: #c995ff; border-color: #c995ff; }
 .player-marker-stale { border-style: dashed; border-color: #ff6f6f; }
+.event-player { --player-color: #ff9d45; transform: translate(calc(-50% + var(--player-visual-offset, 0px)), -50%); pointer-events: none; }
+.event-player-orange { --player-color: #ff9d45; }
+.event-player-cyan { --player-color: #5bd8ee; }
+.event-player-violet { --player-color: #c995ff; }
+.player-location-info { position: absolute; bottom: calc(100% + .25rem); left: 50%; display: grid; min-width: clamp(110px, 9vw, 165px); transform: translateX(-50%); gap: .12rem; border: 2px solid var(--player-color); border-radius: clamp(6px, .55vw, 10px); background: rgba(8, 16, 25, .94); padding: clamp(.25rem, .38vw, .45rem); color: white; box-shadow: 0 4px 8px rgba(0, 0, 0, .38); text-align: left; }
+.player-location-name { overflow: hidden; color: var(--player-color); font-size: clamp(.5rem, .65vw, .78rem); line-height: 1; text-overflow: ellipsis; white-space: nowrap; }
+.player-location-held { display: flex; min-width: 0; align-items: center; gap: .2rem; }
+.player-location-held img { flex: 0 0 auto; width: clamp(16px, 1.35vw, 24px); height: clamp(16px, 1.35vw, 24px); }
+.player-location-held img + img { margin-left: -.55rem; }
+.player-location-held > span:last-child { min-width: 0; overflow: hidden; font-size: clamp(.42rem, .52vw, .65rem); font-weight: 950; text-overflow: ellipsis; white-space: nowrap; }
+.player-location-empty { color: #a9bac9; font-size: clamp(.4rem, .48vw, .6rem); font-weight: 950; }
+.player-location-action { overflow: hidden; color: #a9bac9; font-size: clamp(.38rem, .46vw, .58rem); font-weight: 900; text-overflow: ellipsis; white-space: nowrap; }
+.player-location-info .is-failure { color: #ff6f6f; font-size: clamp(.38rem, .46vw, .58rem); }
+.player-location-info .is-success { color: #57e389; font-size: clamp(.38rem, .46vw, .58rem); }
 
 .hud-timer { position: relative; width: 100%; aspect-ratio: 1320 / 500; color: #fdfeff; }
 /* Geometry lifted directly from the Figma frame (node 20-2), which specs a
@@ -482,7 +507,7 @@ button:focus-visible { outline: 3px solid var(--yellow); outline-offset: 3px; }
 .tracked-player {
   position: absolute;
   z-index: 12;
-  transform: translate(-50%, -50%);
+  transform: translate(calc(-50% + var(--player-visual-offset, 0px)), -50%);
   transform-origin: center center;
   pointer-events: none;
 }
@@ -512,9 +537,9 @@ button:focus-visible { outline: 3px solid var(--yellow); outline-offset: 3px; }
   filter: drop-shadow(0 2px 1px rgba(43, 23, 18, .34));
 }
 
-.player-team-red { --team-colour: #d63d3d; }
-.player-team-blue { --team-colour: #326fd0; }
-.player-team-green { --team-colour: #2d9b57; }
+.player-team-red { --team-colour: #d63d3d; --player-color: #d63d3d; }
+.player-team-blue { --team-colour: #326fd0; --player-color: #326fd0; }
+.player-team-green { --team-colour: #2d9b57; --player-color: #2d9b57; }
 .player-team-red .player-chef-art,
 .player-team-blue .player-chef-art { filter: drop-shadow(0 2px 1px rgba(43, 23, 18, .34)); }
 
@@ -846,7 +871,9 @@ button:focus-visible { outline: 3px solid var(--yellow); outline-offset: 3px; }
    different bar heights producing two different corner curves. */
 .board-score::before { content: ""; position: absolute; top: 14.4%; right: 1.44%; bottom: 9.2%; left: 12.1%; border: clamp(5px, .8vw, 14px) solid #4a5473; border-radius: 12.27% / 36.65%; background: #1b2030; box-shadow: 0 16px 22px 2px rgba(5, 8, 20, .42), inset 0 2px 0 rgba(148, 163, 199, .15); }
 .board-score > img { position: absolute; z-index: 2; top: 4%; left: 0; width: 28%; height: 82%; object-fit: contain; }
-.board-score-value { position: absolute; z-index: 2; top: 22%; right: 14.24%; bottom: 18%; left: 36.52%; display: grid; place-items: center; color: white; font-size: clamp(1.25rem, 2.75vw, 3.6rem); font-weight: 950; letter-spacing: -.05em; line-height: 1; }
+.board-score-label { position: absolute; z-index: 2; top: 18%; right: 8%; left: 36%; color: #aab6d1; font-size: clamp(.38rem, .52vw, .72rem); font-weight: 950; letter-spacing: .12em; text-align: center; }
+.board-score-value { position: absolute; z-index: 2; top: 28%; right: 8%; bottom: 29%; left: 36%; display: grid; place-items: center; color: white; font-size: clamp(1rem, 2.2vw, 3rem); font-weight: 950; letter-spacing: -.05em; line-height: 1; }
+.board-tip-total { position: absolute; z-index: 2; right: 8%; bottom: 15%; left: 36%; color: #57e389; font-size: clamp(.4rem, .58vw, .78rem); font-weight: 950; letter-spacing: .04em; text-align: center; }
 .hud-timer-value { position: absolute; z-index: 2; top: 22.2%; right: 11.36%; bottom: 17.8%; left: 35.61%; display: grid; place-items: center; min-width: 0; color: #fdfeff; font-size: clamp(1.05rem, 2.1vw, 2.8rem); font-variant-numeric: tabular-nums; font-weight: 950; letter-spacing: -.05em; line-height: 1; text-align: center; white-space: nowrap; }
 @media (max-width: 1050px) {
   /* Stacking the stage cards and workspace columns no longer fits one
@@ -869,7 +896,9 @@ button:focus-visible { outline: 3px solid var(--yellow); outline-offset: 3px; }
   .game-board-orders.orders-1 { grid-template-columns: minmax(0, 360px); }
   .game-board-orders.orders-2, .game-board-orders.orders-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .game-board-orders.orders-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-.game-board-score, .game-board-timer { bottom: 1.5%; width: 24%; min-width: 100px; }
+  .game-board-score, .game-board-timer { bottom: 1.5%; width: 24%; min-width: 100px; }
+  .player-location-info { min-width: 92px; padding: .18rem; }
+  .player-location-info .is-failure, .player-location-info .is-success { font-size: .34rem; line-height: 1.05; }
   .game-board-score { left: 1.4%; }
   .game-board-timer { right: 1.4%; }
   .hud-order, .hud-order-compact { min-height: 72px; grid-template-columns: 38px minmax(0, 1fr) 50px; gap: .25rem; padding: .35rem; }

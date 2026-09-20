@@ -45,8 +45,8 @@ async function approveAndStart(base) {
   const host = await post(base, "/api/command", { type: "START_HOST" });
   assert.equal(host.response.status, 200);
   const scan = await post(base, "/api/command", { type: "SCAN_ROOM" });
-  assert.equal(scan.response.status, 200);
-  assert.equal(scan.data.setup.phase, "layout-proposed");
+  assert.equal(scan.response.status, 400);
+  assert.match(scan.data.error, /api\/layout\/generate/);
   const review = await post(base, "/api/floorplan/review", {});
   assert.equal(review.response.status, 200);
   assert.equal(review.data.floorPlan.stations.length, 4);
@@ -73,7 +73,7 @@ test("fixture parser accepts noisy and chunk-framed gateway records", async () =
   assert.equal(records[1].intent.value, "START");
   assert.equal(records[2].intent.senderMac, MAC.replace("01", "02"));
   assert.equal(adapter.stats().malformed, 1);
-  const fixedPlayer = parseGatewayRxLine("debug HTN26|RX|AA:BB:CC:DD:EE:02|-46|OC1|000043|E|P2:PU:R");
+  const fixedPlayer = parseGatewayRxLine("debug HTN26|RX|AA:BB:CC:DD:EE:02|-46|OC2|000043|E|P2:PU:R");
   assert.equal(fixedPlayer.ok, true);
   assert.equal(fixedPlayer.intent.value, "P2:PU:R");
   assert.equal(parseGatewayRxLine("debug HTN26|RX|bad|-1|OC1|1|H|START").ok, false);
@@ -110,7 +110,7 @@ test("canonical protocol covers host, gateway, player actions, and submissions w
   assert.equal(parseGatewaySerialLine("noise HTN26|GW|DOWN|4|2").kind, "gateway-status");
   assert.equal(parseGatewaySerialLine("noise HTN26|GAME|START_GAME|120|3").kind, "host-control");
   assert.equal(parseGatewaySerialLine("noise HTN26|GAME|GAME_END|3").control, "END");
-  assert.equal(parseGatewaySerialLine(`noise HTN26|RX|${MAC}|-44|OC1|7|E|P2:PU:R`).kind, "badge-event");
+  assert.equal(parseGatewaySerialLine(`noise HTN26|RX|${MAC}|-44|OC2|7|E|P2:PU:R`).kind, "badge-event");
 });
 
 test("configurable serial-device adapter opens a fixture stream", async () => {
@@ -433,7 +433,7 @@ test("native GAME and complete E event path is parsed and projected by the lapto
       return runtime.projection.snapshot(now);
     };
     let sequence = 100_000;
-    const event = (player, action) => ingest(`native HTN26|RX|AA:BB:CC:DD:EE:0${player}|-45|OC1|${sequence++}|E|P${player}:${action}`);
+    const event = (player, action) => ingest(`native HTN26|RX|AA:BB:CC:DD:EE:0${player}|-45|OC2|${sequence++}|E|P${player}:${action}`);
 
     let state = ingest("native HTN26|GW|UP|0|0");
     assert.equal(state.health.gateway.status, "healthy");
@@ -544,12 +544,27 @@ test("HTTP upload, review, approval, serial projection, and browser reads work",
     const initial = await fetch(`${base}/api/state`).then((response) => response.json());
     assert.equal(initial.players.length, 3);
     assert.equal(initial.timer.totalSeconds, 240);
+    assert.equal(initial.floorPlan.coordinateSpace, "normalized-percent");
+    assert.equal(initial.floorPlan.units, "percent");
+    assert.equal(initial.floorPlan.width, 100);
+    assert.equal(initial.floorPlan.height, 100);
+    assert.deepEqual(
+      initial.floorPlan.stations.map(({ id, x, y, width, height }) => ({ id, x, y, width, height })),
+      [
+        { id: "pantry", x: 8, y: 8, width: 16, height: 14 },
+        { id: "fridge", x: 76, y: 8, width: 16, height: 14 },
+        { id: "cutting-board", x: 12, y: 74, width: 24, height: 15 },
+        { id: "stove", x: 64, y: 74, width: 24, height: 15 },
+      ],
+    );
+    assert.ok(initial.floorPlan.walls.every((wall) => wall.x + wall.width <= 100 && wall.y + wall.height <= 100));
     const state = await approveAndStart(base);
     assert.equal(state.setup.phase, "running");
     assert.equal(state.eventHistory[0].startSource, "physical host badge");
     assert.equal(state.floorPlan.room.widthMeters, 10);
     assert.equal(state.floorPlan.stations.length, 4);
-    const serial = await post(base, "/api/serial", { line: `noise HTN26|RX|${MAC}|-40|OC1|99|N|ING:MEAT` });
+    assert.equal(state.floorPlan.coordinateSpace, "normalized-percent");
+    const serial = await post(base, "/api/serial", { line: `noise HTN26|RX|${MAC}|-40|OC2|99|N|ING:MEAT` });
     assert.equal(serial.response.status, 200);
     assert.equal(serial.data.result.ok, true);
     assert.equal(serial.data.state.players[0].heldItem, "MEAT");

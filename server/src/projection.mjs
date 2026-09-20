@@ -1,4 +1,6 @@
+import { DIFFICULTY_LABELS } from "./difficulty-sidecar.mjs";
 import { LocalFloorplanProvider, localPlan } from "./provider.mjs";
+import { sanitizeRoomLayout } from "./layout-schema.mjs";
 
 const ROUND_SECONDS = 240;
 const CHOP_SECONDS = 3;
@@ -31,8 +33,25 @@ const SHORT_ITEMS = Object.freeze({
 const PLATE_ITEMS = new Set(["BUN", "COOKED_MEAT", "MEAT", "LETTUCE", "CHEESE"]);
 const RAW_TO_CHOPPED = Object.freeze({ RAW_MEAT: "CHOPPED_MEAT", RAW_LETTUCE: "LETTUCE", RAW_CHEESE: "CHEESE" });
 
+function recipeForDifficulty(difficulty, orderSequence) {
+  if (difficulty === "easy") return RECIPE_BY_ID.get("PLAIN_MEAT");
+  if (difficulty === "hectic") return RECIPE_BY_ID.get("CHEESE_LETTUCE_MEAT");
+  if (difficulty === "normal") return RECIPE_BY_ID.get(orderSequence % 2 === 1 ? "CHEESEBURGER" : "LETTUCE_MEAT");
+  return null;
+}
+
 function clone(value) { return structuredClone(value); }
 function iso(ms) { return new Date(ms).toISOString(); }
+function projectRotatedRect(rect) {
+  const radians = rect.rotationDeg * Math.PI / 180;
+  const extentX = (Math.abs(Math.cos(radians)) * rect.width + Math.abs(Math.sin(radians)) * rect.height) / 2;
+  const extentY = (Math.abs(Math.sin(radians)) * rect.width + Math.abs(Math.cos(radians)) * rect.height) / 2;
+  const left = Math.max(0, Math.min(100, (rect.center.x - extentX) * 100));
+  const top = Math.max(0, Math.min(100, (rect.center.y - extentY) * 100));
+  const right = Math.max(left, Math.min(100, (rect.center.x + extentX) * 100));
+  const bottom = Math.max(top, Math.min(100, (rect.center.y + extentY) * 100));
+  return { x: left, y: top, width: right - left, height: bottom - top };
+}
 function numeric(value, fallback = 0) {
   const number = Number(value);
   return Number.isFinite(number) ? number : fallback;
@@ -133,10 +152,13 @@ function makeOrder(id, recipe, now, patienceSeconds) {
 export function createInitialProjectionState(now = Date.now(), roundSeconds = ROUND_SECONDS) {
   const plan = localPlan({ generatedAt: iso(now), photoCount: 0 });
   return {
-    version: 1,
-    source: "pi-server-simulator",
+    version: 2,
+    revision: 1,
+    source: "root-server-simulator",
     setup: { phase: "idle", message: "Upload 3-4 room photos for setup, or start the local simulator with a host serial record.", updatedAt: iso(now) },
     floorPlan: plan,
+    roomLayout: null,
+    proposedRoomLayout: null,
     burgerLevel: { status: "not-generated", recipe: "BURGER", placementInstructions: clone(plan.placementInstructions) },
     photos: [],
     players: DEFAULT_PLAYERS.map((player) => makePlayer(player, now)),
@@ -167,7 +189,7 @@ export class ServerProjection {
   constructor({ provider, now = () => Date.now(), roundSeconds = ROUND_SECONDS,
     orderIntervalSeconds, orderIntervalMinSeconds = 8, orderIntervalMaxSeconds = 35,
     orderPatienceSeconds, maxActiveOrders = 3, locationHoldSeconds = DEFAULT_LOCATION_HOLD_SECONDS,
-    random = Math.random, authoritativeEngine } = {}) {
+    random = Math.random, authoritativeEngine, difficultySidecar } = {}) {
     this.now = now;
     this.provider = provider || new LocalFloorplanProvider({ now });
     this.roundSeconds = clampInteger(roundSeconds, 1, 3600, ROUND_SECONDS);
@@ -179,9 +201,13 @@ export class ServerProjection {
     this.locationHoldSeconds = clampInteger(locationHoldSeconds, 0, 30, DEFAULT_LOCATION_HOLD_SECONDS);
     this.random = typeof random === "function" ? random : Math.random;
     this.authoritativeEngine = authoritativeEngine || null;
+    this.difficultySidecar = difficultySidecar || null;
+    this._revision = 1;
     this._nextOrderAt = null;
     this._orderSequence = 0;
     this._state = createInitialProjectionState(now(), this.roundSeconds);
+    this._state.version = 2;
+    this._state.revision = this._revision;
     this._badges = new Map();
     this._seenEvents = new Set();
     this._listeners = new Set();
@@ -190,6 +216,9 @@ export class ServerProjection {
     this._pendingTransfer = null;
     this._pendingSubmission = null;
     this._historySequence = 0;
+    this._nextDifficulty = null;
+    this._difficultyEpoch = 0;
+    this._difficultyRequestId = 0;
   }
 
   subscribe(listener) {
@@ -204,7 +233,8 @@ export class ServerProjection {
   }
 
   _publish(now = this.now()) {
-    this._state.version += 1;
+    this._revision += 1;
+    this._state.revision = this._revision;
     this._emit(now);
   }
 
@@ -223,7 +253,10 @@ export class ServerProjection {
 
   applyAuthoritativeSnapshot(snapshot, now = this.now()) {
     if (!snapshot || typeof snapshot !== "object") throw new Error("an authoritative snapshot is required");
+    this._revision = Math.max(this._revision + 1, Number(snapshot.revision) || 0);
     this._state = clone(snapshot);
+    this._state.version = 2;
+    this._state.revision = this._revision;
     this._state.setup ??= { phase: "idle", message: "", updatedAt: iso(now) };
     this._state.setup.updatedAt = iso(now);
     this._state.eventHistory ??= [];
@@ -249,14 +282,46 @@ export class ServerProjection {
     this._state.order = active[0] ? clone(active[0]) : null;
   }
 
+  _difficultyFeatures(now = this.now()) {
+    const recent = this._state.submissions.slice(-6);
+    const failures = recent.filter((submission) => submission.status === "failure").length;
+    const busyStoves = this._state.stations.filter((station) => station.kind === "stove" && station.status !== "idle").length;
+    const elapsed = this._roundStartedAt == null ? 0 : (now - this._roundStartedAt) / (this._roundDurationSeconds * 1000);
+    return { activeOrderPressure: this._activeOrders().length / this.maxActiveOrders, recentFailureRate: recent.length ? failures / recent.length : 0, busyStovePressure: busyStoves / 2, roundElapsed: Math.max(0, Math.min(1, elapsed)) };
+  }
+
+  _requestDifficulty(now = this.now()) {
+    if (!this.difficultySidecar?.recommend) return;
+    const epoch = this._difficultyEpoch;
+    const requestId = ++this._difficultyRequestId;
+    const expiresAt = now + this.orderIntervalMaxSeconds * 1000;
+    Promise.resolve().then(() => this.difficultySidecar.recommend(this._difficultyFeatures(now))).then((result) => {
+      if (epoch !== this._difficultyEpoch || requestId !== this._difficultyRequestId || this._state.timer.status !== "running" || !DIFFICULTY_LABELS.has(result?.difficulty)) return;
+      this._nextDifficulty = { ...result, requestedAt: now, expiresAt };
+    }).catch(() => {
+      if (epoch === this._difficultyEpoch && requestId === this._difficultyRequestId) this._nextDifficulty = null;
+    });
+  }
+
+  _clearDifficultyRecommendation() {
+    this._difficultyEpoch += 1;
+    this._difficultyRequestId += 1;
+    this._nextDifficulty = null;
+  }
+
   _issueOrder(now = this.now()) {
-    const recipe = BURGER_RECIPES[this._orderSequence % BURGER_RECIPES.length];
+    const candidate = this._nextDifficulty;
+    this._nextDifficulty = null;
+    const recommendation = candidate && now <= candidate.expiresAt ? candidate : null;
+    const fallbackRecipe = BURGER_RECIPES[this._orderSequence % BURGER_RECIPES.length];
+    const recipe = recipeForDifficulty(recommendation?.difficulty, this._orderSequence) || fallbackRecipe;
     this._orderSequence += 1;
     const order = makeOrder(`order-${this._orderSequence}`, recipe, now, this._patienceSeconds());
     this._state.orders.push(order);
     while (this._state.orders.length > 32) this._state.orders.shift();
     this._syncActiveOrder();
-    this._record("order-created", `${order.recipeName} ordered`, now, { orderId: order.id, recipe: order.recipe });
+    this._record("order-created", `${order.recipeName} ordered`, now, { orderId: order.id, recipe: order.recipe, ...(recommendation ? { difficulty: recommendation.difficulty, difficultySource: recommendation.source, difficultyModel: recommendation.model?.version || null, difficultyLatencyMs: recommendation.latencyMs } : {}) });
+    this._requestDifficulty(now);
     return order;
   }
 
@@ -493,7 +558,8 @@ export class ServerProjection {
     }
 
     if (changed) {
-      this._state.version += 1;
+      this._revision += 1;
+      this._state.revision = this._revision;
       this._emit(now);
     }
     return changed;
@@ -533,8 +599,47 @@ export class ServerProjection {
     this._touch(now);
   }
 
+  proposeRoomLayout(candidate, now = this.now(), { photoCount = this._state.photos.length } = {}) {
+    const layout = sanitizeRoomLayout(candidate);
+    if (this._state.setup.phase === "running") throw new Error("cannot replace the room layout while a game is running");
+    this._state.proposedRoomLayout = clone(layout);
+    const stations = layout.stations.map((station) => ({
+      id: station.type,
+      label: station.type.replaceAll("_", " ").toUpperCase(),
+      kind: station.type === "cutting_board" ? "chop" : station.type === "stove" ? "stove" : "ingredient",
+      ...projectRotatedRect(station),
+      nfcTag: station.type,
+      instruction: `Place the ${station.type.replaceAll("_", " ")} NFC sticker here.`,
+      rotationDeg: 0,
+    }));
+    this._state.floorPlan = {
+      accepted: false,
+      provider: "openai-layout",
+      mode: "ai",
+      reviewMessage: "AI room layout generated from the classroom photos.",
+      room: { widthMeters: 10, heightMeters: 10 },
+      width: 100,
+      height: 100,
+      units: "percent",
+      coordinateSpace: "normalized-percent",
+      walls: [],
+      stations: clone(stations),
+      placementInstructions: stations.map(({ id, label, instruction, x, y }) => ({ id, label, instruction, x, y })),
+      photoCount,
+      generatedAt: iso(now),
+    };
+    this._state.burgerLevel = { status: "not-generated", recipe: "BURGER", placementInstructions: clone(this._state.floorPlan.placementInstructions) };
+    this._state.setup.phase = "layout-proposed";
+    this._state.setup.message = "Review the proposed AI room layout before approving it.";
+    this._state.health.inference = { id: "inference", label: "SETUP INFERENCE", status: "healthy", lastSeenAt: iso(now), detail: this._state.setup.message };
+    this._touch(now);
+    return this.snapshot(now);
+  }
+
   async proposeFloorplan({ photos = [], readPhoto } = {}, now = this.now()) {
     const result = await this.provider.propose({ photos, readPhoto });
+    this._state.roomLayout = null;
+    this._state.proposedRoomLayout = null;
     this._state.floorPlan = clone(result);
     this._state.floorPlan.accepted = false;
     this._state.burgerLevel = { status: "not-generated", recipe: "BURGER", placementInstructions: clone(result.placementInstructions) };
@@ -549,6 +654,11 @@ export class ServerProjection {
     if (!approved) return this.snapshot(now);
     if (this._state.setup.phase !== "layout-proposed") throw new Error("a proposed floorplan is required before approval");
     this._state.floorPlan.accepted = true;
+    if (this._state.proposedRoomLayout) {
+      this._state.roomLayout = clone(this._state.proposedRoomLayout);
+      this._state.proposedRoomLayout = null;
+    }
+    this._state.stations = this._state.floorPlan.stations.map((station) => ({ id: station.id, label: station.label, kind: station.kind, status: "idle", progress: 0, remainingSeconds: 0, item: null }));
     this._state.setup.phase = "burger-placement";
     this._state.setup.message = "Floorplan approved. Place the four burger stations as instructed, then start the round.";
     this._state.burgerLevel = { status: "placement-ready", recipe: "BURGER", placementInstructions: clone(this._state.floorPlan.placementInstructions) };
@@ -593,6 +703,7 @@ export class ServerProjection {
     this._nextOrderAt = null;
     this._pendingTransfer = null;
     this._pendingSubmission = null;
+    this._clearDifficultyRecommendation();
     this._seenEvents.clear();
     this._record("round-started", `Round started for ${this._roundDurationSeconds} seconds`, now, { durationSeconds: this._roundDurationSeconds, playerCount: 3, startSource });
     this._issueOrder(now);
@@ -623,6 +734,7 @@ export class ServerProjection {
     this._nextOrderAt = null;
     this._pendingTransfer = null;
     this._pendingSubmission = null;
+    this._clearDifficultyRecommendation();
     this._seenEvents.clear();
     this._publish(now);
     return this.snapshot(now);
@@ -658,6 +770,7 @@ export class ServerProjection {
         return this.snapshot(now);
       case "RESET_GAME":
         return this.resetGame(now);
+
       default:
         throw new Error(`unsupported command: ${type}`);
     }

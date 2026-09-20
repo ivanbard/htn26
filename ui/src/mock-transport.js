@@ -20,13 +20,9 @@ const PLACEMENT_INSTRUCTIONS = STANDARD_ROOM_PLAN.placementInstructions;
 function health(now) {
   return {
     gateway: { id: "gateway", label: "GATEWAY BADGE", status: "healthy", lastSeenAt: now, detail: "Host badge / USB online" },
-    workers: [
-      { id: "camera-1", label: "CAMERA 1", status: "healthy", lastSeenAt: now, detail: "Master Pi camera" },
-      { id: "camera-2", label: "CAMERA 2", status: "healthy", lastSeenAt: now, detail: "Worker Pi 2" },
-      { id: "camera-3", label: "CAMERA 3", status: "healthy", lastSeenAt: now, detail: "Worker Pi 3" },
-    ],
-    inference: { id: "inference", label: "AI INFERENCE", status: "healthy", lastSeenAt: now, detail: "On-device tracking" },
-    trackingCoverage: "healthy",
+    workers: [],
+    inference: { id: "inference", label: "SETUP INFERENCE", status: "healthy", lastSeenAt: now, detail: "Room setup complete" },
+    trackingCoverage: "event-inferred",
   };
 }
 
@@ -34,7 +30,7 @@ function burgerLevel(status = "not-generated") {
   return { status, recipe: "BURGER", placementInstructions: cloneState(PLACEMENT_INSTRUCTIONS) };
 }
 
-// Mirrors pi/server/src/projection.mjs BURGER_RECIPES exactly (id, dish name,
+// Mirrors server/src/projection.mjs BURGER_RECIPES exactly (id, dish name,
 // components, gold) — the mock is a stand-in for that authoritative Pi
 // projection, so it uses the same four recipes and the same gold values
 // rather than inventing its own catalog.
@@ -48,7 +44,7 @@ const RECIPE_BY_ID = new Map(BURGER_RECIPES.map((recipe) => [recipe.id, recipe])
 
 // README.md "Submission behavior": "The authoritative Pi projection applies
 // the configured penalty, tip, or bonus-gold result for the submitted
-// order." The gold/tip side of that is implemented in pi/server's
+// order." The gold/tip side of that is implemented in server's
 // projection.mjs (ported below in orderTip()); no file in this repo defines
 // a penalty amount, so this is this mock's own reasonable stand-in for that
 // documented-but-unspecified value, not a value read from server code.
@@ -65,7 +61,7 @@ function makeMockOrder(id, recipe, remainingSeconds, totalSeconds = 120) {
     goldValue: recipe.gold,
     remainingSeconds,
     totalSeconds,
-    // Same 3-segment patience meter as pi/server's projection.mjs, computed
+    // Same 3-segment patience meter as server's projection.mjs, computed
     // the same way: ceil((remaining / total) * 3), clamped to [0, 3].
     patience: { segments: 3, filledSegments: orderPatienceSegments(remainingSeconds, totalSeconds) },
   };
@@ -76,7 +72,7 @@ function orderPatienceSegments(remainingSeconds, totalSeconds) {
   return Math.max(0, Math.min(3, Math.ceil((remainingSeconds / totalSeconds) * 3)));
 }
 
-// Identical formula to pi/server/src/projection.mjs's submit(): gold is
+// Identical formula to server/src/projection.mjs's submit(): gold is
 // worth 10% of a tip, plus up to 5 more for a plate turned in with a full
 // patience meter — so a same-tick (3/3 segments) submission tips the most,
 // and it never rounds down to nothing.
@@ -105,14 +101,15 @@ export function createInitialMockState(now = Date.now()) {
   const orders = cloneState(MOCK_ORDERS);
   return {
     version: 2,
-    source: "mock-master-pi",
-  setup: { phase: SETUP_PHASES.IDLE, message: "Host is idle. Start to prepare the standard kitchen.", updatedAt: now },
+    schemaVersion: 2,
+    source: "mock-laptop-server",
+    setup: { phase: SETUP_PHASES.IDLE, message: "Host is idle. Start to prepare the standard kitchen.", updatedAt: now },
     floorPlan: cloneState(PROPOSED_PLAN),
     burgerLevel: burgerLevel(),
     players: [
-      { id: "p1", label: "P1", name: "PLAYER 1", color: "red", position: { x: 20, y: 58 }, tracking: { status: "healthy", source: "nfc-scan", lastSeenAt: now, staleAfterMs: 20_000 }, inventory: [], plate: ["BUN", "COOKED MEAT", "SHREDDED LETTUCE"] },
-      { id: "p2", label: "P2", name: "PLAYER 2", color: "blue", position: { x: 68, y: 58 }, tracking: { status: "healthy", source: "nfc-scan", lastSeenAt: now, staleAfterMs: 20_000 }, inventory: ["RAW MEAT"] },
-      { id: "p3", label: "P3", name: "PLAYER 3", color: "green", position: { x: 82, y: 63 }, tracking: { status: "healthy", source: "nfc-scan", lastSeenAt: now, staleAfterMs: 20_000 }, inventory: [], plate: ["BUN", "CHOPPED CHEESE"] },
+      { id: "p1", label: "P1", name: "PLAYER 1", color: "red", position: { x: 20, y: 58 }, location: "center", positionSource: "badge-events", tracking: { status: "inferred", source: "badge-events", lastSeenAt: now, staleAfterMs: null }, heldItem: "PLATE", actionState: "holding plate", inventory: ["BUN", "COOKED MEAT", "SHREDDED LETTUCE"], plate: ["BUN", "COOKED MEAT", "SHREDDED LETTUCE"] },
+      { id: "p2", label: "P2", name: "PLAYER 2", color: "blue", position: { x: 68, y: 58 }, location: "center", positionSource: "badge-events", tracking: { status: "inferred", source: "badge-events", lastSeenAt: now, staleAfterMs: null }, heldItem: "RAW_MEAT", actionState: "holding raw meat", inventory: ["RAW MEAT"] },
+      { id: "p3", label: "P3", name: "PLAYER 3", color: "green", position: { x: 82, y: 63 }, location: "center", positionSource: "badge-events", tracking: { status: "inferred", source: "badge-events", lastSeenAt: now, staleAfterMs: null }, heldItem: "PLATE", actionState: "holding plate", inventory: ["BUN", "CHOPPED CHEESE"], plate: ["BUN", "CHOPPED CHEESE"] },
     ],
     order: cloneState(orders[0]),
     orders,
@@ -123,7 +120,6 @@ export function createInitialMockState(now = Date.now()) {
       { id: "chop1", label: "CHOP 1", kind: "chop", status: "ready", progress: 1, remainingSeconds: 0, item: "LETTUCE" },
       { id: "chop2", label: "CHOP 2", kind: "chop", status: "chopping", progress: 0.4, remainingSeconds: 9, totalSeconds: 15, item: "CHEESE" },
     ],
-    score: { value: 0, delivered: 0 },
     gold: { total: 0, earned: 0, lastChange: 0 },
     tips: { total: 0, earned: 0, lastChange: 0 },
     clock: { status: "ready", remainingSeconds: 240, totalSeconds: 240 },
@@ -180,21 +176,40 @@ function startGame(state, now) {
   if (!canRunAction(state, GAME_ACTIONS.START_GAME)) return state;
   const orders = normalizedOrders(state).map((order) => ({ ...order, status: "active", remainingSeconds: order.totalSeconds }));
   return withUpdate(state, {
-    setup: { phase: SETUP_PHASES.RUNNING, message: "Burger game running. Live locations and orders come from the master Pi." },
-    score: { value: 0, delivered: 0 },
+    setup: { phase: SETUP_PHASES.RUNNING, message: "Burger game running. Badge events drive player state and inferred positions." },
     gold: { total: 0, earned: 0, lastChange: 0 },
     tips: { total: 0, earned: 0, lastChange: 0 },
+    penalties: { total: 0, lastChange: 0 },
+    score: { value: 0, delivered: 0 },
     clock: { ...state.clock, status: "running", remainingSeconds: state.clock.totalSeconds },
     order: { ...withPrimaryOrder(orders, state.order) },
     orders,
     serving: { ...state.serving, lastEvent: null },
+    submissions: [],
+    players: state.players.map((player, index) => ({
+      ...player,
+      position: { x: [34, 50, 66][index] ?? 50, y: 88 },
+      location: "bottom",
+      heldItem: "EMPTY",
+      actionState: "idle",
+      inventory: [],
+    })),
     burgerLevel: { ...state.burgerLevel, status: "in-play" },
   }, now);
 }
 
 function endGame(state, now) {
   if (!canRunAction(state, GAME_ACTIONS.END_GAME)) return state;
-  return withUpdate(state, { setup: { phase: SETUP_PHASES.ENDED, message: "Game ended. Reset to host another burger level." }, clock: { ...state.clock, status: "ended" } }, now);
+  const orders = normalizedOrders(state).map((order) => order.status === "active"
+    ? { ...order, status: "expired", remainingSeconds: 0 }
+    : { ...order });
+  return withUpdate(state, {
+    setup: { phase: SETUP_PHASES.ENDED, message: "Game ended. Reset to host another burger level." },
+    clock: { ...state.clock, status: "ended", remainingSeconds: 0 },
+    orders,
+    order: { ...withPrimaryOrder(orders, state.order) },
+    players: state.players.map((player, index) => ({ ...player, position: { x: [34, 50, 66][index] ?? 50, y: 88 }, location: "bottom", heldItem: "EMPTY", actionState: "idle", inventory: [] })),
+  }, now);
 }
 
 function hasActiveRound(state) {
@@ -204,7 +219,7 @@ function hasActiveRound(state) {
 }
 
 // README.md "Submission behavior": a correct submission "reports its
-// score"; a failed one "applies a penalty and has no retry." pi/server's
+// score"; a failed one "applies a penalty and has no retry." server's
 // submit() implements the success side (gold from the matched recipe, a tip
 // from remaining patience) — ported via orderTip()/RECIPE_BY_ID above so
 // this mock computes the same numbers the authoritative Pi would. The
@@ -226,6 +241,8 @@ function recordDelivery(state, success, now, orderId) {
   const penalty = success ? 0 : FAILED_SUBMISSION_PENALTY;
   const event = success
     ? {
+      id: `submission-${(state.submissions || []).length + 1}`,
+      playerId: "p1",
       status: "success",
       message: "BURGER SERVED",
       detail: segments >= 3 ? "Served with a full patience meter — max tip." : segments > 0 ? `Served with ${segments}/3 patience remaining.` : "Served just before the order ran out.",
@@ -236,6 +253,8 @@ function recordDelivery(state, success, now, orderId) {
       at: now,
     }
     : {
+      id: `submission-${(state.submissions || []).length + 1}`,
+      playerId: "p1",
       status: "failure",
       message: "WRONG BURGER",
       detail: `Serving badge rejected the topping combination — penalty applied.`,
@@ -248,21 +267,27 @@ function recordDelivery(state, success, now, orderId) {
   const nextOrders = success
     ? orders.map((order, index) => index === targetIndex ? { ...order, status: "completed" } : { ...order })
     : orders.map((order) => ({ ...order }));
+  const goldTotal = Number(state.gold?.total || 0) + (success ? gold : 0);
+  const tipsTotal = Number(state.tips?.total || 0) + (success ? tip : 0);
+  const penaltiesTotal = Number(state.penalties?.total || 0) + (success ? 0 : penalty);
   return withUpdate(state, {
-    score: {
-      ...state.score,
-      value: Number(state.score?.value || 0) + (success ? gold : -penalty),
-      delivered: Number(state.score?.delivered || 0) + (success ? 1 : 0),
-    },
     gold: success
-      ? { ...state.gold, total: Number(state.gold?.total || 0) + gold, earned: Number(state.gold?.earned || 0) + gold, lastChange: gold }
+      ? { total: goldTotal, earned: Number(state.gold?.earned || 0) + gold, lastChange: gold }
       : { ...state.gold, lastChange: 0 },
     tips: success
-      ? { ...state.tips, total: Number(state.tips?.total || 0) + tip, earned: Number(state.tips?.earned || 0) + tip, lastChange: tip }
+      ? { total: tipsTotal, earned: Number(state.tips?.earned || 0) + tip, lastChange: tip }
       : { ...state.tips, lastChange: 0 },
+    penalties: success
+      ? { ...state.penalties, lastChange: 0 }
+      : { total: penaltiesTotal, lastChange: -penalty },
+    score: {
+      value: goldTotal + tipsTotal - penaltiesTotal,
+      delivered: Number(state.score?.delivered || 0) + (success ? 1 : 0),
+    },
     order: { ...withPrimaryOrder(nextOrders, state.order) },
     orders: nextOrders,
     serving: { ...state.serving, lastEvent: event },
+    submissions: [...(state.submissions || []), event],
   }, now);
 }
 

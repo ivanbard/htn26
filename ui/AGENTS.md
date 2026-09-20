@@ -4,10 +4,13 @@ The UI contract, transport seam, rendering ownership, and tests are [`README.md`
 
 Read [`../README.md`](../README.md), [`../updates/UPDATE_v1.md`](../updates/UPDATE_v1.md), [`../updates/UPDATE_v1.1.md`](../updates/UPDATE_v1.1.md), and [`../FLOW.md`](../FLOW.md) for product context.
 
-Keep the UI offline-first and local, with the laptop server or a future
-authoritative-engine adapter as the source of authoritative state.
+Keep the UI offline-first and local. Root `server/` is the current laptop HTTP,
+SSE, photo, and AI-layout peer; the master Pi remains authoritative for game
+rules when connected.
 
-Render player icons, held items, chopping state, cooking progress, orders, health, and submission results from transport snapshots.
+Render player positions only when supplied by transport snapshots, along with
+held items, chopping state, cooking progress, orders, health, and submission
+results. Setup photos do not establish live tracking.
 
 Do not decrement timers, infer locations, validate plates, score orders, or mutate game authority in the renderer.
 

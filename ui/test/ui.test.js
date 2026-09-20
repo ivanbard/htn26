@@ -4,12 +4,13 @@ import assert from "node:assert/strict";
 import { createApp } from "../src/main.js";
 import { createInitialMockState, createMockTransport } from "../src/mock-transport.js";
 import { renderApp } from "../src/render.js";
+import { createHttpTransport } from "../src/transport.js";
 import { ROOM_COORDINATE_SPACE, validateFrontendSnapshot } from "../src/contracts.js";
 import { normalizeServerSnapshot } from "../src/server-snapshot.js";
-import { createHttpTransport } from "../src/transport.js";
 import {
   isWalkablePosition,
   pathsHaveAgentConflict,
+  plansHaveTemporalConflict,
   planPlayerPaths,
   playerPlansAreCollisionSafe,
   projectPointIntoWalkableRoom,
@@ -23,7 +24,7 @@ import {
   stationTileKey,
 } from "../src/room-grid.js";
 import { displayModeForPhase, GAME_ACTIONS, SETUP_PHASES, UI_DISPLAY_MODES } from "../src/state.js";
-import { createInitialProjectionState } from "../../pi/server/src/projection.mjs";
+import { createInitialProjectionState } from "../../server/src/projection.mjs";
 
 async function approvedTransport(now = 1_000) {
   const transport = createMockTransport({ now: () => now });
@@ -220,7 +221,7 @@ test("plans simultaneous chef movement with barrier-safe alternate lanes", () =>
     assert.equal(plan.path.every((point) => isWalkablePosition(point, state.floorPlan.walls)), true);
     assert.equal(plan.reachedTarget, true);
   });
-  assert.equal(pathsHaveAgentConflict(plans.get("p1").path, plans.get("p2").path), false);
+  assert.equal(plansHaveTemporalConflict(plans.get("p1"), plans.get("p2")), false);
 });
 
 test("uses an alternate arc when two chefs would exchange positions", () => {
@@ -449,7 +450,7 @@ test("marks old or missing player tracking and stale worker health", () => {
   state.clock.status = "running";
   state.players[1].tracking.status = "stale";
   delete state.players[0].position;
-  state.health.workers[1].lastSeenAt = 0;
+  state.health.workers.push({ id: "worker-1", label: "WORKER 1", status: "stale", lastSeenAt: 0, detail: "test" });
 
   const html = renderApp(state, 7_000);
 
@@ -610,16 +611,16 @@ test("delivery is accepted only during a running active round", async () => {
   await assertCommandUnchanged(transport, GAME_ACTIONS.DELIVERY_FAILURE);
 });
 
-test("successful delivery awards the recipe's gold plus a patience-based tip, matching pi/server's formula", async () => {
+test("successful delivery awards the recipe's gold plus a patience-based tip, matching server's formula", async () => {
   const transport = await approvedTransport(1_000);
   await transport.command(GAME_ACTIONS.START_GAME);
   await transport.command({ type: GAME_ACTIONS.DELIVERY_SUCCESS, orderId: "order-1" });
   const served = transport.snapshot();
 
   // order-1 is PLAIN_MEAT (gold: 100); START_GAME resets it to full patience
-  // (remaining === total), so pi/server's tip formula — max(1, round(gold *
+  // (remaining === total), so server's tip formula — max(1, round(gold *
   // 0.1 + ratio * 5)) — gives round(10 + 5) = 15 at a 1.0 ratio.
-  assert.deepEqual(served.score, { value: 100, delivered: 1 });
+  assert.deepEqual(served.score, { value: 115, delivered: 1 });
   assert.deepEqual(served.gold, { total: 100, earned: 100, lastChange: 100 });
   assert.deepEqual(served.tips, { total: 15, earned: 15, lastChange: 15 });
   assert.equal(served.orders[0].status, "completed");
@@ -631,7 +632,7 @@ test("successful delivery awards the recipe's gold plus a patience-based tip, ma
   assert.equal(served.serving.lastEvent.patienceSegments, 3);
 
   await assertCommandUnchanged(transport, { type: GAME_ACTIONS.DELIVERY_SUCCESS, orderId: "order-1" });
-  assert.deepEqual(transport.snapshot().score, { value: 100, delivered: 1 });
+  assert.deepEqual(transport.snapshot().score, { value: 115, delivered: 1 });
 });
 
 test("failed delivery applies the documented penalty and does not complete the order", async () => {
@@ -686,7 +687,7 @@ test("renders serving success, gold/tip breakdown, and score update from the aut
   await transport.command(GAME_ACTIONS.DELIVERY_SUCCESS);
   const state = transport.snapshot();
 
-  assert.equal(state.score.value, 100);
+  assert.equal(state.score.value, 115);
   assert.equal(state.orders[0].status, "completed");
   const html = renderApp(state, 2_000);
   assert.doesNotMatch(html, /LIVE ACTIVITY/);
@@ -841,4 +842,79 @@ test("cleans up a connection that resolves after app destruction", async () => {
 
   assert.equal(cleanupCount, 1);
   assert.equal(closeCount, 1);
+});
+
+test("exposes room-photo generation only for capable transports", () => {
+  const makeRoot = () => ({
+    innerHTML: "",
+    addEventListener() {},
+    removeEventListener() {},
+  });
+  const scanningState = createInitialMockState(1_000);
+  scanningState.setup.phase = SETUP_PHASES.SCANNING;
+  const mockRoot = makeRoot();
+  const mockApp = createApp({
+    root: mockRoot,
+    transport: createMockTransport({ initialState: scanningState, now: () => 1_000 }),
+  });
+  assert.match(mockRoot.innerHTML, /data-command="SCAN_ROOM"/);
+  assert.doesNotMatch(mockRoot.innerHTML, /data-layout-photo-controls/);
+  mockApp.destroy();
+
+  const httpRoot = makeRoot();
+  const capableTransport = {
+    connect(listener) { listener(scanningState); },
+    async command() { return scanningState; },
+    async generateLayout() { return scanningState; },
+  };
+  const httpApp = createApp({ root: httpRoot, transport: capableTransport, now: () => 1_000 });
+  assert.doesNotMatch(httpRoot.innerHTML, /data-command="SCAN_ROOM"/);
+  assert.match(httpRoot.innerHTML, /data-layout-photo-controls/);
+  httpApp.destroy();
+});
+
+test("HTTP transport consumes named state events", async () => {
+  class FakeEventSource {
+    constructor(url) {
+      this.url = url;
+      this.listeners = new Map();
+      this.closed = false;
+      FakeEventSource.instance = this;
+    }
+
+    addEventListener(type, listener) {
+      this.listeners.set(type, listener);
+    }
+
+    emit(type, state) {
+      this.listeners.get(type)?.({ data: JSON.stringify(state) });
+    }
+
+    close() {
+      this.closed = true;
+    }
+  }
+
+  const initial = createInitialMockState(1_000);
+  const updated = { ...initial, setup: { ...initial.setup, message: "named SSE update" } };
+  const received = [];
+  const normalizedInitial = normalizeServerSnapshot(initial);
+  const transport = createHttpTransport({
+    baseUrl: "http://laptop.test",
+    eventSourceFactory: FakeEventSource,
+    fetchImpl: async (url) => {
+      assert.equal(url, "http://laptop.test/api/state");
+      return { ok: true, async json() { return initial; } };
+    },
+  });
+
+  const cleanup = await transport.connect((state) => received.push(state));
+  assert.equal(FakeEventSource.instance.url, "http://laptop.test/api/events");
+  assert.equal(received.length, 1);
+  assert.equal(received[0].setup.message, normalizedInitial.setup.message);
+  FakeEventSource.instance.emit("state", updated);
+  assert.equal(received.length, 2);
+  assert.equal(received[1].setup.message, "named SSE update");
+  cleanup();
+  assert.equal(FakeEventSource.instance.closed, true);
 });

@@ -1,22 +1,18 @@
 # FILE: `/pi/README.md`
 
-# Laptop server and possible future Raspberry Pi / QNX system
+# Raspberry Pi / QNX System
 
-The current v1 server runs, is tested, and is deployed on the captain's laptop.
-It receives the host badge's USB serial stream and serves the local browser UI.
-QNX is only a possible future server target; the current path does not require
-or claim Raspberry Pi or QNX deployment validation.
+All Raspberry Pis run QNX.
 
-The current laptop server slice owns:
+The current Pi layer owns authoritative game-state execution and host-badge/UI
+transport. Laptop-first room-photo processing and AI layout review belong to
+root `server/` and `ui/`; QNX/on-device setup inference is future-only. The
+local web/serial boundary is documented in
+[`../server/README.md`](../server/README.md).
 
-* setup-photo upload and provider adaptation
-* authoritative game-state execution
-* host-badge and UI transport, with the local web/serial boundary documented in
-  [`server/README.md`](server/README.md)
-
-The current v1 setup accepts still photographs from an Apple phone. Pi-hosted
-inference, workers, and multi-camera responsibilities below remain possible
-future seams, not the current deployment or current player-location tracking.
+The current v1 deployment uses one Raspberry Pi and an Apple phone camera.
+The worker and multi-camera responsibilities below remain implementation seams
+for future expansion, not current v1 player-location tracking.
 
 No AI inference required for gameplay should depend on the cloud.
 
@@ -24,40 +20,49 @@ No AI inference required for gameplay should depend on the cloud.
 
 ## Roles
 
-### Possible future master Pi/QNX adapter
+### Master Pi
 
 `pi/master/`
 
-Would own:
+Owns:
 
 * authoritative game state
 * USB gateway-badge serial input
-* phone-camera setup inference
+* consumption of approved setup layouts
 * station-zone evaluation
 * orders
-* authoritative round, cooking, and order timers (the host badge initiates the
-  physical lifecycle and displays its local countdown)
+* cooking and order timers (the host badge owns the four-minute round lifecycle)
 * scoring
 * health monitoring
 * UI API
 
-### Pi server slice
+### Root server slice
 
-`pi/server/`
+`server/`
 
-The server slice is the laptop-hosted HTTP/SSE and USB-serial boundary for the
-current launch. It owns protocol adaptation, browser projections, photo
-upload/review plumbing, and the functional local game simulator; it does not
-replace the portable master engine as the future authoritative-engine seam.
-QNX is only a possible future deployment target for this server. Its routes,
-serial setup, provider boundary, and validation limits are documented in
-[`server/README.md`](server/README.md).
+The current laptop-first server slice is the locally runnable HTTP/SSE,
+USB-serial, photo, and AI-layout boundary. It is not a QNX deployment. It owns
+protocol adaptation, browser projections, audit persistence, and deterministic
+workstation fixtures; it does not replace the master engine as the
+authoritative game-state owner. Its routes, schema, serial setup, provider
+boundary, and validation limits are documented in
+[`../server/README.md`](../server/README.md).
+
+### Future QNX difficulty sidecar
+
+A difficulty director may later run beside the QNX master. It may observe
+canonical snapshots and return bounded recommendations through an explicit
+adapter. The master validates and applies any accepted recommendation. The
+sidecar must not mutate state directly, duplicate order/timer/scoring rules,
+host HTTP/photo/layout routes, or claim authority. No such sidecar is currently
+implemented or validated.
 
 ### Worker Pi
 
 `pi/slave/`
 
-The same worker software can be deployed to future additional camera Pis.
+The same worker software can be deployed to future additional camera Pis;
+this is a future QNX boundary, not the current laptop room-layout path.
 
 When enabled, each worker owns:
 
@@ -258,10 +263,293 @@ Initial target:
 
 Reliability and consistency are more important than 30/60 FPS.
 
+# FILE: `/pi/master/README.md`
+
+# Master Pi
+
+## Role
+
+The master Pi is the single authoritative controller for the game.
+
+It runs QNX and is responsible for combining:
+
+```text
+badge intent
++
+camera observations
++
+game rules
+=
+authoritative state transition
+```
+
+No other component may directly decide final game state.
+
 ---
 
-## Portable master engine
+## Inputs
 
-The implemented portable engine and its possible future Pi/QNX adapter are
-owned by [`master/README.md`](master/README.md). Worker implementation and
-validation details are owned by [`slave/README.md`](slave/README.md).
+### 1. Gateway badge over USB serial
+
+Expected embedded marker:
+
+```text
+HTN26|RX|<sender_mac>|<rssi>|<payload>
+```
+
+The serial parser must tolerate surrounding firmware/logging text and locate the `HTN26|` marker.
+
+### 2. Local camera
+
+The master Pi should run the same basic camera/AI pipeline as worker Pis.
+
+### 3. Worker Pi observations
+
+Receive world-space observations and heartbeat information from Pi 2 and Pi 3.
+
+### 4. UI/operator commands
+
+Examples:
+
+* start game
+* stop game
+* reset game
+* assign badge MAC to player
+* load calibration
+* load recipe set
+
+Operator commands are never allowed to bypass invariants accidentally.
+
+---
+
+## Core state
+
+Maintain explicit structures for:
+
+### Player
+
+```text
+id
+badge_mac
+position
+position_confidence
+position_timestamp
+current_zone
+held_item
+action_state
+```
+
+### Station
+
+```text
+id
+type
+zone
+contents
+processing_state
+processing_deadline
+```
+
+### Order
+
+```text
+id
+recipe
+created_at
+deadline
+state
+score_value
+```
+
+### System
+
+```text
+game_state
+score
+remaining_time
+camera_health
+gateway_health
+```
+
+---
+
+## Badge event ingestion
+
+For every badge event:
+
+1. parse sender MAC
+2. parse protocol/version
+3. validate fields
+4. deduplicate `(MAC, sequence)`
+5. map MAC to player
+6. create an internal intent event
+7. evaluate game rules
+8. update state at most once
+9. publish resulting state to UI
+
+Never allow malformed packets to crash the process.
+
+---
+
+## Deduplication
+
+Player badges may deliberately retransmit an important event.
+
+Therefore:
+
+```text
+AA:BB:... + sequence 42
+```
+
+must be accepted once.
+
+Subsequent copies are ignored.
+
+Maintain a bounded deduplication structure rather than an ever-growing set.
+
+---
+
+## Spatial validation
+
+Location-sensitive actions require recent camera information.
+
+Example:
+
+```text
+event:
+Player 2 -> STN:CHOP1
+
+required:
+Player 2 physically inside CHOP1 zone
+
+tracking:
+last update < stale threshold
+confidence >= threshold
+
+result:
+accept or reject
+```
+
+Never infer that scanning a station means the camera says the player is there.
+
+NFC intent and camera location are independent evidence.
+
+---
+
+## Multi-camera fusion
+
+Each camera can report the same player.
+
+The master must combine observations based on:
+
+* freshness
+* confidence
+* configured camera quality/coverage
+* physical plausibility
+
+Start simple.
+
+A weighted average or choose-best-fresh-observation strategy is acceptable for the MVP.
+
+Do not implement a complicated distributed tracking algorithm before the simple version works.
+
+---
+
+## Game-state processing
+
+Game rules should be deterministic.
+
+Given the same ordered sequence of validated events and timer expirations, the engine should produce the same result.
+
+Separate:
+
+* input parsing
+* spatial validation
+* game rules
+* timers
+* state publishing
+
+Do not bury game rules inside camera code.
+
+---
+
+## Timers
+
+Cooking and order timers belong on the master Pi. The stationary host badge
+owns only the four-minute host round countdown and its START_GAME/GAME_END
+lifecycle records; the Pi must not invent a Pi-to-badge control path.
+
+Use a monotonic clock.
+
+Do not trust player badge clocks for authoritative timing.
+
+Examples:
+
+```text
+pot cooking completion
+order expiration
+round end
+station cooldown
+```
+
+---
+
+## Health monitoring
+
+Track:
+
+```text
+gateway badge
+camera 1
+worker Pi 2
+worker Pi 3
+UI clients
+```
+
+Expose health to the UI.
+
+Example:
+
+```text
+Gateway    HEALTHY
+Camera 1   HEALTHY
+Pi 2       FAILED
+Pi 3       HEALTHY
+
+Tracking coverage: DEGRADED
+```
+
+---
+
+## Failure injection demo
+
+The system should support a hackathon demonstration where a worker process/node is intentionally stopped.
+
+Expected result:
+
+1. heartbeat disappears
+2. master marks worker stale
+3. UI visibly reports degraded coverage
+4. stale observations stop influencing game state
+5. remaining system continues running
+
+This is an important part of the QNX/reliability story.
+
+---
+
+## Non-goals
+
+Do not initially implement:
+
+* cloud synchronization
+* facial recognition
+* voice control
+* complex physics
+* distributed consensus between Pis
+* master-Pi failover
+* direct Pi-to-player-badge commands
+
+## Worker implementation
+
+The worker's implementation details, host demo inputs, adapter seams, and
+validation scope are maintained in [`pi/slave/README.md`](slave/README.md).

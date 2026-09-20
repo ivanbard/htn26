@@ -157,7 +157,7 @@ function activeOrders(snapshot) {
  * display contract consumed by the browser.
  */
 export function normalizeServerSnapshot(snapshot) {
-  if (!snapshot || snapshot.source !== "pi-server") return snapshot;
+  if (!snapshot || !["pi-server", "root-server", "pi-server-simulator", "root-server-simulator"].includes(snapshot.source)) return snapshot;
   const sourcePlan = snapshot.floorPlan || {};
   const dimensions = sourceDimensions(sourcePlan);
   const normalized = isNormalizedPlan(sourcePlan);

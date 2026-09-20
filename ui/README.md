@@ -1,11 +1,6 @@
 # Burger Level UI
 
-This directory contains a separate local, offline-first HTN26 spectator and host
-UI prototype. Its browser surface is a React application styled with Tailwind
-CSS; the only runtime assets are files in this directory, and it makes no
-internet requests. The current v1 simulator instead serves its required plain,
-no-CSS page directly from `pi/server`; see
-[`../pi/server/README.md`](../pi/server/README.md).
+This directory contains the local, offline-first HTN26 spectator and host UI MVP. The browser surface is a React application styled with Tailwind CSS; the only runtime assets are files in this directory, and it makes no internet requests. The current/latest companion development server is the root [`server/`](../server/) surface; keep browser integration pointed at that server rather than creating another server under `pi/`.
 
 ## Run locally
 
@@ -19,8 +14,8 @@ npm run dev
 
 `npm run build` creates the production bundle in `dist/`.
 
-Open <http://127.0.0.1:4173>. The development page uses its mock authoritative
-transport. Try the prototype host flow:
+Open <http://127.0.0.1:4173>. The default page uses the mock transport and
+needs no provider key. Its executable offline flow is:
 
 1. `Start` host mode.
 2. `Scan Room` to show the proposed floor plan.
@@ -28,17 +23,23 @@ transport. Try the prototype host flow:
 4. Place the cheese, lettuce, meat, and bun sources, the chopping boards, stoves, and serving badge as shown.
 5. `Start Game` for a four-minute round.
 
+For the active camera flow, start the root server with `OPENAI_API_KEY` and
+open `http://127.0.0.1:4173/?transport=http`. The scan step becomes a 3-5-photo
+picker; the browser preprocesses all photos and sends one multipart generation
+request. The mock has no `generateLayout` capability, so it intentionally keeps
+the `Scan Room` command instead of showing a broken generation control.
+
 The mock also supports delivery fixtures for tests (`DELIVERY_SUCCESS` and `DELIVERY_FAILURE`). The UI renders the serving result and score supplied by the transport; it does not create a delivery result itself.
 
-## Prototype flow
+## Product flow
 
-The transport remains authoritative. This prototype mirrors the following
-fixture flow; it is not the current laptop simulator's run path:
+The master Pi remains authoritative. The UI mirrors this flow:
 
 ```text
 host Start
-  -> camera room scan
-  -> proposed floor plan
+  -> choose 3-5 classroom photos
+  -> one laptop-server AI generation request
+  -> complete proposed room layout
   -> host approves floor plan
   -> burger level placement instructions
   -> four-minute burger round
@@ -56,12 +57,13 @@ A burger uses buns, meat, cheese, and lettuce. Cheese, lettuce, and meat can be 
 {
   connect(onState) -> cleanup | Promise<cleanup>,
   command(action) -> Promise<state>,
+  generateLayout(files) -> Promise<state>, // optional capability
   close() // optional
 }
 ```
 
-- `src/mock-transport.js` is the required offline development transport. It owns a fixture state and applies host commands as a stand-in for an authoritative server.
-- `src/transport.js` includes a local HTTP/SSE transport for integration with an authoritative server. It expects `GET /api/state`, `POST /api/command`, and `GET /api/events`; those endpoints remain outside this UI task.
+- `src/mock-transport.js` is the required offline development transport. It owns a fixture state and applies host commands as a stand-in for the master Pi; it deliberately does not advertise `generateLayout`.
+- `src/transport.js` includes the laptop-server HTTP/SSE transport. It expects `GET /api/state`, `POST /api/command`, `GET /api/events`, and `POST /api/layout/generate` from root `server/`.
 - Use `http://127.0.0.1:4173/?transport=http` to select the HTTP seam. A supplied `window.__HTN26_TRANSPORT__` takes precedence for integration tests.
 - `src/App.js` contains the React component tree for the staged setup flow, framed room board, order HUD, player/station overlays, and live notifications.
 - `src/render.js` renders the same React tree to static markup for contract tests. It does not create timers, move players, score deliveries, or infer station/order state.
@@ -70,17 +72,46 @@ A burger uses buns, meat, cheese, and lettuce. Cheese, lettuce, and meat can be 
 
 The renderer uses three display modes so setup controls do not compete with the live game display:
 
-- `setup`: host controls, the room mirror, and physical burger-level placement instructions.
-- `gameplay`: one framed room board with up to four active orders across the top, the score at bottom-left, the round clock at bottom-right, live tracked players, and compact activity notifications. Operator health chrome is intentionally excluded from the player-facing HUD.
+- `setup`: host controls, the room mirror, and physical burger-level placement instructions. An AI `proposedRoomLayout` is rendered as the complete unaccepted review surface; `roomLayout` is rendered after explicit approval.
+- `gameplay`: one framed room board with up to four active orders across the top, the score at bottom-left, the round clock at bottom-right, and player/station/status overlays from the snapshot. Operator health chrome is intentionally excluded from the player-facing HUD.
 - `results`: the completed round, score, serving result, and final room mirror.
 
-The frontend snapshot boundary is defined in `src/contracts.js` (version 2). Optional `orders` may retain completed history but must contain no more than four active objects, all with unique, non-empty IDs; snapshots without it continue to render the required legacy `order`. `floorPlan.coordinateSpace` must be `normalized-percent`; its `width` and `height` are positive finite values, and wall/station `x`, `y`, `width`, and `height` values are normalized to the 0–100 range. Present player positions use the same 0–100 coordinate space; a missing position is allowed so the UI can explicitly show tracking lost. A future camera-enabled adapter would be responsible for projecting room-camera coordinates into this display space before sending a snapshot. Invalid snapshots render an error state instead of partially rendering authoritative data.
+The frontend snapshot boundary is defined in `src/contracts.js`. `version: 2`
+is the stable schema version; it is independent of the monotonic `revision`
+used to order full HTTP/SSE snapshots. The canonical snapshot contains
+`setup`, `floorPlan`, `burgerLevel`, `players`, `order`, `stations`, `score`,
+`clock`, `serving`, and `health`. Root server snapshots also carry
+`proposedRoomLayout`, approved `roomLayout`, `timer`, `orders`,
+`activeOrders`, `submissions`, `gold`, and `tips`.
+
+`setup.phase` follows `idle` -> `scanning` -> `layout-proposed` ->
+`burger-placement` -> `running` -> `ended`, with reset returning to `idle`.
+`proposedRoomLayout` is review-only; approval moves it to `roomLayout` and sets
+`floorPlan.accepted`. `START_GAME` remains unavailable before that transition.
+
+Optional `orders` may retain completed history but contain no more than four
+active objects with unique IDs. Cards expose server-supplied remaining time and
+patience; `order` is the legacy first-active alias. `timer` and `clock` are
+authoritative aliases and are never decremented in the browser. Submission,
+serving, score, gold, and tip fields are displayed without local validation or
+reward calculation.
+
+`floorPlan.coordinateSpace` is `normalized-percent`; dimensions are positive
+and wall/station rectangles fit the 0-100 range. AI room-layout rectangles use
+their separate 0..1 center/size/rotation contract and are rendered completely
+before and after approval, with optional debug IDs. Each player may supply a
+0-100 `position`, `heldItem`, `actionState`, inventory, and tracking status. A
+fixture may retain `simulatedLocation`, but an adapter must project it into
+`position`; the UI does not treat it as camera evidence. Missing `position`
+shows tracking unavailable rather than inventing a location.
+Gateway, inference, and worker health remain integration data, not gameplay
+authority. Invalid snapshots render an error state instead of partial data.
 
 Authoritative values stay explicit:
 
 - `floorPlan.accepted`, `floorPlan.stations`, and `burgerLevel.placementInstructions` describe the accepted map and where the physical burger level belongs.
-- `players[].position` and `players[].tracking.lastSeenAt` are optional transport observations for this prototype. The current v1 laptop simulator does not supply camera-tracked player positions. Missing players are rendered at no fabricated location; stale health remains available through accessible labels without adding large warning boxes to the game board. Player tokens never animate between snapshots.
-- `orders[].remainingSeconds`, `order.remainingSeconds`, `clock.remainingSeconds`, station `progress`, and cooking state are displayed values from the authoritative snapshot. The UI never decrements them locally.
+- `players[].position` and `players[].tracking.lastSeenAt` are transport observations. The current phone photos are setup-only and do not provide live positions. Missing players are rendered at no fabricated location; stale health remains available through accessible labels. Player tokens never animate between snapshots.
+- `orders[].remainingSeconds`, `order.remainingSeconds`, `clock.remainingSeconds`, station `progress`, and cooking state are displayed values from the master snapshot. The UI never decrements them locally.
 - `health.gateway`, `health.workers`, and `health.inference` remain available to the host integration, but system-health warnings are intentionally excluded from the player-facing gameplay HUD.
 - `stations[].item`, `stations[].status`, and `stations[].remainingSeconds` are rendered directly on their physical boards or plates. Empty stations explicitly show `EMPTY`; the player-facing screen has no separate live-activity feed.
 - `serving.lastEvent` remains available to results/integration surfaces, while `score` is rendered exactly as delivered by the transport.

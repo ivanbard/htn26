@@ -118,7 +118,7 @@ function stagesForLayout(layoutFromImage) {
   ];
 }
 
-function StageTracker({ state, onCommand }) {
+function StageTracker({ state, onCommand, hideScanAction = false }) {
   const current = stageIndex(state.setup?.phase);
   const stages = stagesForLayout(state.floorPlan?.layoutFromImage === true);
   return h("ol", { className: "setup-stages", "aria-label": "Game setup stages" }, stages.map((stage, index) => {
@@ -133,13 +133,14 @@ function StageTracker({ state, onCommand }) {
           h("span", null, stage.description),
         ),
       ),
-      stage.action && (active || canRunAction(state, stage.action)) && h(ActionButton, { state, action: stage.action, label: stage.label, onCommand, compact: true }),
+      stage.action && !(hideScanAction && stage.action === GAME_ACTIONS.SCAN_ROOM) && (active || canRunAction(state, stage.action)) && h(ActionButton, { state, action: stage.action, label: stage.label, onCommand, compact: true }),
     );
   }));
 }
 
-function HostPanel({ state, onCommand }) {
+function HostPanel({ state, onCommand, onGenerateLayout }) {
   const phase = state.setup?.phase;
+  const [photoFiles, setPhotoFiles] = React.useState([]);
   const stages = stagesForLayout(state.floorPlan?.layoutFromImage === true);
   return h("section", { className: "setup-card setup-progress", "aria-labelledby": "host-title" },
     h("div", { className: "setup-progress-heading" },
@@ -153,7 +154,14 @@ function HostPanel({ state, onCommand }) {
         h(ActionButton, { state, action: GAME_ACTIONS.RESET_GAME, label: "Reset", onCommand, compact: true }),
       ),
     ),
-    h(StageTracker, { state, onCommand }),
+    h(StageTracker, { state, onCommand, hideScanAction: Boolean(onGenerateLayout) }),
+    onGenerateLayout && h("div", { className: "layout-photo-controls", "data-layout-photo-controls": true },
+      h("label", { className: "setup-photo-label" }, "Classroom photos (3-5)", h("input", {
+        type: "file", accept: "image/jpeg,image/png,image/webp,image/heic", multiple: true,
+        onChange: (event) => setPhotoFiles(Array.from(event.target.files || []).slice(0, 5)),
+      })),
+      h("button", { type: "button", className: "game-action-button game-action-button-compact", disabled: photoFiles.length < 3 || photoFiles.length > 5, onClick: () => onGenerateLayout(photoFiles) }, photoFiles.length ? `Generate AI layout (${photoFiles.length})` : "Choose 3-5 photos"),
+    ),
   );
 }
 
@@ -379,10 +387,35 @@ function AnimatedPlayer({ player, position, walls, stale, plannedPath, delayMs =
   ));
 }
 
+function layoutRect(rect, className, debug, label) {
+  const center = rect?.center || { x: 0.5, y: 0.5 };
+  const width = Number(rect?.width) || 0;
+  const height = Number(rect?.height) || 0;
+  const x = center.x - width / 2;
+  const y = center.y - height / 2;
+  const rotation = Number(rect?.rotationDeg) || 0;
+  return h(React.Fragment, { key: `${className}-${label || "rect"}` },
+    h("rect", { className, x, y, width, height, rx: 0.008, transform: `rotate(${rotation} ${center.x} ${center.y})` }),
+    debug && h("text", { x: center.x, y: center.y, className: "room-layout-debug-label", textAnchor: "middle", dominantBaseline: "middle" }, label),
+  );
+}
+
+function RoomLayoutSurface({ layout, debug = false, proposed = false }) {
+  return h("svg", { className: "room-layout-svg", viewBox: "0 0 1 1", preserveAspectRatio: "xMidYMid meet", role: "img", "aria-label": `${proposed ? "Proposed" : "Active"} AI-generated normalized room layout` },
+    h("rect", { className: "room-layout-background", x: 0, y: 0, width: 1, height: 1 }),
+    layoutRect(layout.playArea, "room-layout-play-area", debug, "play area"),
+    layoutRect(layout.presentationArea, "room-layout-presentation", debug, "presentation area"),
+    ...(layout.objects || []).map((object) => layoutRect(object, "room-layout-object", debug, object.id)),
+    ...(layout.stations || []).map((station) => layoutRect(station, `room-layout-station station-${station.type}`, debug, station.type)),
+  );
+}
+
 function RoomSurface({ state, now, gameplay = false }) {
   const plan = state.floorPlan || {};
   const accepted = plan.accepted === true;
   const layoutFromImage = plan.layoutFromImage === true;
+  const layout = accepted ? state.roomLayout : state.proposedRoomLayout;
+  const layoutSurface = layout && h("div", { className: "absolute inset-0 z-0", "data-layout-state": accepted ? "active" : "proposed" }, h(RoomLayoutSurface, { layout, debug: state.roomLayoutDebug === true }));
   const runtimeStations = new Map((state.stations || []).map((station) => [station.id, station]));
   const movementWalls = [
     ...(plan.walls || []),
@@ -452,7 +485,7 @@ function RoomSurface({ state, now, gameplay = false }) {
     "data-grid-rows": plan.grid?.rows,
     role: "img",
     "aria-label": `${accepted ? "Accepted burger" : "Proposed room"} top-down kitchen with scan-animated players`,
-  }, !layoutFromImage && h("div", { className: "kitchen-floor", "aria-hidden": true }), !gameplay && h("div", { className: "room-plan-grid", "aria-hidden": true }), walls, stations, players,
+  }, layoutSurface, !layoutFromImage && h("div", { className: "kitchen-floor", "aria-hidden": true }), !gameplay && h("div", { className: "room-plan-grid", "aria-hidden": true }), walls, stations, players,
   !accepted && h("div", { className: "room-approval-overlay" }, "Approve floor plan to generate burger level"));
 }
 
@@ -618,7 +651,7 @@ const DELIVERY_TOAST_LIFETIME_MS = 3200;
 // behavior"): a correct plate reports gold plus a tip that scales with how
 // much patience was left (the order's 3-segment meter — see
 // mock-transport.js's orderTip()/patience.filledSegments, ported from
-// pi/server's projection.mjs), or a wrong plate applies a penalty. This is
+// server's projection.mjs), or a wrong plate applies a penalty. This is
 // the live, in-round version of that result; ServingPanel (ResultsView)
 // still shows the final round's last event after the round ends.
 function DeliveryToast({ state, now }) {
@@ -660,14 +693,14 @@ function GameplayBoard({ state, now }) {
   );
 }
 
-function SetupView({ state, now, onCommand, transportKind, onUploadPhotos, uploadStatus }) {
+function SetupView({ state, now, onCommand, transportKind, onUploadPhotos, uploadStatus, onGenerateLayout }) {
   const accepted = state.floorPlan?.accepted === true;
   // The room map already draws every station at its approved position with
   // its own label (see RoomSurface), so a separate "Kitchen pieces" checklist
   // next to it was just restating the same nine labels as a plain text list —
   // dropped in favor of letting the map be the single placement reference.
   return h("div", { className: "setup-flow" },
-    h(HostPanel, { state, onCommand }),
+    h(HostPanel, { state, onCommand, onGenerateLayout }),
     h("div", { className: "setup-workspace" },
       h("section", { className: "setup-card map-card", "aria-labelledby": "map-title" }, h("div", { className: "map-heading" }, h("div", null, h("p", { className: "setup-kicker" }, accepted ? "Layout ready" : "Room preview"), h("h2", { id: "map-title" }, accepted ? "Your burger kitchen" : "Check the play area")), h("span", { className: cx("map-state", accepted && "is-ready") }, accepted ? "Ready to place" : "Needs approval")), h("p", null, accepted ? "Match each printed ingredient and station to its labelled spot on the map below. Keep chopping boards and stoves still once the round begins." : "Approve the layout to see where every station belongs."), transportKind === "http" && h("div", { className: "server-photo-upload" }, h("label", { htmlFor: "room-photo-input" }, "Upload 3–4 room photos to the master Pi"), h("input", { id: "room-photo-input", type: "file", accept: "image/jpeg,image/png", multiple: true, onChange: (event) => onUploadPhotos?.(event.target.files) }), uploadStatus && h("span", { role: "status" }, uploadStatus)), h("div", { className: "map-frame" }, h(RoomStage, { state, now }))),
     ),
@@ -713,12 +746,12 @@ function ResultsView({ state, now, onCommand }) {
   return h(React.Fragment, null, h("section", { className: "flex flex-col justify-between gap-4 border border-[#ffd166] bg-[#2a2415] p-5 md:flex-row md:items-center" }, h("div", null, h("p", { className: "mb-1 text-xs font-black uppercase tracking-[0.16em] text-[#ffd166]" }, "Round complete"), h("h2", { className: "text-2xl font-black text-white" }, phaseLabel(state.setup?.phase)), h("p", { className: "mt-1 text-sm text-[#a9bac9]" }, state.setup?.message)), h(ActionButton, { state, action: GAME_ACTIONS.RESET_GAME, label: "Reset game", onCommand })), h("div", { className: "mt-5 grid gap-5 xl:grid-cols-[minmax(0,1.55fr)_minmax(320px,.85fr)]" }, h("section", { className: "border border-[#2a435a] bg-[#101c29] p-5" }, h("div", { className: "mb-4 flex items-center justify-between" }, h("h2", { className: "text-xl font-black text-white" }, "Room mirror"), h(StatusBadge, { status: "healthy", label: "Final layout" })), h("div", { className: "aspect-[1672/941] overflow-hidden border border-[#45647d]" }, h(RoomSurface, { state, now }))), h(ServingPanel, { state })));
 }
 
-export function App({ state, now = Date.now(), connectionError = "", uploadStatus = "", transportKind, onCommand, onUploadPhotos }) {
+export function App({ state, now = Date.now(), connectionError = "", uploadStatus = "", transportKind, onCommand, onUploadPhotos, onGenerateLayout }) {
   if (!state) return h("section", { className: "mx-auto mt-24 max-w-2xl border border-[#2a435a] bg-[#101c29] p-8 text-center" }, h("p", { className: "text-xs font-black uppercase tracking-[0.16em] text-[#a9bac9]" }, "Burger level"), h("h1", { className: "mt-2 text-3xl font-black text-white" }, "Waiting for authoritative state…"), connectionError && h("div", { id: "ui-error", className: "ui-error", role: "alert" }, connectionError));
   const validation = validateFrontendSnapshot(state);
   if (!validation.valid) return h("section", { className: "mx-auto mt-24 max-w-3xl border border-[#ff6f6f] bg-[#2c1820] p-8", role: "alert" }, h("p", { className: "text-xs font-black uppercase tracking-[0.16em] text-[#ff6f6f]" }, "Burger level"), h("h1", { className: "mt-2 text-3xl font-black text-white" }, "Authoritative state unavailable"), h("p", { className: "mt-3 text-[#a9bac9]" }, "The received snapshot does not match the frontend contract. No game values were rendered."), h("p", { className: "mt-3 text-white" }, validation.errors.map((error) => error.message).join(" ")));
   const mode = displayModeForPhase(state.setup?.phase);
-  const content = mode === UI_DISPLAY_MODES.GAMEPLAY ? h(GameplayView, { state, now, onCommand }) : mode === UI_DISPLAY_MODES.RESULTS ? h(ResultsView, { state, now, onCommand }) : h(SetupView, { state, now, onCommand, transportKind, onUploadPhotos, uploadStatus });
+  const content = mode === UI_DISPLAY_MODES.GAMEPLAY ? h(GameplayView, { state, now, onCommand }) : mode === UI_DISPLAY_MODES.RESULTS ? h(ResultsView, { state, now, onCommand }) : h(SetupView, { state, now, onCommand, transportKind, onUploadPhotos, uploadStatus, onGenerateLayout });
   const gameplay = mode === UI_DISPLAY_MODES.GAMEPLAY;
   const setupMode = mode === UI_DISPLAY_MODES.SETUP;
   return h("div", { className: cx("app-shell", gameplay && "is-gameplay", setupMode && "is-setup"), "data-display-mode": mode },

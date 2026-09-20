@@ -12,7 +12,6 @@ export function createApp({ root, transport, now = () => Date.now() }) {
   let destroyed = false;
   let unsubscribe;
   let connectionError = "";
-  let uploadStatus = "";
   const reactRoot = typeof root.nodeType === "number" ? createRoot(root) : null;
 
   const render = (nextState) => {
@@ -22,13 +21,11 @@ export function createApp({ root, transport, now = () => Date.now() }) {
       state,
       now: now(),
       connectionError,
-      uploadStatus,
-      transportKind: transport.kind,
       onCommand,
-      onUploadPhotos,
+      onGenerateLayout: typeof transport.generateLayout === "function" ? onGenerateLayout : undefined,
     };
     if (reactRoot) reactRoot.render(React.createElement(App, props));
-    else root.innerHTML = renderApp(state, props.now, connectionError);
+    else root.innerHTML = renderApp(state, props.now, connectionError, props);
   };
 
   const onCommand = async (command) => {
@@ -44,19 +41,17 @@ export function createApp({ root, transport, now = () => Date.now() }) {
     }
   };
 
-  const onUploadPhotos = async (files) => {
-    if (typeof transport.uploadPhotos !== "function") return;
+  const onGenerateLayout = async (files) => {
     connectionError = "";
-    uploadStatus = "Uploading room photos to the master Pi…";
-    render(state);
+    const stateAtCommandStart = state;
     try {
-      const result = await transport.uploadPhotos(files);
-      uploadStatus = `${result.count || 0}/4 room photos on the master Pi${result.reviewReady ? " — ready to scan" : " — add at least 3"}.`;
+      const nextState = await transport.generateLayout(files);
+      if (state !== stateAtCommandStart) return;
+      render(nextState);
     } catch (error) {
-      uploadStatus = "";
-      connectionError = `PHOTO UPLOAD FAILED — ${error.message}`;
+      connectionError = "ROOM LAYOUT UNAVAILABLE — Try again with 3-5 classroom photos.";
+      render(state);
     }
-    render(state);
   };
 
   const onFallbackClick = async (event) => {
@@ -76,7 +71,7 @@ export function createApp({ root, transport, now = () => Date.now() }) {
     }
     unsubscribe = resolvedCleanup;
   }).catch((error) => {
-    connectionError = `MASTER PI UNAVAILABLE — ${error.message}`;
+    connectionError = `LAPTOP SERVER UNAVAILABLE — ${error.message}`;
     render(state);
   });
 
