@@ -50,7 +50,14 @@ fresh per-device backup, read-only security inspection, factory-only write and
 readback, and an explicit factory-only rollback. Never erase the device, write
 other partitions, alter security configuration, or change eFuses.
 
-Do not mix native and Lua badges. Their OC1 application bytes agree, but Lua's
+Before flashing the native candidate, push the current `badge/master/` rollback
+app to the host and the current `badge/slave/` rollback app to all three players.
+Those checked-in apps use the same OC2 application contract as the candidate
+and remain in LittleFS across the factory-only write. The laptop parser
+intentionally rejects OC1, so do not flash over badges whose retained rollback
+apps have not been refreshed and verified as the matching whole-fleet set.
+
+Do not mix native and Lua badges. Their OC2 application bytes agree, but Lua's
 restricted radio API uses a private `LUA1` carrier wrapper and native mode uses
 the recovered HAL directly. The `badge/master/` and `badge/slave/` Lua apps are
 retained as a whole-fleet rollback for restored stock factory firmware.

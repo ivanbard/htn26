@@ -204,7 +204,7 @@ def scenario(nvs_error=0, radio_error=0, nfc_error=0, allocation_failure=False,
     def acknowledge(expected):
         packet = packets[-1]
         assert packet.endswith(b':' + expected.encode()), packet
-        incoming(b'OC1|' + packet[4:10] + b'|A|OK'); invoke(0x5c)
+        incoming(b'OC2|' + packet[4:10] + b'|A|OK'); invoke(0x5c)
 
     def assert_icon(expected):
         actual = None if display["hidden"] else display["icon"]
@@ -258,25 +258,25 @@ def scenario(nvs_error=0, radio_error=0, nfc_error=0, allocation_failure=False,
         else:
             assert "HTN26|GW|UP|0|0\n" in prints
             invoke(0x60, 8)
-            assert packets[-1] == b'OC1|000001|G|S'
+            assert packets[-1] == b'OC2|000001|G|S'
             assert "HTN26|GAME|START_GAME|240|3\n" in prints
             game_ticks, = struct.unpack('<I', cpu.mem_read(app + 288, 4))
             assert game_ticks == 12000
             forwarded = 'HTN26|RX|%02x:%02x:%02x:%02x:%02x:%02x|%d|%s\n'
-            incoming(b'OC1|876543|E|P2:ST:L:P'); invoke(0x5c)
-            assert packets[-1] == b'OC1|876543|A|OK'
+            incoming(b'OC2|876543|E|P2:ST:L:P'); invoke(0x5c)
+            assert packets[-1] == b'OC2|876543|A|OK'
             assert prints.count(forwarded) == 1
             sent = len(packets)
-            incoming(b'OC1|876543|E|P2:ST:L:P'); invoke(0x5c)
+            incoming(b'OC2|876543|E|P2:ST:L:P'); invoke(0x5c)
             assert len(packets) == sent and prints.count(forwarded) == 1
             for _ in range(100): invoke(0x5c)
-            incoming(b'OC1|876543|E|P2:ST:L:P'); invoke(0x5c)
+            incoming(b'OC2|876543|E|P2:ST:L:P'); invoke(0x5c)
             assert len(packets) == sent + 1 and prints.count(forwarded) == 1
             cpu.mem_write(app + 288, struct.pack('<I', 1)); invoke(0x5c)
-            assert packets[-1] == b'OC1|000002|G|E'
+            assert packets[-1] == b'OC2|000002|G|E'
             assert "HTN26|GAME|GAME_END|3\n" in prints
     elif not nvs_error and not radio_error:
-        incoming(b'OC1|000001|G|S'); invoke(0x5c)
+        incoming(b'OC2|000001|G|S'); invoke(0x5c)
         assert_icon(None)
         assert packets == []  # Only the gateway acknowledges; player peers never stop retries.
         invoke(0x60, 4)  # LEFT, packed press event; upper bits are ignored.
@@ -301,13 +301,13 @@ def scenario(nvs_error=0, radio_error=0, nfc_error=0, allocation_failure=False,
             assert hardware["nfc_text_calls"] == calls_after_scan, "held tag must not be reread"
             hardware["tag"] = None
         else:
-            incoming(b'OC1|876543|E|P3:READY'); invoke(0x5c)
-        assert packets == ([b'OC1|441741|E|P2:PU:Q'] if not nfc_error else []), packets
+            incoming(b'OC2|876543|E|P3:READY'); invoke(0x5c)
+        assert packets == ([b'OC2|441741|E|P2:PU:Q'] if not nfc_error else []), packets
         if send_error:
             assert 'RADIO SEND ERROR' in texts
         else:
-            for bad in (b'MEAT', b'OC1|441741|A|NO', b'OC1|44174x|A|OK',
-                        b'OC1|441741|E|P2:PU:Z'):
+            for bad in (b'MEAT', b'OC1|441741|E|P2:PU:Q', b'OC2|441741|A|NO',
+                        b'OC2|44174x|A|OK', b'OC2|441741|E|P2:PU:Z'):
                 incoming(bad); invoke(0x5c)
             if not nfc_error:
                 assert 'ACTION ACKNOWLEDGED' not in texts
@@ -380,8 +380,8 @@ def scenario(nvs_error=0, radio_error=0, nfc_error=0, allocation_failure=False,
 
                 for _ in range(25): invoke(0x5c)
                 cpu.mem_write(app + 228, b'\x01')
-                incoming(b'OC1|333331|E|P1:READY'); invoke(0x5c)
-                incoming(b'OC1|333333|E|P3:READY'); invoke(0x5c)
+                incoming(b'OC2|333331|E|P1:READY'); invoke(0x5c)
+                incoming(b'OC2|333333|E|P3:READY'); invoke(0x5c)
                 hardware["motion"] = "shake"; invoke(0x5c); hardware["motion"] = "rest"
                 assert cpu.mem_read(app + 228, 1) == b'\0'
                 assert_icon(None)
@@ -405,39 +405,39 @@ def scenario(nvs_error=0, radio_error=0, nfc_error=0, allocation_failure=False,
 
                 # A peer plate receives our cooked meat; the local hand is now empty.
                 before = len(packets)
-                incoming(b'OC1|222220|E|P1:X:P----'); invoke(0x5c)
+                incoming(b'OC2|222220|E|P1:X:P----'); invoke(0x5c)
                 assert len(packets) == before
                 assert_icon(None)
 
-                incoming(b'OC1|222223|E|P1:X:HD'); invoke(0x5c)
+                incoming(b'OC2|222223|E|P1:X:HD'); invoke(0x5c)
                 assert_icon('chopped_meat')
-                incoming(b'OC1|222224|E|P1:X:E----'); invoke(0x5c)
+                incoming(b'OC2|222224|E|P1:X:E----'); invoke(0x5c)
                 assert_icon(None)
 
                 # An invalid raw-item merge swaps inventories, removing our plate.
                 invoke(0x60, 3); scan('pantry'); acknowledge('PL:NEW')
                 assert_icon('plate')
-                incoming(b'OC1|222221|E|P1:X:HR'); invoke(0x5c)
+                incoming(b'OC2|222221|E|P1:X:HR'); invoke(0x5c)
                 assert_icon('raw_meat')
 
-                incoming(b'OC1|000002|G|E'); invoke(0x5c)
+                incoming(b'OC2|000002|G|E'); invoke(0x5c)
                 assert_icon(None)
-                incoming(b'OC1|000003|G|S'); invoke(0x5c)
+                incoming(b'OC2|000003|G|S'); invoke(0x5c)
                 assert_icon(None)
 
                 before = len(packets)
-                incoming(b'OC1|222222|E|P1:X:PB---'); invoke(0x5c)
+                incoming(b'OC2|222222|E|P1:X:PB---'); invoke(0x5c)
                 assert len(packets) == before  # A player applies peer state but never ACKs it.
                 assert cpu.mem_read(app + 229, 2) == b'\0\0'  # Empty hand cannot take a peer plate.
                 assert_icon(None)
 
-            incoming(b'OC1|765432|E|P1:PU:R'); invoke(0x5c)
+            incoming(b'OC2|765432|E|P1:PU:R'); invoke(0x5c)
             assert cpu.mem_read(app + 228, 1) == b'\0'  # Peer inventory never overwrites ours.
             count = len(packets)
-            incoming(b'OC1|876543|E|P1:ST:L:P'); invoke(0x5c)
-            incoming(b'OC1|876543|E|P1:ST:L:P'); invoke(0x5c)
+            incoming(b'OC2|876543|E|P1:ST:L:P'); invoke(0x5c)
+            incoming(b'OC2|876543|E|P1:ST:L:P'); invoke(0x5c)
             for _ in range(100): invoke(0x5c)
-            incoming(b'OC1|876543|E|P1:ST:L:P'); invoke(0x5c)
+            incoming(b'OC2|876543|E|P1:ST:L:P'); invoke(0x5c)
             assert len(packets) == count
             assert not any(line.startswith('HTN26|RX|') for line in prints)
             for _ in range(1000): invoke(0x5c)
@@ -452,7 +452,7 @@ def scenario(nvs_error=0, radio_error=0, nfc_error=0, allocation_failure=False,
                 invoke(0x60, 5); scan('fridge')
                 pending = packets[-1]
                 assert pending.endswith(b':PU:K')
-                incoming(b'OC1|000001|A|OK'); invoke(0x5c)
+                incoming(b'OC2|000001|A|OK'); invoke(0x5c)
                 before = len(texts); sent = len(packets)
                 for _ in range(451): invoke(0x5c)
                 assert packets[sent:] == [pending, pending]
@@ -466,7 +466,7 @@ def scenario(nvs_error=0, radio_error=0, nfc_error=0, allocation_failure=False,
     assert cpu.mem_read(app + 4, 24) == bytes(24)
     if handler:
         before = len(packets)
-        incoming(b'OC1|000001|E|P1:READY');invoke(0x5c)
+        incoming(b'OC2|000001|E|P1:READY');invoke(0x5c)
         assert len(packets) == before
 
 

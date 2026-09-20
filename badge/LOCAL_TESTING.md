@@ -65,8 +65,8 @@ current fixed player flow:
 | Path | Protocol/state owner | Verified scope |
 | --- | --- | --- |
 | Three-app MVP | Type-first OC1; Lua host owns plates and score | Complete raw-tomato slice through `GAME` logs |
-| PR player/gateway | Sequence-first OC1; gateway emits `HTN26` logs | NFC actions, forwarding, serving plate logs |
-| Pi engine | Sequence-first OC1; C++ owns tomato-soup state | Standalone core tests, timers, tracking, delivery, score |
+| PR player/gateway | Sequence-first OC2; gateway emits `HTN26` logs | NFC actions, forwarding, serving plate logs |
+| Pi engine | Sequence-first OC2; C++ owns tomato-soup state | Standalone core tests, timers, tracking, delivery, score |
 | UI | Snapshot/command transport; default fixture | Offline burger setup/rendering tests |
 
 The Pi core still needs the gateway `HTN26|PLATE|P:nn` path connected to physical

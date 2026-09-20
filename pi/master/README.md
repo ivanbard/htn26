@@ -29,7 +29,7 @@ The MVP implements one deterministic `TOMATO_SOUP` order:
 5. `N|STN:DELIVERY` delivers it and awards the score.
 
 The serial parser searches for `HTN26|` inside noisy lines, validates the MAC,
-RSSI, `OC1` payload, sequence, type, value, and payload length, then the engine
+RSSI, `OC2` payload, sequence, type, value, and payload length, then the engine
 maps the normalized MAC to a player. It retains the current fixed-player `E`
 event type at this transport boundary. The portable tomato-soup fixture does
 not claim to apply the burger action vocabulary (`P2:PU:R`, etc.); that semantic

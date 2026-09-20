@@ -77,12 +77,13 @@ this revision does not claim that cosmetic Lua simplification would fix either
 badge.
 
 The production/live deployment consequently uses the native Overcooked app on
-the host **and all three players**. Native packets carry the same
-`OC1|<sequence>|E|P<player>:<action>` application bytes and host lifecycle/
+the host **and all three players**. Native packets carry the same current
+`OC2|<sequence>|E|P<player>:<action>` application bytes and host lifecycle/
 serial records as the current Lua contracts, but use the recovered stock HAL
 directly. Lua `badge.radio` adds and filters a private `LUA1` carrier prefix, so
 a mixed native/Lua round is not supported. The Lua files remain installable as
-an explicit whole-fleet rollback; they are not deleted or silently replaced.
+an explicit whole-fleet rollback and must be refreshed to the matching OC2
+revision before native deployment; they are not deleted by the factory write.
 The historical measurements below are not evidence for later source revisions.
 Use `native/README.md` for the captain-reported hardware boundary and for the
 separate offline-only status of the generated-icon display revision.

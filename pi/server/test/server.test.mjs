@@ -90,10 +90,11 @@ test("fixture parser accepts noisy and chunk-framed gateway records", async () =
   assert.equal(records[1].intent.value, "START");
   assert.equal(records[2].intent.senderMac, MAC.replace("01", "02"));
   assert.equal(adapter.stats().malformed, 1);
-  const fixedPlayer = parseGatewayRxLine("debug HTN26|RX|AA:BB:CC:DD:EE:02|-46|OC1|000043|E|P2:PU:R");
+  const fixedPlayer = parseGatewayRxLine("debug HTN26|RX|AA:BB:CC:DD:EE:02|-46|OC2|000043|E|P2:PU:R");
   assert.equal(fixedPlayer.ok, true);
   assert.equal(fixedPlayer.intent.value, "P2:PU:R");
-  assert.equal(parseGatewayRxLine("debug HTN26|RX|bad|-1|OC1|1|H|START").ok, false);
+  assert.equal(parseGatewayRxLine("debug HTN26|RX|bad|-1|OC2|1|H|START").ok, false);
+  assert.equal(parseGatewayRxLine(`debug HTN26|RX|${MAC}|-46|OC1|1|E|P2:PU:R`).ok, false);
 });
 
 test("canonical protocol covers host, gateway, player actions, and submissions while legacy frames remain valid", () => {
@@ -127,7 +128,7 @@ test("canonical protocol covers host, gateway, player actions, and submissions w
   assert.equal(parseGatewaySerialLine("noise HTN26|GW|DOWN|4|2").kind, "gateway-status");
   assert.equal(parseGatewaySerialLine("noise HTN26|GAME|START_GAME|120|3").kind, "host-control");
   assert.equal(parseGatewaySerialLine("noise HTN26|GAME|GAME_END|3").control, "END");
-  assert.equal(parseGatewaySerialLine(`noise HTN26|RX|${MAC}|-44|OC1|7|E|P2:PU:R`).kind, "badge-event");
+  assert.equal(parseGatewaySerialLine(`noise HTN26|RX|${MAC}|-44|OC2|7|E|P2:PU:R`).kind, "badge-event");
 });
 
 test("configurable serial-device adapter opens a fixture stream", async () => {
@@ -450,7 +451,7 @@ test("native GAME and complete E event path is parsed and projected by the lapto
       return runtime.projection.snapshot(now);
     };
     let sequence = 100_000;
-    const event = (player, action) => ingest(`native HTN26|RX|AA:BB:CC:DD:EE:0${player}|-45|OC1|${sequence++}|E|P${player}:${action}`);
+    const event = (player, action) => ingest(`native HTN26|RX|AA:BB:CC:DD:EE:0${player}|-45|OC2|${sequence++}|E|P${player}:${action}`);
 
     let state = ingest("native HTN26|GW|UP|0|0");
     assert.equal(state.health.gateway.status, "healthy");
@@ -641,7 +642,7 @@ test("HTTP upload, review, approval, serial projection, and browser reads work",
     assert.equal(state.eventHistory[0].startSource, "physical host badge");
     assert.equal(state.floorPlan.room.widthMeters, 10);
     assert.equal(state.floorPlan.stations.length, 4);
-    const serial = await post(base, "/api/serial", { line: `noise HTN26|RX|${MAC}|-40|OC1|99|N|ING:MEAT` });
+    const serial = await post(base, "/api/serial", { line: `noise HTN26|RX|${MAC}|-40|OC2|99|N|ING:MEAT` });
     assert.equal(serial.response.status, 200);
     assert.equal(serial.data.result.ok, true);
     assert.equal(serial.data.state.players[0].heldItem, "MEAT");

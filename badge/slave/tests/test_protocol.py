@@ -38,16 +38,18 @@ class PlayerBadgeTests(unittest.TestCase):
     def test_compact_sequence_tagged_payloads_and_controls(self):
         self.execute("""
           local p = player_test.event_payload(42, 2, "PU:B")
-          assert(p == "OC1|000042|E|P2:PU:B" and #p <= 44)
+          assert(p == "OC2|000042|E|P2:PU:B" and #p <= 44)
           local seq, player, action = player_test.parse_event(p)
           assert(seq == 42 and player == 2 and action == "PU:B")
           assert(player_test.event_payload(0, 1, "READY") == nil)
           assert(player_test.event_payload(1, 4, "READY") == nil)
           assert(player_test.event_payload(1, 1, "BAD|FIELD") == nil)
-          assert(player_test.parse_event("OC1|000001|E|P1:READY" .. string.char(10)) == nil)
-          local c, code = player_test.parse_control("OC1|000007|G|S")
+          assert(player_test.parse_event("OC2|000001|E|P1:READY" .. string.char(10)) == nil)
+          assert(player_test.parse_event("OC1|000001|E|P1:READY") == nil)
+          assert(player_test.parse_control("OC1|000007|G|S") == nil)
+          local c, code = player_test.parse_control("OC2|000007|G|S")
           assert(c == 7 and code == "S")
-          c, code = player_test.parse_control("OC1|000008|G|END")
+          c, code = player_test.parse_control("OC2|000008|G|END")
           assert(c == 8 and code == "E")
         """)
 

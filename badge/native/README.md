@@ -62,7 +62,13 @@ OOM and player Lua-allocation failure. The existing `master/` and `slave/` Lua
 apps remain in the repository and in LittleFS only as the explicit
 unmodified-firmware rollback profile; they are not an alternate live profile.
 
-Do not mix profiles within a round. Native mode preserves the current OC1
+The current native and Lua rollback sources use the OC2 application namespace.
+Before any native factory write, push the current `../master/` app to the host
+and the current `../slave/` app to all three players, then verify that matching
+rollback set is installed. Factory-only deployment leaves LittleFS untouched,
+and the laptop intentionally rejects the older OC1 namespace.
+
+Do not mix profiles within a round. Native mode preserves the current OC2
 application payloads, but calls the stock advertising HAL directly. Lua
 `badge.radio` adds and filters its private `LUA1` carrier prefix, so a Lua host
 cannot hear a native player and a native host cannot hear a Lua player.
@@ -78,7 +84,7 @@ which is the memory-critical difference from launching either Lua app.
    to choose host mode. Host mode starts radio without NFC and emits
    `HTN26|GW|UP|0|0` on success or `HTN26|GW|DOWN|0|0` on failure.
 3. After all players show waiting state, press **START** again on the host. It
-   logs `HTN26|GAME|START_GAME|240|3`, broadcasts `OC1|000001|G|S`, counts down
+   logs `HTN26|GAME|START_GAME|240|3`, broadcasts `OC2|000001|G|S`, counts down
    four minutes, then logs `HTN26|GAME|GAME_END|3` and broadcasts the matching
    end control. Events before start are ignored.
 
@@ -181,8 +187,9 @@ python -m esptool --chip esp32c3 --port COM4 --baud 460800 --before no-reset --a
 python -m esptool --chip esp32c3 --port COM4 --before no-reset --after no-reset read-flash 0x10000 0x2A0000 badge-backup/factory-rollback-readback.bin
 ```
 
-Rollback leaves LittleFS/storage untouched, so the Lua `master` and `slave`
-apps remain available. Roll back all four badges together and select **HTN26
+Rollback leaves LittleFS/storage untouched, so the required preinstalled OC2
+Lua `master` and `slave` apps remain available. Roll back all four badges
+together and select **HTN26
 Host** on the gateway plus **HTN26 Player** on each player; do not create a mixed
 round.
 

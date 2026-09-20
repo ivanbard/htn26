@@ -42,7 +42,7 @@ The player path is responsible for:
 
 * reading NFC interactions
 * identifying ingredient/station interactions
-* sending short game events over `badge.radio`
+* sending short game events over the selected whole-fleet radio profile
 * showing immediate local feedback
 * optionally using LEDs or motion sensors for interactions
 
@@ -72,7 +72,7 @@ Both preserve the primary data path:
 ```text
 player badge
     ↓
-badge.radio
+native OC2 radio (Lua `badge.radio` only after whole-fleet rollback)
     ↓
 stationary gateway badge
     ↓
@@ -108,7 +108,7 @@ The documented and supported architecture is:
 ```text
 player badges
       ↓
-restricted badge radio
+native OC2 radio
       ↓
 stationary badge
       ↓
@@ -138,18 +138,20 @@ Player badge events use a compact protocol.
 The current player format is:
 
 ```text
-OC1|<sequence>|<type>|<value>
+OC2|<sequence>|<type>|<value>
 ```
 
 For example:
 
 ```text
-OC1|000042|E|P2:PU:B
-OC1|000043|E|P2:CH:D:D
-OC1|000044|E|P2:SUB:BMLC
+OC2|000042|E|P2:PU:B
+OC2|000043|E|P2:CH:D:D
+OC2|000044|E|P2:SUB:BMLC
 ```
 
-`OC1` is the protocol version.
+`OC2` is the protocol version. It identifies the distinct chopped-meat (`D`)
+and cooked-meat (`M`) hand snapshot encoding and is intentionally incompatible
+with OC1.
 
 The sequence number is monotonically increasing per player badge and the
 player action is sequence-tagged in the value. The complete current event and
@@ -185,7 +187,7 @@ HTN26|RX|<mac>|<rssi>|<payload>
 Example:
 
 ```text
-HTN26|RX|AA:BB:CC:DD:EE:FF|-48|OC1|42|N|ING:TOM
+HTN26|RX|AA:BB:CC:DD:EE:FF|-48|OC2|42|N|ING:TOM
 ```
 
 The badge runtime may add additional logging text around `badge.sys.log()` output.
@@ -263,7 +265,7 @@ player scans tomato NFC
         ↓
 player badge creates event
         ↓
-badge.radio
+native OC2 radio
         ↓
 gateway badge receives event
         ↓

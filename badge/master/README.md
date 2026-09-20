@@ -23,6 +23,10 @@ players: Lua radio uses a private `LUA1` carrier wrapper while native mode calls
 the recovered HAL directly. Profile selection is whole-fleet and rollback is
 explicit in the native guide.
 
+Both profiles use OC2. Install this current rollback app before the native
+factory-only deployment so restoring stock firmware cannot expose an older OC1
+app to the OC2-only laptop parser.
+
 The packet bytes, USB serial framing, server ownership, and lifecycle records
 below apply to both profiles. Native mode additionally uses private player-to-
 host ACK packets, which the host never forwards to the server.
@@ -56,17 +60,17 @@ forwarded unchanged. A forwarded record is one `badge.sys.log()` call with this
 stable payload:
 
 ```text
-HTN26|RX|<sender_mac>|<rssi>|OC1|<sequence>|<type>|<value>
+HTN26|RX|<sender_mac>|<rssi>|OC2|<sequence>|<type>|<value>
 ```
 
 For example:
 
 ```text
-HTN26|RX|AA:BB:CC:DD:EE:FF|-48|OC1|0042|N|ING:TOM
+HTN26|RX|AA:BB:CC:DD:EE:FF|-48|OC2|0042|N|ING:TOM
 ```
 
 `sender_mac` is the radio sender identity and `rssi` is the received signal
-strength. Payloads are limited to 44 bytes, use `OC1|<sequence>|<type>|<value>`,
+strength. Payloads are limited to 44 bytes, use `OC2|<sequence>|<type>|<value>`,
 and reject control characters and `|` in the value so the server can split fields.
 The Lua app accepts `N`, `M`, `B`, `H`, and the fixed-player `E` events emitted
 by the current player app. Native mode emits the same compact `E` payload bytes

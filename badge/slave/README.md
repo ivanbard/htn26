@@ -20,7 +20,7 @@ host and all three Lua players together. A mixed round cannot work because Lua
 the recovered stock HAL directly. Native flashing, backup, factory-only write,
 rollback, and remaining physical gates are owned by the native guide.
 
-The gameplay controls and compact OC1 application payloads below are shared by
+The gameplay controls and compact OC2 application payloads below are shared by
 both profiles. Native event sequences are six digits and monotonic for one app
 boot, randomized at boot; unlike the Lua store-backed sequence, they are not
 persisted across a reboot. Starting a fresh round resets gateway/laptop-server
@@ -92,9 +92,9 @@ are not sent. The screen always labels feedback as local capture; a successful
 Player events use the compact, sequence-tagged form:
 
 ```text
-OC1|000042|E|P2:PU:B
-OC1|000043|E|P2:CH:D:D
-OC1|000044|E|P2:SUB:BMLC
+OC2|000042|E|P2:PU:B
+OC2|000043|E|P2:CH:D:D
+OC2|000044|E|P2:SUB:BMLC
 ```
 
 Hand snapshots use distinct meat codes: `HD` is chopped meat ready for a stove,
@@ -110,8 +110,8 @@ responses.
 The gateway's fixed-session control broadcasts are:
 
 ```text
-OC1|000001|G|S
-OC1|000002|G|E
+OC2|000001|G|S
+OC2|000002|G|E
 ```
 
 `START` and `END` are accepted as the long aliases for `S` and `E`. The host

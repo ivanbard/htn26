@@ -198,12 +198,12 @@ static void receive(const usize *capture, const u8 **peer, const signed char *rs
     App *self = (App *)capture[0];
     if (!acquire(&self->active) || *size < 14 || *size >= sizeof(self->inbox)) return;
     const u8 *p = *data;
-    int event = *size > 16 && equal(p, "OC1|", 4) && sequence(p + 4) &&
+    int event = *size > 16 && equal(p, "OC2|", 4) && sequence(p + 4) &&
                 equal(p + 10, "|E|P", 4) && p[14] >= '1' && p[14] <= '3' && p[15] == ':' &&
                 valid_action(p + 16, *size - 16);
-    int control = *size == 14 && equal(p, "OC1|", 4) && sequence(p + 4) &&
+    int control = *size == 14 && equal(p, "OC2|", 4) && sequence(p + 4) &&
                   equal(p + 10, "|G|", 3) && (p[13] == 'S' || p[13] == 'E');
-    int ack = *size == ACK_BYTES && equal(p, "OC1|", 4) && sequence(p + 4) &&
+    int ack = *size == ACK_BYTES && equal(p, "OC2|", 4) && sequence(p + 4) &&
               equal(p + 10, "|A|OK", 5);
     if (!event && !control && !ack) return;
     if (acquire(&self->inbox_full)) { ++self->dropped; return; }
@@ -473,7 +473,7 @@ static void start_action(App *self, const char *action) {
     u32 current = self->sequence++;
     if (self->sequence > 999999) self->sequence = 1;
     int written = FORMAT(self->pending, sizeof(self->pending),
-                         "OC1|%06u|E|P%u:%s", current, (u32)self->player, action);
+                         "OC2|%06u|E|P%u:%s", current, (u32)self->player, action);
     if (written < 17 || written >= (int)sizeof(self->pending)) return;
     self->pending_size = (u32)written; self->advertise_ticks = 0;
     self->attempts = 1; self->wait_ticks = WAIT_TICKS;
@@ -485,7 +485,7 @@ static void start_action(App *self, const char *action) {
 
 static void broadcast_control(App *self, char code) {
     u32 current = ++self->sequence;
-    int written = FORMAT(self->pending, sizeof(self->pending), "OC1|%06u|G|%c", current, code);
+    int written = FORMAT(self->pending, sizeof(self->pending), "OC2|%06u|G|%c", current, code);
     if (written != 14) return;
     self->pending_size = (u32)written; self->wait_ticks = 0;
     if (!transmit(self, self->pending, self->pending_size)) self->advertise_ticks = WAIT_TICKS;
@@ -842,7 +842,7 @@ static void consume_radio(App *self) {
        retry before the laptop-connected host has observed and logged it. */
     if (self->role == ROLE_HOST && event &&
         (!duplicate || !self->advertise_ticks)) {
-        char reply[16]; FORMAT(reply, sizeof(reply), "OC1|%.6s|A|OK", packet + 4);
+        char reply[16]; FORMAT(reply, sizeof(reply), "OC2|%.6s|A|OK", packet + 4);
         int error = transmit(self, reply, ACK_BYTES);
         if (!error) self->advertise_ticks = ACK_TICKS;
     }
