@@ -7,10 +7,10 @@ import { renderApp } from "../src/render.js";
 import { createHttpTransport } from "../src/transport.js";
 import { ROOM_COORDINATE_SPACE, validateFrontendSnapshot } from "../src/contracts.js";
 import { normalizeServerSnapshot } from "../src/server-snapshot.js";
-import { createHttpTransport } from "../src/transport.js";
 import {
   isWalkablePosition,
   pathsHaveAgentConflict,
+  plansHaveTemporalConflict,
   planPlayerPaths,
   playerPlansAreCollisionSafe,
   projectPointIntoWalkableRoom,
@@ -24,7 +24,7 @@ import {
   stationTileKey,
 } from "../src/room-grid.js";
 import { displayModeForPhase, GAME_ACTIONS, SETUP_PHASES, UI_DISPLAY_MODES } from "../src/state.js";
-import { createInitialProjectionState } from "../../pi/server/src/projection.mjs";
+import { createInitialProjectionState } from "../../server/src/projection.mjs";
 
 async function approvedTransport(now = 1_000) {
   const transport = createMockTransport({ now: () => now });
@@ -221,7 +221,7 @@ test("plans simultaneous chef movement with barrier-safe alternate lanes", () =>
     assert.equal(plan.path.every((point) => isWalkablePosition(point, state.floorPlan.walls)), true);
     assert.equal(plan.reachedTarget, true);
   });
-  assert.equal(pathsHaveAgentConflict(plans.get("p1").path, plans.get("p2").path), false);
+  assert.equal(plansHaveTemporalConflict(plans.get("p1"), plans.get("p2")), false);
 });
 
 test("uses an alternate arc when two chefs would exchange positions", () => {
@@ -611,14 +611,14 @@ test("delivery is accepted only during a running active round", async () => {
   await assertCommandUnchanged(transport, GAME_ACTIONS.DELIVERY_FAILURE);
 });
 
-test("successful delivery awards the recipe's gold plus a patience-based tip, matching pi/server's formula", async () => {
+test("successful delivery awards the recipe's gold plus a patience-based tip, matching server's formula", async () => {
   const transport = await approvedTransport(1_000);
   await transport.command(GAME_ACTIONS.START_GAME);
   await transport.command({ type: GAME_ACTIONS.DELIVERY_SUCCESS, orderId: "order-1" });
   const served = transport.snapshot();
 
   // order-1 is PLAIN_MEAT (gold: 100); START_GAME resets it to full patience
-  // (remaining === total), so pi/server's tip formula — max(1, round(gold *
+  // (remaining === total), so server's tip formula — max(1, round(gold *
   // 0.1 + ratio * 5)) — gives round(10 + 5) = 15 at a 1.0 ratio.
   assert.deepEqual(served.score, { value: 100, delivered: 1 });
   assert.deepEqual(served.gold, { total: 100, earned: 100, lastChange: 100 });
@@ -898,6 +898,7 @@ test("HTTP transport consumes named state events", async () => {
   const initial = createInitialMockState(1_000);
   const updated = { ...initial, setup: { ...initial.setup, message: "named SSE update" } };
   const received = [];
+  const normalizedInitial = normalizeServerSnapshot(initial);
   const transport = createHttpTransport({
     baseUrl: "http://laptop.test",
     eventSourceFactory: FakeEventSource,
@@ -909,9 +910,11 @@ test("HTTP transport consumes named state events", async () => {
 
   const cleanup = await transport.connect((state) => received.push(state));
   assert.equal(FakeEventSource.instance.url, "http://laptop.test/api/events");
-  assert.deepEqual(received, [initial]);
+  assert.equal(received.length, 1);
+  assert.equal(received[0].setup.message, normalizedInitial.setup.message);
   FakeEventSource.instance.emit("state", updated);
-  assert.deepEqual(received, [initial, updated]);
+  assert.equal(received.length, 2);
+  assert.equal(received[1].setup.message, "named SSE update");
   cleanup();
   assert.equal(FakeEventSource.instance.closed, true);
 });

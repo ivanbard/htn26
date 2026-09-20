@@ -645,7 +645,7 @@ const DELIVERY_TOAST_LIFETIME_MS = 3200;
 // behavior"): a correct plate reports gold plus a tip that scales with how
 // much patience was left (the order's 3-segment meter — see
 // mock-transport.js's orderTip()/patience.filledSegments, ported from
-// pi/server's projection.mjs), or a wrong plate applies a penalty. This is
+// server's projection.mjs), or a wrong plate applies a penalty. This is
 // the live, in-round version of that result; ServingPanel (ResultsView)
 // still shows the final round's last event after the round ends.
 function DeliveryToast({ state, now }) {

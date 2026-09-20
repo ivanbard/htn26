@@ -144,8 +144,9 @@ function makeOrder(id, recipe, now, patienceSeconds) {
 export function createInitialProjectionState(now = Date.now(), roundSeconds = ROUND_SECONDS) {
   const plan = localPlan({ generatedAt: iso(now), photoCount: 0 });
   return {
-    version: 1,
-    source: "pi-server-simulator",
+    version: 2,
+    revision: 1,
+    source: "root-server-simulator",
     setup: { phase: "idle", message: "Upload 3-4 room photos for setup, or start the local simulator with a host serial record.", updatedAt: iso(now) },
     floorPlan: plan,
     roomLayout: null,

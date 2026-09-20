@@ -39,7 +39,9 @@ export async function createRuntime({ env = process.env, now = () => Date.now(),
     roundSeconds: Number(env.HTN26_ROUND_SECONDS) || 240,
     orderIntervalMinSeconds: Number(env.HTN26_ORDER_INTERVAL_MIN_SECONDS) || 8,
     orderIntervalMaxSeconds: Number(env.HTN26_ORDER_INTERVAL_MAX_SECONDS) || 35,
+    orderPatienceSeconds: Number(env.HTN26_ORDER_PATIENCE_SECONDS) || undefined,
     maxActiveOrders: Number(env.HTN26_MAX_ACTIVE_ORDERS) || 3,
+    locationHoldSeconds: env.HTN26_PLAYER_LOCATION_HOLD_SECONDS == null ? undefined : Number(env.HTN26_PLAYER_LOCATION_HOLD_SECONDS),
     authoritativeEngine,
   });
   const serialAdapter = createSerialStreamAdapter({
@@ -47,6 +49,9 @@ export async function createRuntime({ env = process.env, now = () => Date.now(),
       const timestamp = now();
       if (record.kind === "badge-event") projection.ingestBadgeEvent(record.intent, timestamp);
       else if (record.kind === "gateway-status") projection.ingestGatewayStatus(record.status, timestamp);
+      else if (record.kind === "host-control") projection.ingestHostControl(record, timestamp);
+      else if (record.kind === "player-action") projection.ingestPlayerAction(record, timestamp);
+      else if (record.kind === "submission") projection.ingestSubmission(record, timestamp);
     },
   });
   projection.serialAdapter = serialAdapter;
@@ -84,6 +89,13 @@ export function usage() {
     `OPENAI_API_KEY (optional; server-side only), OPENAI_LAYOUT_TIMEOUT_MS,\n` +
     `HTN26_ORDER_INTERVAL_MIN_SECONDS,\n` +
     `HTN26_ORDER_INTERVAL_MAX_SECONDS, HTN26_MAX_ACTIVE_ORDERS.\n`;
+}
+
+export function startupGuide(baseUrl) {
+  return `HTN26 development simulator guide at ${baseUrl}/\\n` +
+    `GET /api/timer\\nGET /api/orders\\nGET /api/players\\nGET /api/submissions\\nGET /api/money\\n` +
+    `HTN26|1|PLAYER|2|READY\\nHTN26|1|PLAYER|3|READY\\nHTN26|1|SUBMIT|1|BM--\\n` +
+    `HTN26|GAME|START_GAME|240|3\\nDevelopment simulator`;
 }
 
 export async function main(argv = process.argv.slice(2), env = process.env) {
