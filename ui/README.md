@@ -21,7 +21,7 @@ needs no provider key. Its executable offline flow is:
 2. `Scan Room` to show the proposed floor plan.
 3. `Approve Layout` (the existing `Accept Layout` protocol alias) to accept the plan and generate burger-level placement instructions.
 4. Place the cheese, lettuce, meat, and bun sources, the chopping boards, stoves, and serving badge as shown.
-5. `Start Game` for a roughly two-minute round.
+5. `Start Game` for a four-minute round.
 
 For the active camera flow, start the root server with `OPENAI_API_KEY` and
 open `http://127.0.0.1:4173/?transport=http`. The scan step becomes a 3-5-photo
@@ -42,8 +42,8 @@ host Start
   -> complete proposed room layout
   -> host approves floor plan
   -> burger level placement instructions
-  -> two-minute burger round
-  -> topping-variation orders and player state from snapshots
+  -> four-minute burger round
+  -> topping-variation orders and live player positions
   -> serving badge validates completed burger
 ```
 

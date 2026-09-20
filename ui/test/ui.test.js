@@ -578,7 +578,7 @@ test("start game resets the authoritative clock, order, and score", async () => 
   initialState.floorPlan.accepted = true;
   initialState.burgerLevel.status = "placement-ready";
   initialState.score = { value: 250, delivered: 2 };
-  initialState.clock = { status: "ended", remainingSeconds: 3, totalSeconds: 120 };
+  initialState.clock = { status: "ended", remainingSeconds: 3, totalSeconds: 240 };
   initialState.order = { ...initialState.order, status: "completed", remainingSeconds: 3 };
   initialState.orders = initialState.orders.map((order) => ({ ...order, status: "completed", remainingSeconds: 3 }));
   const transport = createMockTransport({ initialState, now: () => 5_000 });

@@ -122,10 +122,7 @@ export function createInitialMockState(now = Date.now()) {
     ],
     gold: { total: 0, earned: 0, lastChange: 0 },
     tips: { total: 0, earned: 0, lastChange: 0 },
-    penalties: { total: 0, lastChange: 0 },
-    score: { value: 0, delivered: 0 },
     clock: { status: "ready", remainingSeconds: 240, totalSeconds: 240 },
-    submissions: [],
     serving: { lastEvent: null, gooseQueue: 4, location: "SERVING" },
     health: health(now),
   };
@@ -322,9 +319,22 @@ export function createMockTransport({ initialState, now = () => Date.now() } = {
   const heartbeat = setInterval(() => {
     if (!listeners.size || !Array.isArray(state.players)) return;
     const seenAt = now();
-    state = { ...state, players: state.players.map((player) => player.tracking?.status === "healthy" ? { ...player, tracking: { ...player.tracking, lastSeenAt: seenAt } } : player) };
+    const players = state.players.map((player) => player.tracking?.status === "healthy"
+      ? { ...player, tracking: { ...player.tracking, lastSeenAt: seenAt } }
+      : player);
+    if (state.setup?.phase === SETUP_PHASES.RUNNING && state.clock?.status === "running") {
+      const remaining = Math.max(0, Number(state.clock.remainingSeconds || 0) - 1);
+      const orders = normalizedOrders(state).map((order) => order.status === "active"
+        ? { ...order, remainingSeconds: Math.max(0, Number(order.remainingSeconds || 0) - 1) }
+        : { ...order });
+      state = remaining === 0
+        ? withUpdate(state, { setup: { phase: SETUP_PHASES.ENDED, message: "Time’s up. Reset to host another burger level." }, clock: { ...state.clock, status: "ended", remainingSeconds: 0 }, players, orders, order: withPrimaryOrder(orders, state.order) }, seenAt)
+        : { ...state, players, clock: { ...state.clock, remainingSeconds: remaining }, orders, order: withPrimaryOrder(orders, state.order) };
+    } else {
+      state = { ...state, players };
+    }
     emit();
-  }, 5_000);
+  }, 1_000);
   // Don't keep a Node process (tests) alive just for the heartbeat.
   if (typeof heartbeat === "object" && typeof heartbeat.unref === "function") heartbeat.unref();
   return {
