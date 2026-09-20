@@ -226,9 +226,10 @@ HTN26|GAME|RESET_GAME|3
 32-bit sequence checks, and `(MAC, sequence)` duplicate suppression. The full
 fixed-player `E|P<player>:<action>` vocabulary is translated:
 
-- `PU:B|R|Q|K` and the cooked/chopped item codes update the hand.
+- `PU:B|R|D|M|X|Q|L|K|C` updates the hand; `D` is chopped meat and
+  `M` is cooked meat, so transfer snapshots preserve the distinct states.
 - `PL:NEW` and `PL:<BMLC>` update the plate.
-- `CH:S`, `CH:F`, and `CH:D:M|L|C` update chopping.
+- `CH:S`, `CH:F`, and `CH:D:D|L|C` update chopping.
 - `ST:L|R:P|T|X` and `ST:L|R:C:<phase>` update/check the two stoves without
   letting a reported phase override server time.
 - `DROP:<snapshot>`, paired `X:<snapshot>`, `READY`, and `SUB:<BMLC>` map to

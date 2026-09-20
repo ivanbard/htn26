@@ -17,6 +17,7 @@ local WARNING_MS = 3000
 local ITEMS = {
 	BUN = true,
 	RAW_MEAT = true,
+	CHOPPED_MEAT = true,
 	MEAT = true,
 	RAW_LETTUCE = true,
 	LETTUCE = true,
@@ -28,6 +29,7 @@ local ITEMS = {
 local ITEM_SHORT = {
 	BUN = "B",
 	RAW_MEAT = "R",
+	CHOPPED_MEAT = "D",
 	MEAT = "M",
 	BURNT = "X",
 	RAW_LETTUCE = "Q",
@@ -39,6 +41,7 @@ local ITEM_SHORT = {
 local SHORT_ITEM = {
 	B = "BUN",
 	R = "RAW_MEAT",
+	D = "CHOPPED_MEAT",
 	M = "MEAT",
 	X = "BURNT",
 	Q = "RAW_LETTUCE",
@@ -200,7 +203,7 @@ local function finish_chop(state, now)
 	end
 	local item = state.chop.item
 	if item == "RAW_MEAT" then
-		state.hand = "MEAT"
+		state.hand = "CHOPPED_MEAT"
 	elseif item == "RAW_LETTUCE" then
 		state.hand = "LETTUCE"
 	elseif item == "RAW_CHEESE" then
@@ -247,8 +250,8 @@ local function stove_action(state, index, now)
 	end
 	local stove = state.stoves[index]
 	local phase = stove_phase(stove, now)
-	if state.hand == "MEAT" and phase == "EMPTY" then
-		stove.item, stove.started = "MEAT", now
+	if state.hand == "CHOPPED_MEAT" and phase == "EMPTY" then
+		stove.item, stove.started = "CHOPPED_MEAT", now
 		state.hand = nil
 		return true, "PUT"
 	end

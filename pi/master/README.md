@@ -1,16 +1,17 @@
-# Possible future master Pi/QNX adapter
+# Future portable master engine
 
 ## Role
 
-The current v1 authority is the laptop simulator in `../server`. This directory
-contains a portable C++ engine and a possible future master Pi/QNX adapter. In
-that future deployment it would combine badge intent, fresh camera observations,
-and deterministic game rules; worker Pis and badges would not mutate
-authoritative state directly.
+The production authority is the laptop-hosted `pi/server` process. This
+directory contains a portable C++ engine retained for a possible future
+Raspberry Pi or QNX target. If integrated later, it would combine badge intent,
+fresh camera observations, and deterministic game rules; worker processes and
+badges would not mutate whichever server is authoritative.
 
 This directory contains a portable C++ MVP core. Its worker-observation and
-delivery fixtures are implementation slices from an earlier planning brief;
-they are not current v1 product claims. QNX device and network code
+delivery fixtures are implementation slices from before the current
+laptop-hosted v1 product brief; they are not current v1 product claims. QNX
+device and network code
 belongs behind the interfaces in `src/platform_adapters.hpp`.
 
 ## MVP implementation

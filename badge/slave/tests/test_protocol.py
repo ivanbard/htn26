@@ -86,7 +86,10 @@ class PlayerBadgeTests(unittest.TestCase):
           assert(player_test.chop_step(s, 1500) == 1)
           assert(player_test.chop_step(s, 4000) == 6)
           ok, why = player_test.finish_chop(s, 4000)
-          assert(ok and why == "CHOP_DONE" and s.hand == "MEAT")
+          assert(ok and why == "CHOP_DONE" and s.hand == "CHOPPED_MEAT")
+          assert(player_test.snapshot(s) == "HD")
+          assert(player_test.parse_snapshot("HD").hand == "CHOPPED_MEAT")
+          assert(player_test.parse_snapshot("HM").hand == "MEAT")
 
           local failed = player_test.new_state()
           assert(player_test.take_source(failed, "RAW_CHEESE"))

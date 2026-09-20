@@ -93,9 +93,12 @@ Player events use the compact, sequence-tagged form:
 
 ```text
 OC1|000042|E|P2:PU:B
-OC1|000043|E|P2:CH:D:M
+OC1|000043|E|P2:CH:D:D
 OC1|000044|E|P2:SUB:BMLC
 ```
+
+Hand snapshots use distinct meat codes: `HD` is chopped meat ready for a stove,
+while `HM` is cooked meat ready for a plate.
 
 The sequence is persistent per badge and increases for every event. The
 player number and action are included so the stationary gateway can forward

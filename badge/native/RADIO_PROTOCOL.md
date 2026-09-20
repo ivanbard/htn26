@@ -56,11 +56,13 @@ private 15-byte ACK echoes the event sequence; it is native reliability
 machinery and is never forwarded to the laptop server.
 
 Application action values match `../slave/main.lua`: `PU:B|R|Q|K`,
-`PL:NEW` or `PL:<BMLC>`, `CH:S|F` and `CH:D:M|L|C`, `ST:L|R:P|T|X`,
+`PL:NEW` or `PL:<BMLC>`, `CH:S|F` and `CH:D:D|L|C`, `ST:L|R:P|T|X`,
 `ST:L|R:C:<phase>`, `DROP:<snapshot>`, `X:<snapshot>`, `READY`, and
 `SUB:<BMLC>`. A snapshot is `P` plus four fixed plate columns, `H` plus one
-item code, or `E----`; `-` means absent. Payload validation remains bounded to
-the documented 44-byte application limit.
+item code, or `E----`; `-` means absent. Hand code `D` is chopped meat and `M`
+is cooked meat, so transfer snapshots preserve the native held state without
+context-dependent decoding. Payload validation remains bounded to the
+documented 44-byte application limit.
 
 The application bytes match the Lua contract, but the physical profiles are
 not interoperable. `badge.radio` adds and filters a firmware-private `LUA1`

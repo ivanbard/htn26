@@ -161,7 +161,7 @@ static int valid_snapshot(const char *value, usize size) {
     if (size == 5 && value[0] == 'P') return valid_plate(value + 1);
     if (size == 5 && equal(value, "E----", 5)) return 1;
     return size == 2 && value[0] == 'H' &&
-           (value[1] == 'B' || value[1] == 'R' || value[1] == 'M' || value[1] == 'X' ||
+           (value[1] == 'B' || value[1] == 'R' || value[1] == 'D' || value[1] == 'M' || value[1] == 'X' ||
             value[1] == 'Q' || value[1] == 'L' || value[1] == 'K' || value[1] == 'C');
 }
 
@@ -181,7 +181,7 @@ static int valid_action(const u8 *value, usize size) {
     if (size == 7 && starts(action, "PL:")) return valid_plate(action + 3);
     if (size == 8 && starts(action, "SUB:")) return valid_plate(action + 4);
     if (size == 6 && starts(action, "CH:D:"))
-        return action[5] == 'M' || action[5] == 'L' || action[5] == 'C';
+        return action[5] == 'D' || action[5] == 'L' || action[5] == 'C';
     if (starts(action, "ST:") && size >= 6 && size <= 15 &&
         (action[3] == 'L' || action[3] == 'R') && action[4] == ':') {
         if (size == 6) return action[5] == 'P' || action[5] == 'T' || action[5] == 'X';
@@ -365,6 +365,7 @@ static void take_item(App *self, u8 item) {
 
 static u8 short_item(char code) {
     if (code == 'R') return RAW_MEAT;
+    if (code == 'D') return CHOPPED_MEAT;
     if (code == 'M') return COOKED_MEAT;
     if (code == 'X') return BURNT_MEAT;
     if (code == 'B') return BREAD;
@@ -377,7 +378,8 @@ static u8 short_item(char code) {
 
 static char item_short(u8 item) {
     if (item == RAW_MEAT) return 'R';
-    if (item == CHOPPED_MEAT || item == COOKED_MEAT) return 'M';
+    if (item == CHOPPED_MEAT) return 'D';
+    if (item == COOKED_MEAT) return 'M';
     if (item == BURNT_MEAT) return 'X';
     if (item == BREAD) return 'B';
     if (item == LETTUCE) return 'Q';

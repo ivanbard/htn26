@@ -23,13 +23,13 @@ def valid_snapshot(value):
     return ((len(value) == 5 and value[:1] == b"P" and valid_plate(value[1:])) or
             value == b"E----" or
             (len(value) == 2 and value[:1] == b"H" and value[1:] in
-             (b"B", b"R", b"M", b"X", b"Q", b"L", b"K", b"C")))
+             (b"B", b"R", b"D", b"M", b"X", b"Q", b"L", b"K", b"C")))
 
 
 def valid_action(action):
     plate = ((len(action) == 7 and action[:3] == b"PL:" and valid_plate(action[3:])) or
              (len(action) == 8 and action[:4] == b"SUB:" and valid_plate(action[4:])))
-    chop = len(action) == 6 and action[:5] == b"CH:D:" and action[5:] in (b"M", b"L", b"C")
+    chop = len(action) == 6 and action[:5] == b"CH:D:" and action[5:] in (b"D", b"L", b"C")
     stove_check = action[:7] in (b"ST:L:C:", b"ST:R:C:") and action[7:] in \
         (b"EMPTY", b"COOKING", b"DONE", b"WARNING", b"BURNT")
     snapshot = ((action.startswith(b"DROP:") and valid_snapshot(action[5:])) or
@@ -211,6 +211,8 @@ if __name__ == "__main__":
             assert decode(b"OC1|012345|E|P2:" + action) == ("EVENT", "012345")
         assert decode(b"OC1|012345|E|P2:SUB:BMLC") == ("EVENT", "012345")
         assert decode(b"OC1|012345|E|P2:X:PB-L-") == ("EVENT", "012345")
+        assert decode(b"OC1|012345|E|P2:X:HD") == ("EVENT", "012345")
+        assert decode(b"OC1|012345|E|P2:X:HM") == ("EVENT", "012345")
         assert decode(b"OC1|012345|E|P2:X:HR") == ("EVENT", "012345")
         for bad in (b"MEAT", b"OC1|012345|E|P2:PU:Z", b"OC1|01234x|A|OK",
                     b"OC2|012345|A|OK", bytes(225)):

@@ -461,11 +461,11 @@ test("native GAME and complete E event path is parsed and projected by the lapto
     state = event(1, "PU:R");
     assert.equal(state.players[0].heldItem, "RAW_MEAT");
     event(1, "CH:S");
-    state = event(1, "CH:D:M");
+    state = event(1, "CH:D:D");
     assert.equal(state.players[0].heldItem, "RAW_MEAT");
     assert.equal(state.eventHistory.at(-1).type, "rejected-action");
     now += GAME_TIMINGS.chopSeconds * 1_000;
-    state = event(1, "CH:D:M");
+    state = event(1, "CH:D:D");
     assert.equal(state.players[0].heldItem, "CHOPPED_MEAT");
     assert.match(state.eventHistory.at(-1).message, /confirmed completed chop/);
 
@@ -502,7 +502,7 @@ test("native GAME and complete E event path is parsed and projected by the lapto
     assert.equal(state.submissions[1].playerId, "p1");
     assert.deepEqual(state.submissions[1].consumedSubmissions.map((submission) => submission.playerId), ["p1", "p2"]);
 
-    for (const [code, expected] of [["M", "CHOPPED_MEAT"], ["X", "BURNT_MEAT"], ["L", "LETTUCE"], ["C", "CHEESE"]]) {
+    for (const [code, expected] of [["D", "CHOPPED_MEAT"], ["M", "COOKED_MEAT"], ["X", "BURNT_MEAT"], ["L", "LETTUCE"], ["C", "CHEESE"]]) {
       state = event(3, `PU:${code}`);
       assert.equal(state.players[2].heldItem, expected);
       state = event(3, `DROP:H${code}`);
@@ -525,7 +525,7 @@ test("native GAME and complete E event path is parsed and projected by the lapto
     assert.deepEqual(state.players.slice(0, 2).map((player) => player.currentStation), ["center", "center"]);
     state = event(3, "ST:R:C:EMPTY");
     assert.equal(state.players[2].actionState, "checked stove 2: idle");
-    event(3, "PU:M");
+    event(3, "PU:D");
     event(3, "ST:R:P");
     now += (GAME_TIMINGS.cookSeconds + GAME_TIMINGS.doneSeconds + GAME_TIMINGS.warningSeconds) * 1_000;
     state = event(3, "ST:R:X");
@@ -582,6 +582,31 @@ test("duplicate plate transfers swap both carried states without loss", async ()
   assert.equal(state.players[0].actionState, "transferred");
   assert.equal(state.players[1].actionState, "transferred");
   assert.deepEqual(state.players.slice(0, 2).map((player) => player.location), ["bump-middle", "bump-middle"]);
+});
+
+test("transfer snapshots preserve distinct chopped and cooked meat states", async () => {
+  const now = 2_500;
+  const projection = await readyProjection(now);
+  projection.command("START_GAME", {}, now);
+  const event = (mac, sequence, player, action) => projection.ingestBadgeEvent({
+    senderMac: mac,
+    sequence,
+    type: "E",
+    value: `P${player}:${action}`,
+    playerId: `p${player}`,
+    action,
+  }, now);
+
+  event("AA:BB:CC:DD:EE:11", 1, 1, "PU:D");
+  event("AA:BB:CC:DD:EE:22", 1, 2, "PU:M");
+  event("AA:BB:CC:DD:EE:11", 2, 1, "X:HD");
+  event("AA:BB:CC:DD:EE:22", 2, 2, "X:HM");
+
+  const state = projection.snapshot(now);
+  assert.equal(state.players[0].heldItem, "COOKED_MEAT");
+  assert.deepEqual(state.players[0].inventory, ["COOKED_MEAT"]);
+  assert.equal(state.players[1].heldItem, "CHOPPED_MEAT");
+  assert.deepEqual(state.players[1].inventory, ["CHOPPED_MEAT"]);
 });
 
 test("serial lifecycle and development commands share projection behavior", async () => {

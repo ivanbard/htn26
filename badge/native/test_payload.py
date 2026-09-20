@@ -395,7 +395,7 @@ def scenario(nvs_error=0, radio_error=0, nfc_error=0, allocation_failure=False,
                 invoke(0x60, 0); scan('cutting board'); acknowledge('CH:S')
                 assert_icon('raw_meat')
                 for _ in range(150): invoke(0x5c)
-                acknowledge('CH:D:M'); invoke(0x60, 0x100)
+                acknowledge('CH:D:D'); invoke(0x60, 0x100)
                 assert_icon('chopped_meat')
                 invoke(0x60, 5); scan('stove'); acknowledge('ST:R:P')
                 assert_icon(None)
@@ -407,6 +407,11 @@ def scenario(nvs_error=0, radio_error=0, nfc_error=0, allocation_failure=False,
                 before = len(packets)
                 incoming(b'OC1|222220|E|P1:X:P----'); invoke(0x5c)
                 assert len(packets) == before
+                assert_icon(None)
+
+                incoming(b'OC1|222223|E|P1:X:HD'); invoke(0x5c)
+                assert_icon('chopped_meat')
+                incoming(b'OC1|222224|E|P1:X:E----'); invoke(0x5c)
                 assert_icon(None)
 
                 # An invalid raw-item merge swaps inventories, removing our plate.
