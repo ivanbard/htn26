@@ -8,6 +8,7 @@ const WARNING_SECONDS = 3;
 const DEFAULT_ORDER_INTERVAL_SECONDS = 30;
 const WRONG_ORDER_PENALTY = 25;
 const EXPIRED_ORDER_PENALTY = 20;
+const DEFAULT_LOCATION_HOLD_SECONDS = 2;
 const HISTORY_LIMIT = 100;
 
 export const BURGER_RECIPES = Object.freeze([
@@ -70,7 +71,7 @@ function patienceTier(remaining, total) {
   if (ratio > 1 / 3) return 2;
   return 1;
 }
-function makePlayer(player) {
+function makePlayer(player, now) {
   return {
     ...player,
     badgeMac: null,
@@ -84,6 +85,8 @@ function makePlayer(player) {
     actionState: "idle",
     processing: null,
     submissionReadyUntil: null,
+    currentStation: "center",
+    simulatedLocation: { stationId: "center", label: "CENTER / DEFAULT", source: "action-inference", sinceAt: iso(now), returnAt: null },
   };
 }
 function makeStations() {
@@ -91,8 +94,9 @@ function makeStations() {
     { id: "pantry", label: "PANTRY", kind: "ingredient", status: "idle", progress: 0, remainingSeconds: 0, item: null },
     { id: "fridge", label: "FRIDGE", kind: "ingredient", status: "idle", progress: 0, remainingSeconds: 0, item: null },
     { id: "cutting-board", label: "CUTTING BOARD", kind: "chop", status: "idle", progress: 0, remainingSeconds: 0, item: null },
-    { id: "stove-left", label: "STOVE LEFT", kind: "stove", side: "LEFT", status: "idle", progress: 0, remainingSeconds: 0, item: null, startedAt: null, doneAt: null, warningAt: null, burntAt: null },
-    { id: "stove-right", label: "STOVE RIGHT", kind: "stove", side: "RIGHT", status: "idle", progress: 0, remainingSeconds: 0, item: null, startedAt: null, doneAt: null, warningAt: null, burntAt: null },
+    { id: "stove-left", label: "STOVE 1", kind: "stove", side: "LEFT", status: "idle", progress: 0, remainingSeconds: 0, item: null, startedAt: null, doneAt: null, warningAt: null, burntAt: null },
+    { id: "stove-right", label: "STOVE 2", kind: "stove", side: "RIGHT", status: "idle", progress: 0, remainingSeconds: 0, item: null, startedAt: null, doneAt: null, warningAt: null, burntAt: null },
+    { id: "serving", label: "SERVING", kind: "serving", status: "idle", progress: 0, remainingSeconds: 0, item: null },
   ];
 }
 function makeMoney() {
@@ -134,7 +138,7 @@ export function createInitialProjectionState(now = Date.now(), roundSeconds = RO
     floorPlan: plan,
     burgerLevel: { status: "not-generated", recipe: "BURGER", placementInstructions: clone(plan.placementInstructions) },
     photos: [],
-    players: DEFAULT_PLAYERS.map(makePlayer),
+    players: DEFAULT_PLAYERS.map((player) => makePlayer(player, now)),
     orders: [],
     activeOrders: [],
     order: null,
@@ -161,7 +165,8 @@ export function createInitialProjectionState(now = Date.now(), roundSeconds = RO
 export class ServerProjection {
   constructor({ provider, now = () => Date.now(), roundSeconds = ROUND_SECONDS,
     orderIntervalSeconds, orderIntervalMinSeconds = 8, orderIntervalMaxSeconds = 35,
-    orderPatienceSeconds, maxActiveOrders = 3, random = Math.random, authoritativeEngine } = {}) {
+    orderPatienceSeconds, maxActiveOrders = 3, locationHoldSeconds = DEFAULT_LOCATION_HOLD_SECONDS,
+    random = Math.random, authoritativeEngine } = {}) {
     this.now = now;
     this.provider = provider || new LocalFloorplanProvider({ now });
     this.roundSeconds = clampInteger(roundSeconds, 1, 3600, ROUND_SECONDS);
@@ -170,6 +175,7 @@ export class ServerProjection {
     this.orderIntervalMaxSeconds = clampInteger(Number.isFinite(fixedInterval) ? fixedInterval : orderIntervalMaxSeconds, this.orderIntervalMinSeconds, 180, 35);
     this.orderPatienceSeconds = Number.isFinite(Number(orderPatienceSeconds)) ? clampInteger(orderPatienceSeconds, 3, 600, DEFAULT_ORDER_INTERVAL_SECONDS) : null;
     this.maxActiveOrders = clampInteger(maxActiveOrders, 1, 6, 3);
+    this.locationHoldSeconds = clampInteger(locationHoldSeconds, 0, 30, DEFAULT_LOCATION_HOLD_SECONDS);
     this.random = typeof random === "function" ? random : Math.random;
     this.authoritativeEngine = authoritativeEngine || null;
     this._nextOrderAt = null;
@@ -284,13 +290,47 @@ export class ServerProjection {
     }
   }
 
-  _clearPlayer(player) {
+  _setPlayerLocation(player, stationId, now = this.now(), returnAt = now + this.locationHoldSeconds * 1000) {
+    const labels = {
+      center: "CENTER / DEFAULT",
+      pantry: "PANTRY",
+      fridge: "FRIDGE",
+      "cutting-board": "CUTTING BOARD",
+      "stove-left": "STOVE 1",
+      "stove-right": "STOVE 2",
+      serving: "SERVING",
+    };
+    const resolved = labels[stationId] ? stationId : "center";
+    player.currentStation = resolved;
+    player.simulatedLocation = {
+      stationId: resolved,
+      label: labels[resolved],
+      source: "action-inference",
+      sinceAt: iso(now),
+      returnAt: resolved === "center" || returnAt == null ? null : iso(returnAt),
+    };
+  }
+
+  _updatePlayerLocations(now) {
+    let changed = false;
+    for (const player of this._state.players) {
+      const returnAt = player.simulatedLocation?.returnAt ? Date.parse(player.simulatedLocation.returnAt) : null;
+      if (player.currentStation !== "center" && returnAt != null && now >= returnAt) {
+        this._setPlayerLocation(player, "center", now, null);
+        changed = true;
+      }
+    }
+    return changed;
+  }
+
+  _clearPlayer(player, now = this.now()) {
     player.hand = null;
     player.hasPlate = false;
     player.plate = [];
     player.processing = null;
     player.submissionReadyUntil = null;
     player.actionState = "idle";
+    this._setPlayerLocation(player, "center", now, null);
     this._syncPlayer(player);
   }
 
@@ -321,6 +361,7 @@ export class ServerProjection {
       if (result) chopping.hand = result;
       chopping.processing = null;
       chopping.actionState = result ? `holding ${result.toLowerCase()}` : "cut failed";
+      this._setPlayerLocation(chopping, "cutting-board", now);
       this._syncPlayer(chopping);
       Object.assign(station, { status: "idle", progress: 0, remainingSeconds: 0, item: null });
       this._record("chop-complete", `${chopping.label} finished chopping`, now, { playerId: chopping.id, item: result || null });
@@ -377,6 +418,7 @@ export class ServerProjection {
     this._state.clock.remainingSeconds = remainingRound;
     changed = this._updateChopping(now) || changed;
     changed = this._updateStoves(now) || changed;
+    changed = this._updatePlayerLocations(now) || changed;
 
     for (const player of this._state.players) {
       if (player.submissionReadyUntil && now > Date.parse(player.submissionReadyUntil)) {
@@ -400,7 +442,7 @@ export class ServerProjection {
       this._state.setup.phase = "ended";
       this._state.setup.message = "Round timer reached zero. Round state was cleared; reset or start to play again.";
       this._state.burgerLevel.status = "ended";
-      for (const player of this._state.players) this._clearPlayer(player);
+      for (const player of this._state.players) this._clearPlayer(player, now);
       this._clearStations();
       this._record("round-ended", "Round timer reached zero", now);
       changed = true;
@@ -529,7 +571,7 @@ export class ServerProjection {
     this._state.serving.lastEvent = null;
     this._resetEconomy();
     this._clearStations();
-    for (const player of this._state.players) this._clearPlayer(player);
+    for (const player of this._state.players) this._clearPlayer(player, now);
     this._orderSequence = 0;
     this._nextOrderAt = null;
     this._pendingTransfer = null;
@@ -544,7 +586,7 @@ export class ServerProjection {
   resetGame(now = this.now()) {
     this._roundStartedAt = null;
     this._roundDurationSeconds = this.roundSeconds;
-    for (const player of this._state.players) this._clearPlayer(player);
+    for (const player of this._state.players) this._clearPlayer(player, now);
     this._clearStations();
     this._state.orders = [];
     this._state.activeOrders = [];
@@ -627,7 +669,7 @@ export class ServerProjection {
     this._state.timer.remainingSeconds = 0;
     this._state.clock = { ...this._state.timer };
     this._state.burgerLevel.status = "ended";
-    for (const player of this._state.players) this._clearPlayer(player);
+    for (const player of this._state.players) this._clearPlayer(player, now);
     this._clearStations();
     this._record("round-ended", "Host ended the round", now);
     this._publish(now);
@@ -646,7 +688,7 @@ export class ServerProjection {
     return assigned ? this._player(assigned) : null;
   }
 
-  _setPlate(player, summary) {
+  _setPlate(player, summary, now) {
     if (summary === "NEW") {
       const component = plateComponent(player.hand);
       if (player.hand && !component) return { accepted: false, detail: "held item cannot be plated" };
@@ -662,11 +704,12 @@ export class ServerProjection {
     }
     player.processing = null;
     player.actionState = `holding plate ${plateSummary(player.plate)}`;
+    this._setPlayerLocation(player, "pantry", now);
     this._syncPlayer(player);
     return { accepted: true, detail: `${player.id} plate is ${plateSummary(player.plate)}` };
   }
 
-  _pickup(player, item) {
+  _pickup(player, item, now) {
     const normalized = String(item || "").toUpperCase();
     if (player.processing) return { accepted: false, detail: "player is busy chopping" };
     if (player.hasPlate) {
@@ -675,12 +718,19 @@ export class ServerProjection {
       if (player.plate.includes(component)) return { accepted: false, detail: "plate cannot contain duplicate items" };
       player.plate.push(component);
       player.actionState = `added ${component.toLowerCase()} to plate`;
+      const stationId = ["BUN", "RAW_LETTUCE", "LETTUCE"].includes(normalized) ? "pantry"
+        : ["RAW_MEAT", "RAW_CHEESE", "CHEESE", "MEAT"].includes(normalized) ? "fridge" : "center";
+      this._setPlayerLocation(player, stationId, now);
       this._syncPlayer(player);
       return { accepted: true, detail: `${component} added to ${player.id} plate` };
     }
     if (player.hand) return { accepted: false, detail: "player hand is not empty" };
     player.hand = normalized;
     player.actionState = `holding ${normalized.toLowerCase()}`;
+    const stationId = ["BUN", "RAW_LETTUCE", "LETTUCE"].includes(normalized) ? "pantry"
+      : ["RAW_MEAT", "RAW_CHEESE", "CHEESE", "MEAT"].includes(normalized) ? "fridge"
+        : ["CHOPPED_MEAT", "COOKED_MEAT", "BURNT_MEAT"].includes(normalized) ? "stove-left" : "center";
+    this._setPlayerLocation(player, stationId, now);
     this._syncPlayer(player);
     return { accepted: true, detail: `${player.id} picked up ${normalized}` };
   }
@@ -692,6 +742,7 @@ export class ServerProjection {
       if (this._state.players.some((candidate) => candidate !== player && candidate.processing?.type === "chop")) return { accepted: false, detail: "cutting board is busy" };
       player.processing = { type: "chop", item: player.hand, startedAt: iso(now), deadlineAt: iso(now + CHOP_SECONDS * 1000) };
       player.actionState = "chopping";
+      this._setPlayerLocation(player, "cutting-board", now, now + (CHOP_SECONDS + this.locationHoldSeconds) * 1000);
       Object.assign(station, { status: "chopping", progress: 0, remainingSeconds: CHOP_SECONDS, item: player.hand });
       return { accepted: true, detail: `${player.id} started chopping` };
     }
@@ -699,6 +750,7 @@ export class ServerProjection {
       if (!player.processing || player.processing.type !== "chop") return { accepted: false, detail: "player is not chopping" };
       player.processing = null;
       player.actionState = `holding ${String(player.hand).toLowerCase()}`;
+      this._setPlayerLocation(player, "cutting-board", now);
       Object.assign(station, { status: "idle", progress: 0, remainingSeconds: 0, item: null });
       return { accepted: true, detail: `${player.id} chop failed and progress was lost` };
     }
@@ -708,6 +760,7 @@ export class ServerProjection {
       player.hand = result;
       player.processing = null;
       player.actionState = `holding ${result.toLowerCase()}`;
+      this._setPlayerLocation(player, "cutting-board", now);
       this._syncPlayer(player);
       Object.assign(station, { status: "idle", progress: 0, remainingSeconds: 0, item: null });
       return { accepted: true, detail: `${player.id} finished chopping ${result}` };
@@ -718,6 +771,7 @@ export class ServerProjection {
   _stove(player, side, operation, now) {
     const station = this._state.stations.find((value) => value.id === `stove-${String(side).toLowerCase()}`);
     if (!station) return { accepted: false, detail: "unknown stove side" };
+    this._setPlayerLocation(player, station.id, now);
     this._updateStoves(now);
     if (operation === "CHECK" || operation === "STATUS") {
       player.actionState = `checked ${station.label.toLowerCase()}: ${station.status}`;
@@ -790,12 +844,12 @@ export class ServerProjection {
 
   _applyPlayerAction(player, action, now) {
     switch (action.action) {
-      case "PICKUP": return this._pickup(player, action.item);
-      case "PLATE": return this._setPlate(player, action.plate);
+      case "PICKUP": return this._pickup(player, action.item, now);
+      case "PLATE": return this._setPlate(player, action.plate, now);
       case "CHOP": return this._chop(player, action.phase, action.item, now);
       case "STOVE": return this._stove(player, action.side, action.operation, now);
       case "DROP":
-        this._clearPlayer(player);
+        this._clearPlayer(player, now);
         player.actionState = "dropped held state";
         return { accepted: true, detail: `${player.id} dropped held state` };
       case "TRANSFER": return this._transfer(player, this._player(action.targetPlayerId));
@@ -813,9 +867,20 @@ export class ServerProjection {
         player.submissionReadyUntil = iso(now + 500);
         player.actionState = "ready to submit";
         return { accepted: true, detail: `${player.id} ready for submission` };
-      case "AT_STATION":
+      case "LEAVE":
+        if (player.currentStation !== "center") this._setPlayerLocation(player, player.currentStation, now);
+        player.actionState = "leaving station";
+        return { accepted: true, detail: `${player.id} leaving station` };
+      case "AT_STATION": {
+        const value = String(action.station || "").toUpperCase();
+        const stationId = value.includes("PANTRY") ? "pantry" : value.includes("FRIDGE") ? "fridge"
+          : value.includes("CHOP") || value.includes("CUTTING") ? "cutting-board"
+            : value.includes("RIGHT") || value.endsWith("2") ? "stove-right"
+              : value.includes("STOVE") ? "stove-left" : value.includes("SERV") ? "serving" : "center";
+        this._setPlayerLocation(player, stationId, now);
         player.actionState = `at ${String(action.station).toLowerCase()}`;
         return { accepted: true, detail: `${player.id} at ${action.station}` };
+      }
       default: return { accepted: false, detail: "unsupported player action" };
     }
   }
@@ -913,6 +978,7 @@ export class ServerProjection {
       player.plate = [];
       player.processing = null;
       player.actionState = success ? "order served" : "submission rejected";
+      this._setPlayerLocation(player, "serving", now);
       this._syncPlayer(player);
     }
     return event;

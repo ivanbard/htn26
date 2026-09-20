@@ -78,6 +78,7 @@ test("canonical protocol covers host, gateway, player actions, and submissions w
     parseCanonicalLine("HTN26|1|PLAYER|1|STOVE|RIGHT|TAKE"),
     parseCanonicalLine("HTN26|1|PLAYER|1|STOVE|LEFT|STATUS|WARNING"),
     parseCanonicalLine("HTN26|1|PLAYER|1|DROP"),
+    parseCanonicalLine("HTN26|1|PLAYER|1|LEAVE"),
     parseCanonicalLine("HTN26|1|PLAYER|1|TRANSFER|2"),
     parseCanonicalLine("HTN26|1|PLAYER|1|READY"),
     parseCanonicalLine("HTN26|1|SUBMIT|1|BM--"),
@@ -223,6 +224,27 @@ test("server owns chopping, two-stove cooking phases, and player plate inventory
   assert.deepEqual(player.inventory, ["BUN"]);
 });
 
+test("action-inferred station occupancy allows groups and returns players to center after the hold delay", () => {
+  let now = 45_000;
+  const projection = new ServerProjection({ now: () => now, locationHoldSeconds: 2, orderPatienceSeconds: 30, random: () => 0 });
+  projection.ingestHostControl({ control: "START", durationSeconds: 120 }, now);
+  projection.ingestPlayerAction({ playerId: "p1", action: "PICKUP", item: "BUN" }, now);
+  projection.ingestPlayerAction({ playerId: "p2", action: "PICKUP", item: "BUN" }, now);
+  let state = projection.snapshot(now);
+  assert.deepEqual(state.players.slice(0, 2).map((player) => player.currentStation), ["pantry", "pantry"]);
+  assert.ok(state.players[0].simulatedLocation.returnAt);
+
+  now += 1_999;
+  assert.deepEqual(projection.snapshot(now).players.slice(0, 2).map((player) => player.currentStation), ["pantry", "pantry"]);
+  now += 1;
+  state = projection.snapshot(now);
+  assert.deepEqual(state.players.slice(0, 2).map((player) => player.currentStation), ["center", "center"]);
+
+  projection.ingestPlayerAction({ playerId: "p1", action: "PLATE", plate: "BM--" }, now);
+  projection.ingestSubmission({ playerId: "p1", plate: "BM--" }, now);
+  assert.equal(projection.snapshot(now).players[0].currentStation, "serving");
+});
+
 test("legacy fixed-player actions update the encoded player rather than arrival order", () => {
   const now = 50_000;
   const projection = new ServerProjection({ now: () => now, random: () => 0 });
@@ -267,6 +289,8 @@ test("plain browser view and diagnostic endpoint use the same canonical state", 
   assert.match(html, /Orders \/ new orders/);
   assert.match(html, /Round and timer/);
   assert.match(html, /Players and actions/);
+  for (const heading of ["Pantry", "Fridge", "Cutting Board", "Stove 1", "Stove 2", "Serving", "Center \/ default"]) assert.match(html, new RegExp(heading));
+  assert.match(html, /temporary server inferences from actions/);
   assert.match(html, /Net money/);
   assert.match(html, /HTN26\|1\|HOST\|START\|120\|3/);
   assert.doesNotMatch(html, /<style\b|stylesheet/i);

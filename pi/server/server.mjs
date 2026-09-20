@@ -36,6 +36,8 @@ export async function createRuntime({ env = process.env, now = () => Date.now(),
     orderIntervalMaxSeconds: Number(env.HTN26_ORDER_INTERVAL_MAX_SECONDS) || 35,
     orderPatienceSeconds: Number(env.HTN26_ORDER_PATIENCE_SECONDS) || undefined,
     maxActiveOrders: Number(env.HTN26_MAX_ACTIVE_ORDERS) || 3,
+    locationHoldSeconds: env.HTN26_PLAYER_LOCATION_HOLD_SECONDS == null
+      ? undefined : Number(env.HTN26_PLAYER_LOCATION_HOLD_SECONDS),
     authoritativeEngine,
   });
   const serialAdapter = createSerialStreamAdapter({
@@ -80,7 +82,7 @@ export function usage() {
     `Environment: HTN26_BIND_HOST, HTN26_PORT, HTN26_SERIAL_DEVICE, HTN26_DATA_DIR,\n` +
     `OPENAI_API_KEY (optional; server-side only), HTN26_ORDER_INTERVAL_MIN_SECONDS,\n` +
     `HTN26_ORDER_INTERVAL_MAX_SECONDS, HTN26_ORDER_PATIENCE_SECONDS,\n` +
-    `HTN26_MAX_ACTIVE_ORDERS.\n`;
+    `HTN26_MAX_ACTIVE_ORDERS, HTN26_PLAYER_LOCATION_HOLD_SECONDS.\n`;
 }
 
 export function startupGuide(baseUrl) {

@@ -174,6 +174,7 @@ function parseCanonicalPlayer(fields) {
     }
   }
   if (action === "DROP" && fields.length === 5) return playerRecord(playerId, "DROP");
+  if (action === "LEAVE" && fields.length === 5) return playerRecord(playerId, "LEAVE");
   if (action === "TRANSFER" && fields.length === 6) {
     const target = parseInteger(fields[5], 1, 3);
     if (target != null && target !== playerId) return playerRecord(playerId, "TRANSFER", { targetPlayerId: `p${target}` });

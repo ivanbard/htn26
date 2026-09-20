@@ -47,6 +47,8 @@ Configuration:
 - `HTN26_ORDER_PATIENCE_SECONDS`: optional fixed order lifetime. If omitted,
   each order gets a lifetime from the same configured interval range.
 - `HTN26_MAX_ACTIVE_ORDERS`: active-order limit, default 3.
+- `HTN26_PLAYER_LOCATION_HOLD_SECONDS`: how long an inferred station visit
+  remains visible after an instant/finished action, default 2 seconds.
 - `OPENAI_API_KEY`: optional server-only floorplan provider credential; it is
   never returned to the browser.
 
@@ -108,6 +110,7 @@ HTN26|1|PLAYER|1|STOVE|LEFT|TAKE
 HTN26|1|PLAYER|1|STOVE|RIGHT|CHECK
 HTN26|1|PLAYER|1|STOVE|RIGHT|STATUS|WARNING
 HTN26|1|PLAYER|1|DROP
+HTN26|1|PLAYER|1|LEAVE
 HTN26|1|PLAYER|1|TRANSFER|2
 HTN26|1|PLAYER|1|READY
 ```
@@ -126,7 +129,31 @@ rejected. `TRANSFER` applies the v1 merge/swap rules to the two authoritative
 player inventories. `READY` remains visible for the 0.5-second shake window.
 
 Player actions received while no round is running are recorded as ignored and
-do not mutate inventory.
+do not mutate inventory. `LEAVE` starts the same documented return delay for
+the player's current inferred station.
+
+### Action-inferred station occupancy
+
+The simulator does not claim live camera tracking. It exposes each player's
+`currentStation` and `simulatedLocation` as a temporary inference from accepted
+serial actions:
+
+- bun/lettuce source actions infer Pantry; meat/cheese source actions infer
+  Fridge;
+- chop actions infer Cutting Board;
+- left/right stove actions infer Stove 1/Stove 2; and
+- a submission infers Serving.
+
+Every instant action and every finished/failed timed action remains under that
+station for 2 seconds by default, then the server returns the player to
+`center` / `CENTER / DEFAULT`. `simulatedLocation.returnAt` makes that deadline
+inspectable, and `HTN26_PLAYER_LOCATION_HOLD_SECONDS` changes it. Chopping stays
+at Cutting Board through its three-second operation and then uses the return
+delay. A later action moves the player immediately to its newly inferred
+station. Occupancy is stored per player, so any station can list multiple
+players at once. The plain page shows player names and authoritative action
+text under Pantry, Fridge, Cutting Board, Stove 1, Stove 2, Serving, and the
+center/default group.
 
 ### Submission
 
@@ -197,8 +224,11 @@ and native radio profiles.
 - Chopping takes 3 seconds. Releasing/failing before completion loses progress
   while retaining the raw item.
 - Each logical stove is independent: 15 seconds cooking, 2 seconds done,
-  3 seconds warning, then burnt. Only chopped meat can be placed. Cooked meat
-  can be taken during done/warning; burnt meat must be taken and dropped.
+  3 seconds warning, then burnt. The protocol's left/right sides are displayed
+  as Stove 1/Stove 2. Only chopped meat can be placed. Cooked meat can be taken
+  during done/warning; burnt meat must be taken and dropped.
+- Action-inferred station occupancy uses the documented temporary hold and is
+  not camera or physical-position evidence.
 - Event history records round lifecycle, orders, actions/rejections, station
   phases, submissions, gateway state, and money penalties. Histories and other
   public arrays are bounded.
@@ -224,7 +254,8 @@ diagnostic and passes its line through the exact same parser/dispatcher as the
 physical stream.
 
 A future UI should render `version`, `activeOrders`, `patience.filledSegments`,
-`timer`, players, stations, submissions, and money exactly as supplied. It must
+`timer`, players (including `currentStation`/`simulatedLocation`), stations,
+submissions, and money exactly as supplied. It must
 not run a parallel timer, generate an order, infer a cooking phase, validate a
 plate, or calculate score.
 
