@@ -20,6 +20,7 @@ const DEFAULT_LOCATION_HOLD_SECONDS = 2;
 // Native badges retry an unacknowledged advertisement after three seconds.
 // Keep the first half of a physical bump long enough to pair with one retry.
 const TRANSFER_PAIR_WINDOW_MS = 3_500;
+const CONTROLLER_PRESENCE_TIMEOUT_MS = 8_000;
 const HISTORY_LIMIT = 100;
 
 export const BURGER_RECIPES = Object.freeze([
@@ -110,6 +111,13 @@ function makePlayer(player, now) {
   return {
     ...player,
     badgeMac: null,
+    connection: {
+      status: "waiting",
+      source: "oc2-presence",
+      lastSeenAt: null,
+      staleAfterMs: CONTROLLER_PRESENCE_TIMEOUT_MS,
+      detail: "Waiting for controller",
+    },
     position: null,
     tracking: { status: "unknown", source: "badge-projection", lastSeenAt: null, staleAfterMs: 2000 },
     inventory: [],
@@ -206,6 +214,7 @@ export class ServerProjection {
   constructor({ provider, now = () => Date.now(), roundSeconds = ROUND_SECONDS,
     orderIntervalSeconds, orderIntervalMinSeconds = 8, orderIntervalMaxSeconds = 35,
     orderPatienceSeconds, maxActiveOrders = 3, locationHoldSeconds = DEFAULT_LOCATION_HOLD_SECONDS,
+    controllerPresenceTimeoutMs = CONTROLLER_PRESENCE_TIMEOUT_MS,
     random = Math.random, authoritativeEngine, difficultySidecar } = {}) {
     this.now = now;
     this.provider = provider || new LocalFloorplanProvider({ now });
@@ -216,6 +225,7 @@ export class ServerProjection {
     this.orderPatienceSeconds = Number.isFinite(Number(orderPatienceSeconds)) ? clampInteger(orderPatienceSeconds, 3, 600, DEFAULT_ORDER_INTERVAL_SECONDS) : null;
     this.maxActiveOrders = clampInteger(maxActiveOrders, 1, 6, 3);
     this.locationHoldSeconds = clampInteger(locationHoldSeconds, 0, 30, DEFAULT_LOCATION_HOLD_SECONDS);
+    this.controllerPresenceTimeoutMs = clampInteger(controllerPresenceTimeoutMs, 2_000, 60_000, CONTROLLER_PRESENCE_TIMEOUT_MS);
     this.random = typeof random === "function" ? random : Math.random;
     this.authoritativeEngine = authoritativeEngine || null;
     this.difficultySidecar = difficultySidecar || null;
@@ -410,6 +420,27 @@ export class ServerProjection {
     return changed;
   }
 
+  _updateControllerConnections(now) {
+    let changed = false;
+    for (const player of this._state.players) {
+      const connection = player.connection;
+      if (!connection?.lastSeenAt) continue;
+      const lastSeen = Date.parse(connection.lastSeenAt);
+      const stale = !Number.isFinite(lastSeen) || now - lastSeen > this.controllerPresenceTimeoutMs;
+      const status = stale ? "offline" : "connected";
+      if (connection.status === status) continue;
+      player.connection = {
+        ...connection,
+        status,
+        staleAfterMs: this.controllerPresenceTimeoutMs,
+        detail: stale ? "No controller heartbeat received" : "Controller heartbeat received",
+      };
+      this._record("controller-status", `${player.name} is ${status}`, now, { playerId: player.id, status });
+      changed = true;
+    }
+    return changed;
+  }
+
   _clearPlayer(player, now = this.now()) {
     player.hand = null;
     player.hasPlate = false;
@@ -500,9 +531,17 @@ export class ServerProjection {
   }
 
   _tick(now = this.now()) {
-    if (this._state.timer.status !== "running" || this._roundStartedAt == null) return false;
+    let changed = this._updateControllerConnections(now);
+    if (this._state.timer.status !== "running" || this._roundStartedAt == null) {
+      if (changed) {
+        this._revision += 1;
+        this._state.revision = this._revision;
+        this._emit(now);
+      }
+      return changed;
+    }
     const remainingRound = Math.max(0, this._roundDurationSeconds - Math.floor((now - this._roundStartedAt) / 1000));
-    let changed = remainingRound !== this._state.timer.remainingSeconds;
+    changed = remainingRound !== this._state.timer.remainingSeconds || changed;
     this._state.timer.remainingSeconds = remainingRound;
     this._state.clock.remainingSeconds = remainingRound;
     changed = this._updateChopping(now) || changed;
@@ -590,7 +629,7 @@ export class ServerProjection {
     return clone(this._state);
   }
 
-  registerBadge(mac, playerId) {
+  registerBadge(mac, playerId, now = this.now()) {
     const normalized = String(mac || "").toUpperCase();
     const player = this._state.players.find((candidate) => candidate.id === playerId || candidate.id === `p${playerId}` || String(candidate.id) === String(playerId));
     if (!/^([0-9A-F]{2}:){5}[0-9A-F]{2}$/.test(normalized) || !player) return false;
@@ -602,15 +641,23 @@ export class ServerProjection {
     if (player.badgeMac && player.badgeMac !== normalized) this._badges.delete(player.badgeMac);
     this._badges.set(normalized, player.id);
     player.badgeMac = normalized;
+    player.connection = {
+      ...(player.connection || {}),
+      status: "connected",
+      source: "oc2-presence",
+      lastSeenAt: iso(now),
+      staleAfterMs: this.controllerPresenceTimeoutMs,
+      detail: "Controller heartbeat received",
+    };
     return true;
   }
 
-  assignNextBadge(mac) {
+  assignNextBadge(mac, now = this.now()) {
     const normalized = String(mac || "").toUpperCase();
     const existing = this._badges.get(normalized);
     if (existing) return existing;
     const unassigned = this._state.players.find((player) => !player.badgeMac);
-    if (!unassigned || !this.registerBadge(normalized, unassigned.id)) return null;
+    if (!unassigned || !this.registerBadge(normalized, unassigned.id, now)) return null;
     return unassigned.id;
   }
 
@@ -897,12 +944,12 @@ export class ServerProjection {
     return this._state.players.slice(0, playerCount(this._state.playerCount));
   }
 
-  _playerForIntent(intent) {
+  _playerForIntent(intent, now = this.now()) {
     if (intent.type === "H") return null;
     const mac = String(intent.senderMac || "").toUpperCase();
     const known = this._badges.get(mac);
     if (known) return this._player(known);
-    const assigned = this.assignNextBadge(mac);
+    const assigned = this.assignNextBadge(mac, now);
     return assigned ? this._player(assigned) : null;
   }
 

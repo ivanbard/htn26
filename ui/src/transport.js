@@ -30,6 +30,11 @@ async function failureMessage(label, response) {
   try {
     const body = await response.json();
     if (body && typeof body.error === "string" && body.error !== "server error") detail = `: ${body.error}`;
+    // A server that predates this page rejects the page's newer commands (for
+    // example RESET_TO_OPENING). Say so, since restarting it is the fix.
+    if (response.status === 400 && /^unsupported command/i.test(body?.error || "")) {
+      detail += " — the game server is older than this page; restart it with: cd server && node server.mjs";
+    }
   } catch {
     detail = "";
   }
