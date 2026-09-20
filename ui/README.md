@@ -70,7 +70,7 @@ A burger uses buns, meat, cheese, and lettuce. Cheese, lettuce, and meat can be 
 
 The renderer uses three display modes so setup controls do not compete with the live game display:
 
-- `setup`: host controls, the room mirror, and physical burger-level placement instructions.
+- `setup`: host controls, the room mirror, and physical burger-level placement instructions. An AI `proposedRoomLayout` is rendered as the complete unaccepted review surface; `roomLayout` is rendered after explicit approval.
 - `gameplay`: one framed room board with up to four active orders across the top, the score at bottom-left, the round clock at bottom-right, live tracked players, and compact activity notifications. Operator health chrome is intentionally excluded from the player-facing HUD.
 - `results`: the completed round, score, serving result, and final room mirror.
 

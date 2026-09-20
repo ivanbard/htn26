@@ -396,8 +396,8 @@ function layoutRect(rect, className, debug, label) {
   );
 }
 
-function RoomLayoutSurface({ layout, debug = false }) {
-  return h("svg", { className: "room-layout-svg", viewBox: "0 0 1 1", preserveAspectRatio: "xMidYMid meet", role: "img", "aria-label": "AI-generated normalized room layout" },
+function RoomLayoutSurface({ layout, debug = false, proposed = false }) {
+  return h("svg", { className: "room-layout-svg", viewBox: "0 0 1 1", preserveAspectRatio: "xMidYMid meet", role: "img", "aria-label": `${proposed ? "Proposed" : "Active"} AI-generated normalized room layout` },
     h("rect", { className: "room-layout-background", x: 0, y: 0, width: 1, height: 1 }),
     layoutRect(layout.playArea, "room-layout-play-area", debug, "play area"),
     layoutRect(layout.presentationArea, "room-layout-presentation", debug, "presentation area"),
