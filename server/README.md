@@ -13,7 +13,7 @@ sidecar remains future-only.
 
 ## Run locally
 
-At startup, `server.mjs` automatically loads `server/.env` without overriding variables already supplied by the shell. Copy `example.env` to `.env`, set `OPENAI_API_KEY` and the serial device when needed, and keep the real `.env` out of Git.
+At startup, `server.mjs` automatically loads `server/.env` without overriding variables already supplied by the shell. Copy `example.env` to `.env`, set `OPENAI_API_KEY` when needed, and keep the real `.env` out of Git. Serial attachment is deliberately CLI-only.
 
 ```sh
 cd server
@@ -24,8 +24,6 @@ Use `--host 0.0.0.0` only for a trusted LAN. Useful environment variables:
 
 - `HTN26_BIND_HOST`, `HTN26_PORT`: bind address and port; CLI flags win.
 - `HTN26_DATA_DIR`: persistent photo and audit-metadata directory.
-- `HTN26_SERIAL_DEVICE`: host-badge USB serial device; `--serial DEVICE` is
-  equivalent.
 - `HTN26_ROUND_SECONDS`: round length, default 240.
 - `HTN26_ORDER_INTERVAL_MIN_SECONDS` and
   `HTN26_ORDER_INTERVAL_MAX_SECONDS`: randomized order-spawn interval,
@@ -60,13 +58,22 @@ HTN26|GW|UP|12|0
 
 It searches for `HTN26|` amid log noise, validates the record, handles USB
 chunks that split a line, and suppresses duplicate `MAC + sequence` events.
-For laptop serial integration, set the discovered device before starting:
+For laptop serial integration, explicitly attach the discovered device on each
+start:
 
 ```sh
-HTN26_SERIAL_DEVICE=/dev/ttyUSB0 node server/server.mjs
+node server/server.mjs --serial /dev/ttyUSB0
 ```
 
-The development-only `POST /api/serial` diagnostic uses the same parser:
+A plain `node server/server.mjs` never attaches a device, even if the inherited
+environment or `server/.env` contains `HTN26_SERIAL_DEVICE`. This opt-in avoids
+opening a connected ESP32 unexpectedly. The server-side code previously opened
+the environment-selected path and its adapter retries after stream errors or
+end-of-file; that is the available code evidence for repeated host access. It
+does not establish the cause of any physical badge reboot.
+
+The development-only `POST /api/serial` diagnostic remains available without a
+physical attachment and uses the same parser:
 
 ```sh
 curl -sS -X POST http://127.0.0.1:8787/api/serial \
