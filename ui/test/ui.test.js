@@ -38,7 +38,7 @@ import {
   stationProgressPercent,
   UI_DISPLAY_MODES,
 } from "../src/state.js";
-import { createInitialProjectionState } from "../../pi/server/src/projection.mjs";
+import { createInitialProjectionState } from "../../server/src/projection.mjs";
 
 async function approvedTransport(now = 1_000) {
   const transport = createMockTransport({ now: () => now });
