@@ -33,14 +33,18 @@ If all players are shaking at the same time we submit
 # Other responses
 
 I don't care how players join so long as they get unique player numbers
-Ignore events sent before game starts. Actually, revision to v1, we should click game start on the host badge, and it broadcasts that to all badges, telling them to wipe their memory etc, and also the ui hears it on the serial and starts the game
-After four minutes the host badge should broadcast game end which also wipes everything
+Ignore events sent before game starts. Actually, revision to v1, we should click game start on the host badge, and it broadcasts that to all badges, telling them to wipe their memory etc. The laptop server hears it on serial, applies the authoritative start transition, and owns the game countdown shown by the UI.
+After four minutes the host badge should broadcast game end; the laptop server applies the authoritative end transition and both sides wipe round state.
 There's no retry, a failed order causes a penalty and the plate still gets consumed
 hopefully that shouldn't happen but it should keep trying to reconnect
 that shouldn't happen but assume it doesn't we can fix later
 the host badge should actually show a counting down timer
 yes players can hold items indefinetly but it gets wiped at game end
 
-Yes, we no longer will know where players are, so just keep the player icons at the bottom, and what they're holding, but when chopping the UI should know they're chopping, and we can broadcast done chopping or failed chopping after, things like that
+We no longer know physical player positions. The plain simulator may temporarily
+group each player under the station inferred from their latest action, then
+return them to center/default after a short delay. It must show what they hold
+and explicit action state, including chopping completion or failure, without
+claiming camera tracking.
 The screen/ui should also know how cooked the meat is because it knows when it started ykno.
 the photos are just to set up the level

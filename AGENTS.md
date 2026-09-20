@@ -1,6 +1,7 @@
 # Project agent guidance
 
-Read [`README.md`](README.md) for the current one-Pi phone-camera v1 product intent before changing documentation or code.
+Read [`README.md`](README.md) for the current laptop-hosted, phone-photo v1
+product intent before changing documentation or code.
 
 Read [`updates/UPDATE_v1.md`](updates/UPDATE_v1.md) and [`updates/UPDATE_v1.1.md`](updates/UPDATE_v1.1.md) for the accepted product decisions, with v1.1 taking precedence where the two differ.
 
