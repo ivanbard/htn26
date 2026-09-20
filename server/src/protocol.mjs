@@ -237,19 +237,23 @@ export function createSerialAdapter({ onRecord = () => {} } = {}) {
 }
 
 /** USB reads may split records at any byte boundary and include runtime log prefixes. */
-export function createSerialStreamAdapter({ onRecord = () => {} } = {}) {
+export function createSerialStreamAdapter({ onRecord = () => {}, onLine = () => {} } = {}) {
   const lineAdapter = createSerialAdapter({ onRecord });
+  const ingest = (line) => {
+    onLine(String(line));
+    return lineAdapter.ingest(line);
+  };
   let pending = "";
   return {
-    ingest(line) { return lineAdapter.ingest(line); },
+    ingest,
     push(chunk) {
       pending += Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk);
       const lines = pending.split(/\r?\n/);
       pending = lines.pop() || "";
-      for (const line of lines) lineAdapter.ingest(line);
+      for (const line of lines) ingest(line);
     },
     flush() {
-      if (pending) lineAdapter.ingest(pending);
+      if (pending) ingest(pending);
       pending = "";
     },
     stats() { return lineAdapter.stats(); },

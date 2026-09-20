@@ -74,7 +74,9 @@ stoves.
   stove. Cut meat goes onto an empty stove. An empty hand can take cooked meat
   after 15 seconds; the done period is 2 seconds, the warning period flashes
   for 3 seconds, and then the meat is burnt. Burnt meat must be picked up and
-  dropped.
+  dropped. The `ST:<side>:P` broadcast is the shared start signal: every player
+  badge records its receipt time and advances its own copy without asking the
+  host, while the gateway forwards the same event to the authoritative server/UI.
 - Hold **B** and shake to drop the held item or plate.
 - A supported `badge.sensor.tap()` starts plate/item transfer while both badges
   are tapped. The app also accepts the documented accelerometer fallback: hold
@@ -134,7 +136,8 @@ python -m unittest discover -s badge/slave/tests -p 'test_*.py' -v
 
 The tests cover all four NFC choices and invalid combinations, plate assembly,
 duplicate prevention, six-step chopping and early release, cooking/done/warning/
-burnt transitions, tap-transfer merge/swap rules, compact sequence packets,
+burnt transitions, peer cooking-clock replication, tap-transfer merge/swap
+rules, compact sequence packets,
 fixed three-player readiness, and state discard. They execute helpers from the
 production Lua file rather than a second protocol model.
 

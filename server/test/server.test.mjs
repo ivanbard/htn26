@@ -1,20 +1,22 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import { readFile, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { createSerialStreamAdapter, parseCanonicalLine, parseGatewayRxLine, parseGatewaySerialLine } from "../src/protocol.mjs";
 import { browserDocument } from "../src/http.mjs";
 import { LocalFloorplanProvider } from "../src/provider.mjs";
 import { BURGER_RECIPES, GAME_TIMINGS, MONEY_RULES, ServerProjection } from "../src/projection.mjs";
-import { createRuntime, startupGuide } from "../server.mjs";
-import { openSerialDevice } from "../src/serial-device.mjs";
+import { createRuntime, startupGuide, usage } from "../server.mjs";
+import { configureSerialFd, openSerialDevice } from "../src/serial-device.mjs";
 
 const MAC = "AA:BB:CC:DD:EE:01";
 
-async function withRuntime(callback, { now = () => Date.now(), env = {} } = {}) {
+async function withRuntime(callback, { now = () => Date.now(), env = {}, fetchImpl = globalThis.fetch } = {}) {
   const dataDir = await mkdtemp(path.join(tmpdir(), "htn26-server-"));
-  const runtime = await createRuntime({ dataDir, env, now });
+  const runtime = await createRuntime({ dataDir, env, now, fetchImpl });
   await new Promise((resolve) => runtime.server.listen(0, "127.0.0.1", resolve));
   const address = runtime.server.address();
   try { return await callback(`http://127.0.0.1:${address.port}`, runtime); }
@@ -37,6 +39,55 @@ async function post(base, route, body, headers = { "content-type": "application/
   return { response, data: await response.json() };
 }
 
+async function runServerProcess(args, env, ready, timeoutMs = 3_000) {
+  const entrypoint = fileURLToPath(new URL("../server.mjs", import.meta.url));
+  const child = spawn(process.execPath, [entrypoint, ...args], {
+    env: { ...process.env, ...env },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  let stdout = "";
+  let stderr = "";
+  let settled = false;
+  let timer;
+  const exited = new Promise((resolve) => child.once("exit", resolve));
+  const reachedReadyState = new Promise((resolve, reject) => {
+    const check = () => {
+      if (!settled && ready({ stdout, stderr })) {
+        settled = true;
+        clearTimeout(timer);
+        resolve();
+      }
+    };
+    child.stdout.on("data", (chunk) => { stdout += chunk; check(); });
+    child.stderr.on("data", (chunk) => { stderr += chunk; check(); });
+    child.once("error", (error) => {
+      if (!settled) { settled = true; clearTimeout(timer); reject(error); }
+    });
+    child.once("exit", (code, signal) => {
+      if (!settled) {
+        settled = true;
+        clearTimeout(timer);
+        reject(new Error(`server exited before startup (code=${code}, signal=${signal}): ${stderr}`));
+      }
+    });
+    timer = setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        reject(new Error(`timed out waiting for server output\nstdout:\n${stdout}\nstderr:\n${stderr}`));
+      }
+    }, timeoutMs);
+    timer.unref?.();
+  });
+  try {
+    await reachedReadyState;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  } finally {
+    if (child.exitCode == null && child.signalCode == null) child.kill("SIGTERM");
+    await exited;
+  }
+  return { stdout, stderr };
+}
+
 async function approveAndStart(base) {
   for (let index = 0; index < 3; index += 1) {
     const upload = await post(base, "/api/photos", Buffer.from(`JPEG-FIXTURE-${index}`), { "content-type": "image/jpeg", "x-photo-name": `room-${index}.jpg` });
@@ -45,8 +96,8 @@ async function approveAndStart(base) {
   const host = await post(base, "/api/command", { type: "START_HOST" });
   assert.equal(host.response.status, 200);
   const scan = await post(base, "/api/command", { type: "SCAN_ROOM" });
-  assert.equal(scan.response.status, 400);
-  assert.match(scan.data.error, /api\/layout\/generate/);
+  assert.equal(scan.response.status, 200);
+  assert.equal(scan.data.setup.phase, "layout-proposed");
   const review = await post(base, "/api/floorplan/review", {});
   assert.equal(review.response.status, 200);
   assert.equal(review.data.floorPlan.stations.length, 4);
@@ -61,6 +112,33 @@ async function approveAndStart(base) {
   assert.equal(started.data.result.ok, true);
   return started.data.state;
 }
+
+test("an absent QNX sidecar URL keeps the laptop order policy without connection attempts", async () => {
+  let now = 1_000;
+  let fetchCalls = 0;
+  await withRuntime(async (_base, runtime) => {
+    assert.equal(runtime.difficultySidecar, null);
+    runtime.projection.ingestHostControl({ control: "START", durationSeconds: 120 }, now);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(fetchCalls, 0);
+    assert.deepEqual(runtime.projection.snapshot(now).orders.map((order) => order.recipe), ["PLAIN_MEAT"]);
+
+    now += 1_000;
+    assert.deepEqual(runtime.projection.snapshot(now).orders.map((order) => order.recipe), ["PLAIN_MEAT", "CHEESEBURGER"]);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(fetchCalls, 0);
+  }, {
+    now: () => now,
+    env: {
+      HTN26_ORDER_INTERVAL_MIN_SECONDS: "1",
+      HTN26_ORDER_INTERVAL_MAX_SECONDS: "1",
+    },
+    fetchImpl: async () => {
+      fetchCalls += 1;
+      throw new Error("no network should be attempted");
+    },
+  });
+});
 
 test("fixture parser accepts noisy and chunk-framed gateway records", async () => {
   const fixture = await readFile(new URL("./fixtures/gateway-events.ndjson", import.meta.url));
@@ -115,6 +193,39 @@ test("canonical protocol covers host, gateway, player actions, and submissions w
   assert.equal(parseGatewaySerialLine(`noise HTN26|RX|${MAC}|-44|OC2|7|E|P2:PU:R`).kind, "badge-event");
 });
 
+test("server CLI ignores HTN26_SERIAL_DEVICE and attaches serial only with --serial", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "htn26-serial-cli-"));
+  const devicePath = path.join(directory, "usb-serial.fixture");
+  const dataDir = path.join(directory, "data");
+  const line = "driver noise HTN26|GW|UP|7|0";
+  await writeFile(devicePath, `${line}\n`);
+  try {
+    const plain = await runServerProcess(["--port", "0"], {
+      HTN26_DATA_DIR: dataDir,
+      HTN26_SERIAL_DEVICE: devicePath,
+    }, ({ stdout }) => stdout.includes("HTN26 serial input disabled"));
+    assert.match(plain.stdout, /serial input disabled; pass --serial DEVICE to attach explicitly/);
+    assert.doesNotMatch(plain.stdout, /\[serial\]/);
+    assert.ok(!plain.stdout.includes(devicePath), "plain startup must not use the environment-selected path");
+    assert.equal(plain.stderr, "");
+
+    const explicit = await runServerProcess(["--port", "0", "--serial", devicePath], {
+      HTN26_DATA_DIR: dataDir,
+      HTN26_SERIAL_DEVICE: path.join(directory, "ignored-device"),
+    }, ({ stdout }) => stdout.includes(`HTN26 serial input: ${devicePath}`) && stdout.includes(`[serial] ${line}`));
+    assert.ok(explicit.stdout.includes(`HTN26 serial input: ${devicePath}`));
+    assert.ok(explicit.stdout.includes(`[serial] ${line}`));
+    assert.equal(explicit.stderr, "");
+
+    const help = usage();
+    assert.match(help, /--serial DEVICE/);
+    assert.match(help, /Serial input is disabled unless --serial DEVICE is explicitly passed/);
+    assert.match(help, /HTN26_SERIAL_DEVICE is ignored/);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("configurable serial-device adapter opens a fixture stream", async () => {
   const directory = await mkdtemp(path.join(tmpdir(), "htn26-serial-"));
   const devicePath = path.join(directory, "usb-serial.fixture");
@@ -128,6 +239,37 @@ test("configurable serial-device adapter opens a fixture stream", async () => {
   assert.equal(record.kind, "gateway-status");
   assert.equal(record.status.packetCount, 2);
   await rm(directory, { recursive: true, force: true });
+});
+
+test("POSIX serial-device adapter disables tty echo before reading", () => {
+  let invocation;
+  const configured = configureSerialFd(17, {
+    platform: "linux",
+    fstat: () => ({ isCharacterDevice: () => true }),
+    run: (...args) => {
+      invocation = args;
+      return { status: 0, stderr: "" };
+    },
+  });
+  assert.equal(configured, true);
+  assert.equal(invocation[0], "stty");
+  assert.deepEqual(invocation[1], ["raw", "-echo", "-hupcl", "clocal"]);
+  assert.deepEqual(invocation[2].stdio, [17, "ignore", "pipe"]);
+});
+
+test("serial-device adapter skips stty for fixtures and fails closed on tty configuration errors", () => {
+  let calls = 0;
+  assert.equal(configureSerialFd(9, {
+    platform: "linux",
+    fstat: () => ({ isCharacterDevice: () => false }),
+    run: () => { calls += 1; },
+  }), false);
+  assert.equal(calls, 0);
+  assert.throws(() => configureSerialFd(9, {
+    platform: "linux",
+    fstat: () => ({ isCharacterDevice: () => true }),
+    run: () => ({ status: 1, stderr: "bad tty" }),
+  }), /safe receive-only access: bad tty/);
 });
 
 test("projection keeps four recipes, validates submissions, and computes gold/tips", async () => {
@@ -305,6 +447,26 @@ test("stoves and transfers preserve authoritative processing and native bump rul
   assert.equal(state.players[1].heldItem, "RAW_CHEESE");
 });
 
+test("native bump halves still pair when one badge arrives on its first three-second retry", () => {
+  let now = 46_000;
+  const projection = new ServerProjection({ now: () => now, random: () => 0 });
+  projection.ingestHostControl({ control: "START", durationSeconds: 120 }, now);
+  projection.ingestBadgeEvent({ senderMac: "AA:BB:CC:DD:EE:01", sequence: 1, type: "E", value: "P1:PL:B---" }, now);
+  projection.ingestBadgeEvent({ senderMac: "AA:BB:CC:DD:EE:02", sequence: 2, type: "E", value: "P2:PU:C" }, now);
+
+  let result = projection.ingestBadgeEvent({ senderMac: "AA:BB:CC:DD:EE:01", sequence: 3, type: "E", value: "P1:X:PB---" }, now);
+  assert.equal(result.accepted, true);
+  assert.match(result.detail, /ready to transfer/);
+
+  now += 3_000;
+  result = projection.ingestBadgeEvent({ senderMac: "AA:BB:CC:DD:EE:02", sequence: 4, type: "E", value: "P2:X:HC" }, now);
+  assert.equal(result.accepted, true);
+  assert.match(result.detail, /transferred held state/);
+  const state = projection.snapshot(now);
+  assert.deepEqual(state.players[0].plate, ["BUN", "CHEESE"]);
+  assert.equal(state.players[1].heldItem, "EMPTY");
+});
+
 test("action-inferred station occupancy allows groups and returns players to center after the hold delay", () => {
   let now = 45_000;
   const projection = new ServerProjection({ now: () => now, locationHoldSeconds: 2, orderPatienceSeconds: 30, random: () => 0 });
@@ -455,7 +617,10 @@ test("native GAME and complete E event path is parsed and projected by the lapto
     assert.match(state.eventHistory.at(-1).message, /confirmed completed chop/);
 
     state = event(1, "ST:L:P");
-    assert.equal(state.stations.find((station) => station.id === "stove-left").status, "cooking");
+    const startedStove = state.stations.find((station) => station.id === "stove-left");
+    assert.equal(startedStove.status, "cooking");
+    assert.equal(startedStove.startedAt, new Date(now).toISOString());
+    assert.equal(startedStove.doneAt, new Date(now + GAME_TIMINGS.cookSeconds * 1_000).toISOString());
     now += GAME_TIMINGS.cookSeconds * 1_000;
     state = event(1, "ST:L:C:DONE");
     assert.equal(state.stations.find((station) => station.id === "stove-left").status, "done");
@@ -487,7 +652,7 @@ test("native GAME and complete E event path is parsed and projected by the lapto
     assert.equal(state.submissions[1].playerId, "p1");
     assert.deepEqual(state.submissions[1].consumedSubmissions.map((submission) => submission.playerId), ["p1", "p2"]);
 
-    for (const [code, expected] of [["M", "CHOPPED_MEAT"], ["X", "BURNT_MEAT"], ["L", "LETTUCE"], ["C", "CHEESE"]]) {
+    for (const [code, expected] of [["X", "BURNT_MEAT"], ["L", "LETTUCE"], ["C", "CHEESE"]]) {
       state = event(3, `PU:${code}`);
       assert.equal(state.players[2].heldItem, expected);
       state = event(3, `DROP:H${code}`);
@@ -511,6 +676,12 @@ test("native GAME and complete E event path is parsed and projected by the lapto
     state = event(3, "ST:R:C:EMPTY");
     assert.equal(state.players[2].actionState, "checked stove 2: idle");
     event(3, "PU:M");
+    assert.equal(runtime.projection.snapshot(now).players[2].heldItem, "COOKED_MEAT");
+    event(3, "DROP:HM");
+    event(3, "PU:R");
+    event(3, "CH:S");
+    now += GAME_TIMINGS.chopSeconds * 1_000;
+    event(3, "CH:D:D");
     event(3, "ST:R:P");
     now += (GAME_TIMINGS.cookSeconds + GAME_TIMINGS.doneSeconds + GAME_TIMINGS.warningSeconds) * 1_000;
     state = event(3, "ST:R:X");
@@ -534,7 +705,9 @@ test("one-player rounds only require the active player's submission readiness", 
   const projection = new ServerProjection({ now: () => now, random: () => 0 });
   projection.ingestHostControl({ control: "START", durationSeconds: 120, playerCount: 1 }, now);
   const target = projection.snapshot(now).activeOrders[0];
-  projection.ingestPlayerAction({ playerId: "p1", action: "PLATE", plate: target.components.map((item) => ({ BUN: "B", MEAT: "M", LETTUCE: "L", CHEESE: "C" }[item] || "-")).join("") }, now);
+  const targetComponents = new Set(target.components);
+  const plate = `${targetComponents.has("BUN") ? "B" : "-"}${targetComponents.has("MEAT") ? "M" : "-"}${targetComponents.has("LETTUCE") ? "L" : "-"}${targetComponents.has("CHEESE") ? "C" : "-"}`;
+  projection.ingestPlayerAction({ playerId: "p1", action: "PLATE", plate }, now);
   const result = projection.ingestSubmission({ playerId: "p1", plate: target.recipe }, now);
   const state = projection.snapshot(now);
   assert.equal(state.playerCount, 1);

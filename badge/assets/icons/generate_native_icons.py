@@ -23,6 +23,7 @@ OUTPUT = HERE.parent.parent / "native" / "generated_icons.h"
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 WIDTH = 42
 HEIGHT = 42
+NATIVE_SIZE = 28
 LV_IMAGE_HEADER_MAGIC = 0x19
 LV_COLOR_FORMAT_RGB565A8 = 0x14
 
@@ -205,7 +206,10 @@ def native_icon_data() -> list[tuple[str, str, bytes]]:
         ("chopped_cheese", "ing_cheese_chopped.png", load_rgba_png(HERE / "ing_cheese_chopped.png")),
         ("plate", "station_plate.png", load_rgba_png(HERE / "station_plate.png")),
     ]
-    return [(name, source, encode_rgb565a8(image)) for name, source, image in definitions]
+    # ponytail: 28px assets fit the stock runtime mapping; larger art needs a verified mapping change.
+    return [(name, source, encode_rgb565a8(resized_crop(
+        image, (0, 0, WIDTH, HEIGHT), NATIVE_SIZE, NATIVE_SIZE)))
+        for name, source, image in definitions]
 
 
 def c_bytes(data: bytes) -> str:
@@ -231,7 +235,7 @@ def build_header() -> str:
             c_bytes(data),
             "};",
             f"static const NativeImage native_icon_{name} = {{",
-            f"    {{{LV_IMAGE_HEADER_MAGIC}, {LV_COLOR_FORMAT_RGB565A8}, 0, {WIDTH}, {HEIGHT}, {WIDTH * 2}, 0}},",
+            f"    {{{LV_IMAGE_HEADER_MAGIC}, {LV_COLOR_FORMAT_RGB565A8}, 0, {NATIVE_SIZE}, {NATIVE_SIZE}, {NATIVE_SIZE * 2}, 0}},",
             f"    {len(data)}, native_icon_{name}_data, 0",
             "};",
             "",

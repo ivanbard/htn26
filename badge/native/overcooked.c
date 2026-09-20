@@ -74,8 +74,10 @@ _Static_assert(sizeof(App) == 312, "Update heap report when app size changes");
 #define GAME_TICKS (GAME_SECONDS * 50)
 #define MAX_ATTEMPTS 3
 #define SHAKE_ABS_BITS 0x44c80000u /* 1600 mg; hardware calibration knob. */
+#define DROP_SHAKE_ABS_BITS 0x44af0000u /* 1400 mg while B disambiguates the gesture. */
 #define TAP_ABS_BITS 0x44960000u /* 1200 mg; hardware calibration knob. */
 #define TRANSFER_WAIT_TICKS 40 /* 800 ms peer-transfer handshake window. */
+#define SHAKE_COOLDOWN_TICKS 25
 
 #define FN(address, result, ...) ((result (*)(__VA_ARGS__))(address))
 #define PRINT FN(0x4211b726, int, const char *, ...)
@@ -359,6 +361,7 @@ static void reset_round(App *self) {
     self->held = self->plate = self->has_plate = self->selected = 0;
     self->a_held = self->b_held = self->process_from = self->process_to = 0;
     self->process_ticks = self->stove_view = self->stove_view_ticks = self->transfer_ticks = 0;
+    self->shake_cooldown = self->tap_cooldown = 0;
     self->ready_ticks[0] = self->ready_ticks[1] = self->ready_ticks[2] = 0;
     set_stove(self, 0, STOVE_EMPTY); set_stove(self, 1, STOVE_EMPTY);
     LED_CLEAR(); LED_SHOW();
@@ -426,6 +429,16 @@ static int apply_bump(App *self, const char *state) {
     return 1;
 }
 
+static void apply_peer_bump(App *self, const char *state) {
+    /* Advertising is room-wide, but a transfer is physical and bilateral.
+       Only a badge that detected its own tap in the same half-second window
+       may consume the peer snapshot; uninvolved player badges ignore it. */
+    if (!self->tap_cooldown) return;
+    apply_bump(self, state);
+    if (self->status) LABEL_TEXT(self->status, "TAP TRANSFER COMPLETE");
+    render_game(self);
+}
+
 static void mark_ready(App *self, int player) {
     if (player >= 1 && player <= 3) self->ready_ticks[player - 1] = 25;
     int all_ready = 1;
@@ -465,8 +478,11 @@ static void apply_action(App *self, const char *action, int local) {
     } else if (starts(action, "ST:")) {
         int stove = action[3] == 'R';
         if (action[5] == 'P') {
-            set_stove(self, stove, STOVE_COOKING);
-            if (local) self->held = EMPTY;
+            /* A repeated host ACK must not restart an already-running clock. */
+            if (self->stove_state[stove] == STOVE_EMPTY) {
+                set_stove(self, stove, STOVE_COOKING);
+                if (local) self->held = EMPTY;
+            }
         } else if (action[5] == 'T' || action[5] == 'X') {
             if (local) take_item(self, action[5] == 'X' ? BURNT_MEAT : COOKED_MEAT);
             set_stove(self, stove, STOVE_EMPTY);
@@ -487,19 +503,22 @@ static void apply_action(App *self, const char *action, int local) {
     render_game(self);
 }
 
-static void start_action(App *self, const char *action) {
-    if (self->wait_ticks || self->process_ticks || self->transfer_ticks) return;
+static int start_action(App *self, const char *action) {
+    if (self->wait_ticks || self->process_ticks || self->transfer_ticks) return 0;
     u32 current = self->sequence++;
     if (self->sequence > 999999) self->sequence = 1;
     int written = FORMAT(self->pending, sizeof(self->pending),
                          "OC2|%06u|E|P%u:%s", current, (u32)self->player, action);
-    if (written < 17 || written >= (int)sizeof(self->pending)) return;
+    if (written < 17 || written >= (int)sizeof(self->pending)) return 0;
     self->pending_size = (u32)written; self->advertise_ticks = 0;
     self->attempts = 1; self->wait_ticks = WAIT_TICKS;
     if (transmit(self, self->pending, self->pending_size)) {
         self->wait_ticks = 0; RADIO_PAUSE();
         if (self->status) LABEL_TEXT(self->status, "RADIO SEND ERROR");
-    } else if (self->status) LABEL_TEXT(self->status, "ACTION SENT - WAITING ACK");
+        return 0;
+    }
+    if (self->status) LABEL_TEXT(self->status, "ACTION SENT - WAITING ACK");
+    return 1;
 }
 
 static void broadcast_control(App *self, char code, u8 player_count) {
@@ -567,7 +586,12 @@ static void station_scan(App *self, const char *station) {
         if (verb == 'C') FORMAT(dynamic, sizeof(dynamic), "ST:%c:C:%s",
                                 stove ? 'R' : 'L', stove_phase(self->stove_state[stove]));
         else FORMAT(dynamic, sizeof(dynamic), "ST:%c:%c", stove ? 'R' : 'L', verb);
-        start_action(self, dynamic); return;
+        /* The placement packet itself is the shared start signal. Start the
+           sender's local clock as soon as that broadcast is queued; peers and
+           the laptop start from their first receipt instead of waiting for a
+           later query or for the gateway ACK to return. */
+        if (start_action(self, dynamic) && verb == 'P') apply_action(self, dynamic, 1);
+        return;
     }
     if (action) start_action(self, action);
     else unknown_combo(self);
@@ -652,13 +676,29 @@ static void snapshot(App *self, char *target) {
 static void poll_motion(App *self) {
     if (!self->game_active || self->role != ROLE_PLAYER) return;
     if (self->tap_cooldown) --self->tap_cooldown;
-    if (self->shake_cooldown) { --self->shake_cooldown; return; }
     u32 value = motion();
-    if (value > SHAKE_ABS_BITS) {
-        self->shake_cooldown = 25;
-        if (self->b_held && (self->held != EMPTY || self->has_plate)) {
-            char state[6], action[12]; snapshot(self, state);
-            FORMAT(action, sizeof(action), "DROP:%s", state); start_action(self, action);
+    u32 shake_threshold = self->b_held ? DROP_SHAKE_ABS_BITS : SHAKE_ABS_BITS;
+    if (self->shake_cooldown) {
+        /* A sustained gesture must not become DROP followed by READY after B
+           is released. Require a quiet cooldown before rearming. */
+        if (value >= shake_threshold) self->shake_cooldown = SHAKE_COOLDOWN_TICKS;
+        else --self->shake_cooldown;
+        return;
+    }
+    if (value >= shake_threshold) {
+        self->shake_cooldown = SHAKE_COOLDOWN_TICKS;
+        if (self->b_held) {
+            if (self->held != EMPTY || self->has_plate) {
+                char state[6], action[12]; snapshot(self, state);
+                FORMAT(action, sizeof(action), "DROP:%s", state);
+                /* Capture and queue the OC2 snapshot before clearing local state.
+                   If the radio is busy or fails, keep inventory rather than lose it. */
+                if (start_action(self, action)) {
+                    self->held = self->plate = self->has_plate = 0;
+                    if (self->status) LABEL_TEXT(self->status, "ITEM DROPPED");
+                    render_game(self);
+                }
+            } else unknown_combo(self);
         } else if (self->a_held && self->has_plate) {
             char summary[5], action[9]; plate_summary(summary, self->plate);
             mark_ready(self, self->player);
@@ -671,7 +711,10 @@ static void poll_motion(App *self) {
     } else if (!self->tap_cooldown && value > TAP_ABS_BITS) {
         char state[6], action[10]; snapshot(self, state);
         FORMAT(action, sizeof(action), "X:%s", state);
-        self->tap_cooldown = 25; start_action(self, action); self->transfer_ticks = TRANSFER_WAIT_TICKS;
+        if (start_action(self, action)) {
+            self->tap_cooldown = 25;
+            self->transfer_ticks = TRANSFER_WAIT_TICKS;
+        }
     }
 }
 
@@ -700,6 +743,12 @@ static void render_progress(App *self) {
 
 static void button(App *self, u32 event) {
     u8 key = event & 0xff, kind = (event >> 8) & 0xff;
+    /* Track press/release edges before role/phase gates so a release during
+       radio startup cannot leave A or B latched into gameplay. */
+    if (kind <= 1) {
+        if (key == 0) self->a_held = kind == 0;
+        if (key == 1) self->b_held = kind == 0;
+    }
     if (self->role == ROLE_NONE && kind == 0) {
         if (key == 0) {
             self->role = ROLE_PLAYER_SETUP; self->player = 1;
@@ -730,8 +779,6 @@ static void button(App *self, u32 event) {
         PRINT("HTN26|GAME|START_GAME|240|%u\n", (u32)self->player_count);
         apply_action(self, "GAME:START", 1); broadcast_control(self, 'S', self->player_count); return;
     }
-    if (key == 0) self->a_held = kind == 0;
-    if (key == 1) self->b_held = kind == 0;
     if (kind == 1 && key == 0 && self->process_ticks) {
         self->held = self->process_from; self->process_ticks = 0; self->process_to = EMPTY;
         if (self->status) LABEL_TEXT(self->status, "CUT RESET - A RELEASED");
@@ -856,7 +903,10 @@ static void consume_radio(App *self) {
                 PRINT("HTN26|RX|%02x:%02x:%02x:%02x:%02x:%02x|%d|%s\n",
                   peer[5], peer[4], peer[3], peer[2], peer[1], peer[0], rssi, packet);
             }
-            apply_action(self, packet + 16, 0);
+            if (self->role == ROLE_PLAYER && starts(packet + 16, "X:") &&
+                packet[14] != (char)('0' + self->player))
+                apply_peer_bump(self, packet + 18);
+            else if (!starts(packet + 16, "X:")) apply_action(self, packet + 16, 0);
         }
         if (ack && self->wait_ticks && equal(packet + 4, self->pending + 4, 6)) {
             self->wait_ticks = self->advertise_ticks = 0; RADIO_PAUSE();

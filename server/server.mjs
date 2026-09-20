@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createFloorplanProvider } from "./src/provider.mjs";
@@ -9,6 +10,19 @@ import { PhotoStore, createHttpServer } from "./src/http.mjs";
 import { createRoomLayoutGenerator } from "./src/layout-generator.mjs";
 import { LayoutSubmissionStore } from "./src/layout-submission-store.mjs";
 import { DifficultySidecarClient } from "./src/difficulty-sidecar.mjs";
+
+function loadDotEnv(file = path.join(path.dirname(fileURLToPath(import.meta.url)), ".env")) {
+  if (!fs.existsSync(file)) return;
+  for (const line of fs.readFileSync(file, "utf8").split(/\r?\n/)) {
+    const match = line.match(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/);
+    if (!match) continue;
+    let value = match[2];
+    if ((value.startsWith("\\\"") && value.endsWith("\\\"")) || (value.startsWith("'") && value.endsWith("'"))) value = value.slice(1, -1);
+    if (process.env[match[1]] == null) process.env[match[1]] = value;
+  }
+}
+
+loadDotEnv();
 
 function parseArgs(argv) {
   const options = {};
@@ -26,7 +40,7 @@ function parseArgs(argv) {
   return options;
 }
 
-export async function createRuntime({ env = process.env, now = () => Date.now(), fetchImpl = globalThis.fetch, dataDir, authoritativeEngine, difficultySidecar } = {}) {
+export async function createRuntime({ env = process.env, now = () => Date.now(), fetchImpl = globalThis.fetch, dataDir, authoritativeEngine, difficultySidecar, serialDevicePath } = {}) {
   const directory = dataDir || env.HTN26_DATA_DIR || path.join(path.dirname(fileURLToPath(import.meta.url)), "data");
   const photoStore = new PhotoStore({ directory });
   await photoStore.init();
@@ -34,9 +48,12 @@ export async function createRuntime({ env = process.env, now = () => Date.now(),
   await layoutSubmissionStore.init();
   const provider = createFloorplanProvider({ env, fetchImpl, now });
   const roomLayoutGenerator = createRoomLayoutGenerator({ env, fetchImpl, now });
-  const configuredDifficultySidecar = difficultySidecar === undefined && env.HTN26_DIFFICULTY_SIDECAR_URL
+  const difficultySidecarUrl = typeof env.HTN26_DIFFICULTY_SIDECAR_URL === "string"
+    ? env.HTN26_DIFFICULTY_SIDECAR_URL.trim()
+    : "";
+  const configuredDifficultySidecar = difficultySidecar === undefined && difficultySidecarUrl
     ? new DifficultySidecarClient({
-      baseUrl: env.HTN26_DIFFICULTY_SIDECAR_URL,
+      baseUrl: difficultySidecarUrl,
       timeoutMs: Number(env.HTN26_DIFFICULTY_SIDECAR_TIMEOUT_MS) || 200,
       fetchImpl,
     })
@@ -54,6 +71,7 @@ export async function createRuntime({ env = process.env, now = () => Date.now(),
     difficultySidecar: configuredDifficultySidecar,
   });
   const serialAdapter = createSerialStreamAdapter({
+    onLine: (line) => console.log(`[serial] ${line}`),
     onRecord: (record) => {
       const timestamp = now();
       if (record.kind === "badge-event") projection.ingestBadgeEvent(record.intent, timestamp);
@@ -64,10 +82,10 @@ export async function createRuntime({ env = process.env, now = () => Date.now(),
     },
   });
   projection.serialAdapter = serialAdapter;
-  const serialDevice = env.HTN26_SERIAL_DEVICE
-    ? openSerialDevice(env.HTN26_SERIAL_DEVICE, {
+  const serialDevice = serialDevicePath
+    ? openSerialDevice(serialDevicePath, {
       parser: serialAdapter,
-      onError: (error) => console.error(`serial device ${env.HTN26_SERIAL_DEVICE}: ${error.message}`),
+      onError: (error) => console.error(`serial device ${serialDevicePath}: ${error.message}`),
     })
     : null;
   const server = createHttpServer({ projection, photoStore, layoutSubmissionStore, roomLayoutGenerator });
@@ -95,7 +113,9 @@ export async function createRuntime({ env = process.env, now = () => Date.now(),
 export function usage() {
   return `HTN26 server (portable/QNX-oriented)\n\n` +
     `  node server/server.mjs [--host HOST] [--port PORT] [--serial DEVICE]\n\n` +
-    `Environment: HTN26_BIND_HOST, HTN26_PORT, HTN26_SERIAL_DEVICE, HTN26_DATA_DIR,\n` +
+    `Serial input is disabled unless --serial DEVICE is explicitly passed.\n` +
+    `HTN26_SERIAL_DEVICE is ignored to prevent accidental device attachment.\n\n` +
+    `Environment: HTN26_BIND_HOST, HTN26_PORT, HTN26_DATA_DIR,\n` +
     `OPENAI_API_KEY (optional; server-side only), OPENAI_LAYOUT_TIMEOUT_MS,\n` +
     `HTN26_ORDER_INTERVAL_MIN_SECONDS,\n` +
     `HTN26_ORDER_INTERVAL_MAX_SECONDS, HTN26_MAX_ACTIVE_ORDERS.\n`;
@@ -111,14 +131,17 @@ export function startupGuide(baseUrl) {
 export async function main(argv = process.argv.slice(2), env = process.env) {
   const options = parseArgs(argv);
   if (options.help) { console.log(usage()); return null; }
-  const runtime = await createRuntime({ env: { ...env, HTN26_SERIAL_DEVICE: options.serial || env.HTN26_SERIAL_DEVICE } });
+  const runtime = await createRuntime({ env, serialDevicePath: options.serial });
   const host = options.host || env.HTN26_BIND_HOST || "127.0.0.1";
-  const port = options.port || Number(env.HTN26_PORT) || 8787;
+  const configuredPort = options.port ?? Number(env.HTN26_PORT || 8787);
+  const port = Number.isInteger(configuredPort) && configuredPort >= 0 && configuredPort <= 65_535
+    ? configuredPort
+    : 8787;
   await new Promise((resolve) => runtime.server.listen(port, host, resolve));
   const address = runtime.server.address();
   console.log(`HTN26 server listening on http://${host}:${address.port}`);
   if (runtime.serialDevice) console.log(`HTN26 serial input: ${runtime.serialDevice.path}`);
-  else console.log("HTN26 serial input disabled; set HTN26_SERIAL_DEVICE or pass --serial DEVICE");
+  else console.log("HTN26 serial input disabled; pass --serial DEVICE to attach explicitly");
   console.log(`Floorplan provider: ${env.OPENAI_API_KEY ? "optional OpenAI with local fallback" : "local deterministic fallback (set OPENAI_API_KEY on the server to opt in)"}`);
   const shutdown = async () => { await runtime.close(); process.exit(0); };
   process.once("SIGINT", shutdown);

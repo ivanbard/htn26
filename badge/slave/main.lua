@@ -272,6 +272,25 @@ local function stove_action(state, index, now)
 	return false, "NOT_DONE"
 end
 
+local function apply_peer_stove(state, action, now)
+	local side, operation = string.match(action or "", "^ST:([LR]):([PTX])$")
+	if not side then
+		return false
+	end
+	local stove = state.stoves[side == "L" and 1 or 2]
+	if operation == "P" then
+		if stove.item then
+			return false
+		end
+		-- The placement broadcast is the shared clock edge. Every listening badge
+		-- records its local receipt time and advances doneness without querying the host.
+		stove.item, stove.started = "CHOPPED_MEAT", now
+	else
+		stove.item, stove.started = nil, 0
+	end
+	return true
+end
+
 local function snapshot(state)
 	if state.plate then
 		return "P" .. plate_summary(state.plate)
@@ -717,6 +736,8 @@ local function handle_peer_event(sequence_number, number, action, now)
 						led_mode, led_until, next_led = "event", now + 500, 0
 					end
 				end
+			elseif apply_peer_stove(state, action, now) then
+				set_status("STOVE SYNC", "Shared cooking clock updated from player " .. tostring(number), 0x8ed8ff)
 			end
 		end
 	end
@@ -1165,6 +1186,7 @@ if badge == nil then
 		fail_chop = fail_chop,
 		stove_phase = stove_phase,
 		stove_action = stove_action,
+		apply_peer_stove = apply_peer_stove,
 		plate_summary = plate_summary,
 		snapshot = snapshot,
 		parse_snapshot = parse_snapshot,

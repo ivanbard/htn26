@@ -6,7 +6,7 @@ import subprocess
 import sys
 from build import (ROOT, HERE, FACTORY, CAPACITY, HOOK, HOOK_BYTES, TEXT,
                    ICON_GENERATOR, GENERATED_ICONS, load_stock, encode, decode,
-                   extend, elf_payload, hook_bytes)
+                   extend, elf_payload, hook_bytes, RODATA_LIMIT)
 
 
 def rejects(action):
@@ -29,6 +29,8 @@ def main():
     rejects(lambda: decode(stock[:-1]))
     rejects(lambda: extend(header, segments, bytes(0x38E1), b"test"))
     rejects(lambda: extend(header, segments, b"test", bytes(0x10001)))
+    rejects(lambda: extend(header, segments, b"test", bytes(RODATA_LIMIT + 1)))
+    rejects(lambda: extend(header, segments, b"test", bytes(55695)))  # Boot-looping icon build.
     altered = list(segments)
     original_code = bytearray(altered[2][1])
     offset = HOOK - altered[2][0]
@@ -65,7 +67,7 @@ def main():
     assert report["permanent_app_object_bytes"] == 312
     assert report["native_icon_count"] == 10
     assert report["generated_icons_sha256"] == hashlib.sha256(GENERATED_ICONS.read_bytes()).hexdigest()
-    assert report["payload_rodata_bytes"] <= 0x10000
+    assert report["payload_rodata_bytes"] <= RODATA_LIMIT
     print("PASS: stock round-trip, both backups, generated icons, bounds, hook target, stock preservation, rollback")
 
 

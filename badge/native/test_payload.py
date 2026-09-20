@@ -5,7 +5,7 @@ import sys
 from build import ROOT, HERE, HOOK, decode
 
 sys.path.insert(0, str(ROOT / "badge/assets/icons"))
-from generate_native_icons import encode_rgb565a8, load_rgba_png, native_icon_data
+from generate_native_icons import encode_rgb565a8, load_rgba_png, native_icon_data, resized_crop, NATIVE_SIZE
 
 ICON_DATA = {name: data for name, _, data in native_icon_data()}
 ICON_NAMES_BY_PIXELS = {}
@@ -20,15 +20,18 @@ from unicorn.riscv_const import UC_RISCV_REG_A0, UC_RISCV_REG_A1, UC_RISCV_REG_R
 def scenario(nvs_error=0, radio_error=0, nfc_error=0, allocation_failure=False,
              send_error=0, role="player", timeout_recovery=False):
     cpu = Uc(UC_ARCH_RISCV, UC_MODE_RISCV32)
-    for base, size in [(0x3C000000, 0x300000), (0x3FC80000, 0x80000),
+    for base, size in [(0x3C000000, 0x270000), (0x3FC80000, 0x80000),
                        (0x40380000, 0x20000), (0x42000000, 0x140000), (0x50000000, 0x1000)]:
         cpu.mem_map(base, size)
     _, segments, _ = decode((HERE / "build/overcooked-factory.bin").read_bytes())
     for address, data in segments:
-        cpu.mem_write(address, data)
+        # Image padding extends further than the stock runtime's mapped constants.
+        cpu.mem_write(address, data[:0x3C270000-address] if address == 0x3C130020 else data)
     cpu.reg_write(UC_RISCV_REG_SP, 0x3FCDF000)
     calls, registrations, texts, stages, prints = [], [], [], [], []
     app, old_app = 0x3FCC0000, 0x3FC9AB00
+    app_guard = b'HTN26-APP-GUARD' * 4
+    cpu.mem_write(app + 308, app_guard)
     label_count = 0
     handler, packets = [], []
     image_object = 0x3FCC2800
@@ -93,8 +96,8 @@ def scenario(nvs_error=0, radio_error=0, nfc_error=0, allocation_failure=False,
             data_size, data_pointer, descriptor_reserved = struct.unpack(
                 '<III', cpu.mem_read(a1 + 12, 12))
             assert (magic, color_format, flags, width, height, stride, reserved) == (
-                0x19, 0x14, 0, 42, 42, 84, 0)
-            assert data_size == 42 * 42 * 3 and descriptor_reserved == 0
+                0x19, 0x14, 0, NATIVE_SIZE, NATIVE_SIZE, NATIVE_SIZE * 2, 0)
+            assert data_size == NATIVE_SIZE * NATIVE_SIZE * 3 and descriptor_reserved == 0
             pixels = bytes(cpu.mem_read(data_pointer, data_size))
             assert pixels in ICON_NAMES_BY_PIXELS
             display["icons"] = ICON_NAMES_BY_PIXELS[pixels]
@@ -134,7 +137,8 @@ def scenario(nvs_error=0, radio_error=0, nfc_error=0, allocation_failure=False,
                 data = hardware["tag"].encode() if hardware["tag"] is not None else b""
                 cpu.mem_write(a0, data[:a1-1] + b'\0')
         elif address == 0x4200AED4:
-            value = {"rest": 0x447A0000, "tap": 0x44A00000, "shake": 0x44FA0000}[hardware["motion"]]
+            value = {"rest": 0x447A0000, "tap": 0x44A00000,
+                     "drop_shake": 0x44BB8000, "shake": 0x44FA0000}[hardware["motion"]]
             cpu.mem_write(a0, struct.pack('<3I', 0, 0, value))
         elif address == 0x4211BC16:
             fmt = string(machine.reg_read(UC_RISCV_REG_A0 + 2))
@@ -165,6 +169,7 @@ def scenario(nvs_error=0, radio_error=0, nfc_error=0, allocation_failure=False,
     assert cpu.reg_read(UC_RISCV_REG_PC) == HOOK + 8
     assert registrations == ([old_app] if allocation_failure else [old_app, app])
     if allocation_failure:
+        assert bytes(cpu.mem_read(app + 308, len(app_guard))) == app_guard
         return
     table, = struct.unpack("<I", cpu.mem_read(app, 4))
 
@@ -251,6 +256,7 @@ def scenario(nvs_error=0, radio_error=0, nfc_error=0, allocation_failure=False,
         assert calls.count(0x420109C6) == 1
         assert not packets and 'NFC READ 62760 - REMOVE AND RETAP' in texts
         invoke(0x58)
+        assert bytes(cpu.mem_read(app + 308, len(app_guard))) == app_guard
         return
     if role == "host":
         assert 0x4200FF2E not in calls  # The stationary gateway does not allocate/enable NFC.
@@ -341,6 +347,35 @@ def scenario(nvs_error=0, radio_error=0, nfc_error=0, allocation_failure=False,
                 invoke(0x60, 5); before = len(packets); scan('fridge')
                 assert len(packets) == before and 'UNKNOWN BUTTON COMBO' in texts
 
+                # B + a deliberate shake snapshots and clears a plate immediately,
+                # without waiting for the gateway ACK to update local state.
+                invoke(0x60, 1)
+                hardware["motion"] = "drop_shake"; invoke(0x5c)
+                assert packets[-1].endswith(b':DROP:P--L-')
+                assert cpu.mem_read(app + 228, 3) == b'\0\0\0'
+                assert_icon(None)
+                sent = len(packets); dropped_packet = packets[-1]
+                for _ in range(40): invoke(0x5c)
+                assert len(packets) == sent, "one held shake must emit only one DROP"
+                hardware["motion"] = "rest"
+                for _ in range(109): invoke(0x5c)
+                assert packets[-1] == dropped_packet and len(packets) == sent + 1
+                assert cpu.mem_read(app + 228, 3) == b'\0\0\0'
+                acknowledge('DROP:P--L-'); invoke(0x60, 0x101)
+                for _ in range(25): invoke(0x5c)
+
+                # B + shake with empty inventory is not a READY action and does not
+                # manufacture an empty DROP payload. Releasing B cannot replay it.
+                before = len(packets); invoke(0x60, 1)
+                hardware["motion"] = "shake"
+                for _ in range(40): invoke(0x5c)
+                assert len(packets) == before
+                invoke(0x60, 0x101)
+                for _ in range(10): invoke(0x5c)
+                assert len(packets) == before
+                hardware["motion"] = "rest"
+                for _ in range(25): invoke(0x5c)
+
                 # A + shake submits a fixed plate summary; the server validates consensus/order.
                 cpu.mem_write(app + 229, b'\x0f\x01')
                 for _ in range(50): invoke(0x5c)
@@ -354,7 +389,34 @@ def scenario(nvs_error=0, radio_error=0, nfc_error=0, allocation_failure=False,
                 for _ in range(25): invoke(0x5c)
                 invoke(0x60, 5); scan('pantry'); acknowledge('PU:B')
                 assert_icon('bun')
-                invoke(0x60, 1); hardware["motion"] = "shake"; invoke(0x5c); hardware["motion"] = "rest"
+
+                # A released B must not remain latched: this is READY, not DROP,
+                # and the held bun remains intact.
+                invoke(0x60, 1); invoke(0x60, 0x101)
+                hardware["motion"] = "shake"; invoke(0x5c); hardware["motion"] = "rest"
+                assert packets[-1].endswith(b':READY')
+                assert cpu.mem_read(app + 228, 1) == bytes([5])
+                assert_icon('bun')
+                for _ in range(25): invoke(0x5c)
+                before = len(packets); invoke(0x60, 1)
+                hardware["motion"] = "drop_shake"; invoke(0x5c)
+                assert len(packets) == before
+                assert cpu.mem_read(app + 228, 1) == bytes([5])
+                assert_icon('bun')
+                hardware["motion"] = "rest"; invoke(0x60, 0x101)
+                acknowledge('READY')
+                for _ in range(25): invoke(0x5c)
+
+                # B-held shake uses the lower deliberate-drop threshold, preserves
+                # the pre-clear hand snapshot, and clears locally before ACK.
+                invoke(0x60, 1); hardware["motion"] = "drop_shake"; invoke(0x5c)
+                assert packets[-1].endswith(b':DROP:HB')
+                assert cpu.mem_read(app + 228, 1) == b'\0'
+                assert_icon(None)
+                sent = len(packets)
+                for _ in range(40): invoke(0x5c)
+                assert len(packets) == sent, "sustained B-held shake must respect cooldown"
+                hardware["motion"] = "rest"
                 acknowledge('DROP:HB'); invoke(0x60, 0x101)
                 assert_icon(None)
 
@@ -398,28 +460,45 @@ def scenario(nvs_error=0, radio_error=0, nfc_error=0, allocation_failure=False,
                 for _ in range(150): invoke(0x5c)
                 acknowledge('CH:D:D'); invoke(0x60, 0x100)
                 assert_icon('chopped_meat')
-                invoke(0x60, 5); scan('stove'); acknowledge('ST:R:P')
+                invoke(0x60, 5); scan('stove')
+                assert cpu.mem_read(app + 266, 2) == b'\0\x01', cpu.mem_read(app + 266, 2)
+                acknowledge('ST:R:P')
                 assert_icon(None)
                 for _ in range(750): invoke(0x5c)
                 invoke(0x60, 5); scan('stove'); acknowledge('ST:R:T')
                 assert_icon('cooked_meat')
 
-                # A peer plate receives our cooked meat; the local hand is now empty.
+                # Room-wide transfer advertisements do not mutate an uninvolved
+                # third badge. A matching local tap arms the bilateral exchange.
                 before = len(packets)
                 incoming(b'OC2|222220|E|P1:X:P----'); invoke(0x5c)
                 assert len(packets) == before
+                assert_icon('cooked_meat')
+                hardware["motion"] = "tap"; invoke(0x5c); hardware["motion"] = "rest"
+                assert packets[-1].endswith(b':X:HM')
+                incoming(b'OC2|222225|E|P1:X:P----'); invoke(0x5c)
                 assert_icon(None)
+                acknowledge('X:HM')
+                for _ in range(25): invoke(0x5c)
 
+                hardware["motion"] = "tap"; invoke(0x5c); hardware["motion"] = "rest"
                 incoming(b'OC2|222223|E|P1:X:HD'); invoke(0x5c)
                 assert_icon('chopped_meat')
+                acknowledge('X:E----')
+                for _ in range(25): invoke(0x5c)
+                hardware["motion"] = "tap"; invoke(0x5c); hardware["motion"] = "rest"
                 incoming(b'OC2|222224|E|P1:X:E----'); invoke(0x5c)
                 assert_icon(None)
+                acknowledge('X:HD')
+                for _ in range(25): invoke(0x5c)
 
                 # An invalid raw-item merge swaps inventories, removing our plate.
                 invoke(0x60, 3); scan('pantry'); acknowledge('PL:NEW')
                 assert_icon('plate')
+                hardware["motion"] = "tap"; invoke(0x5c); hardware["motion"] = "rest"
                 incoming(b'OC2|222221|E|P1:X:HR'); invoke(0x5c)
                 assert_icon('raw_meat')
+                acknowledge('X:P----')
 
                 incoming(b'OC2|000002|G|E'); invoke(0x5c)
                 assert_icon(None)
@@ -427,8 +506,9 @@ def scenario(nvs_error=0, radio_error=0, nfc_error=0, allocation_failure=False,
                 assert_icon(None)
 
                 before = len(packets)
+                for _ in range(25): invoke(0x5c)
                 incoming(b'OC2|222222|E|P1:X:PB---'); invoke(0x5c)
-                assert len(packets) == before  # A player applies peer state but never ACKs it.
+                assert len(packets) == before  # Unarmed player ignores peer transfer and never ACKs it.
                 assert cpu.mem_read(app + 229, 2) == b'\0\0'  # Empty hand cannot take a peer plate.
                 assert_icon(None)
 
@@ -466,6 +546,7 @@ def scenario(nvs_error=0, radio_error=0, nfc_error=0, allocation_failure=False,
     invoke(0x58)
     assert 0x42011252 in calls and stages[-1] == "exit"
     assert cpu.mem_read(app + 4, 24) == bytes(24)
+    assert bytes(cpu.mem_read(app + 308, len(app_guard))) == app_guard
     if handler:
         before = len(packets)
         incoming(b'OC2|000001|E|P1:READY');invoke(0x5c)
@@ -474,7 +555,8 @@ def scenario(nvs_error=0, radio_error=0, nfc_error=0, allocation_failure=False,
 
 if __name__ == "__main__":
     burnt_source = load_rgba_png(ROOT / "badge/assets/icons/ing_meat_burnt.png")
-    assert ICON_DATA["burnt_meat"] == encode_rgb565a8(burnt_source)
+    assert ICON_DATA["burnt_meat"] == encode_rgb565a8(resized_crop(
+        burnt_source, (0, 0, 42, 42), NATIVE_SIZE, NATIVE_SIZE))
     scenario()
     scenario(timeout_recovery=True)
     scenario(timeout_recovery="persistent")
@@ -486,4 +568,4 @@ if __name__ == "__main__":
     scenario(nfc_error=-1)
     scenario(allocation_failure=True)
     scenario(send_error=-1)
-    print("PASS: native roles, held-state icon transitions, gateway ACK/serial, lifecycle, retries, cleanup")
+    print("PASS: native roles, B-held DROP hand/plate/empty/cooldown/release, gateway ACK/serial, lifecycle, cleanup")

@@ -163,6 +163,7 @@ export function createInitialMockState(now = Date.now()) {
     score: { value: 0, delivered: 0 },
     gold: { total: 0, earned: 0, lastChange: 0 },
     tips: { total: 0, earned: 0, lastChange: 0 },
+    score: { value: 0, delivered: 0 },
     clock: { status: "ready", remainingSeconds: 240, totalSeconds: 240 },
     serving: { lastEvent: null, gooseQueue: 4, location: "SERVING" },
     health: health(now),

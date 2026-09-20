@@ -19,6 +19,7 @@ HOOK = 0x4200A81C
 HOOK_BYTES = bytes.fromhex("efd05258ef00e32a")
 TEXT = 0x4212C720
 RODATA = 0x3C268760
+RODATA_LIMIT = 0x3C270000 - RODATA
 ICON_GENERATOR = ROOT / "badge/assets/icons/generate_native_icons.py"
 GENERATED_ICONS = HERE / "generated_icons.h"
 
@@ -113,7 +114,7 @@ def hook_bytes():
 
 
 def extend(header, segments, text, rodata):
-    require(len(text) <= 0x38E0 and len(rodata) <= 0x10000, "Payload exceeds mapped space")
+    require(len(text) <= 0x38E0 and len(rodata) <= RODATA_LIMIT, "Payload exceeds runtime mapped space")
     patched = [(address, bytes(data)) for address, data in segments]
     require(patched[0][0] + len(patched[0][1]) == RODATA, "Unexpected DROM end")
     require(patched[2][0] + len(patched[2][1]) == TEXT, "Unexpected IROM end")

@@ -118,6 +118,19 @@ class PlayerBadgeTests(unittest.TestCase):
           assert(s.hand == nil and s.plate == nil)
         """)
 
+    def test_peer_stove_broadcast_copies_start_time_without_host_query(self):
+        self.execute("""
+          local peer = player_test.new_state()
+          assert(player_test.apply_peer_stove(peer, "ST:R:P", 4321))
+          assert(peer.stoves[2].item == "CHOPPED_MEAT" and peer.stoves[2].started == 4321)
+          assert(player_test.stove_phase(peer.stoves[2], 19320) == "COOKING")
+          assert(player_test.stove_phase(peer.stoves[2], 19321) == "DONE")
+          assert(not player_test.apply_peer_stove(peer, "ST:R:P", 9000))
+          assert(peer.stoves[2].started == 4321)
+          assert(player_test.apply_peer_stove(peer, "ST:R:T", 20000))
+          assert(peer.stoves[2].item == nil and peer.stoves[2].started == 0)
+        """)
+
     def test_tap_transfer_merges_or_swaps_without_duplicates(self):
         self.execute("""
           local plate_badge = player_test.new_state()

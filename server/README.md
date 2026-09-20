@@ -13,6 +13,8 @@ sidecar remains future-only.
 
 ## Run locally
 
+At startup, `server.mjs` automatically loads `server/.env` without overriding variables already supplied by the shell. Copy `example.env` to `.env`, set `OPENAI_API_KEY` when needed, and keep the real `.env` out of Git. Serial attachment is deliberately CLI-only.
+
 ```sh
 cd server
 OPENAI_API_KEY=sk-... node server.mjs --host 127.0.0.1 --port 8787
@@ -22,8 +24,6 @@ Use `--host 0.0.0.0` only for a trusted LAN. Useful environment variables:
 
 - `HTN26_BIND_HOST`, `HTN26_PORT`: bind address and port; CLI flags win.
 - `HTN26_DATA_DIR`: persistent photo and audit-metadata directory.
-- `HTN26_SERIAL_DEVICE`: host-badge USB serial device; `--serial DEVICE` is
-  equivalent.
 - `HTN26_ROUND_SECONDS`: round length, default 240.
 - `HTN26_ORDER_INTERVAL_MIN_SECONDS` and
   `HTN26_ORDER_INTERVAL_MAX_SECONDS`: randomized order-spawn interval,
@@ -33,6 +33,11 @@ Use `--host 0.0.0.0` only for a trusted LAN. Useful environment variables:
   this server process. It may be omitted only for the deterministic path.
 - `OPENAI_LAYOUT_TIMEOUT_MS`: bounded Responses request timeout in
   milliseconds, default 12000.
+- `HTN26_DIFFICULTY_SIDECAR_URL`: optional QNX difficulty recommendation
+  adapter. When absent or blank, the runtime does not create or call a sidecar
+  client and uses the normal laptop order sequence.
+- `HTN26_DIFFICULTY_SIDECAR_TIMEOUT_MS`: optional bounded sidecar timeout,
+  default 200 ms; it has no effect when the URL is not configured.
 
 The deterministic default is an approximately 10 m x 10 m room with exactly
 four station types: pantry, fridge, cutting board, and stove. The UI can select
@@ -56,13 +61,29 @@ HTN26|GW|UP|12|0
 
 It searches for `HTN26|` amid log noise, validates the record, handles USB
 chunks that split a line, and suppresses duplicate `MAC + sequence` events.
-For laptop serial integration, set the discovered device before starting:
+For laptop serial integration, explicitly attach the discovered device on each
+start:
 
 ```sh
-HTN26_SERIAL_DEVICE=/dev/ttyUSB0 node server/server.mjs
+node server/server.mjs --serial /dev/ttyUSB0
 ```
 
-The development-only `POST /api/serial` diagnostic uses the same parser:
+On POSIX hosts the adapter configures a real TTY as raw, no-echo, no-hangup
+before reading it. This is required even though the file descriptor is opened
+read-only: a TTY with kernel echo enabled can send every badge log line back to
+the stock console, producing an `Unrecognized command` feedback loop. The
+adapter refuses to read a POSIX TTY when that safety configuration fails.
+Regular fixture files used by host tests are unaffected.
+
+A plain `node server/server.mjs` never attaches a device, even if the inherited
+environment or `server/.env` contains `HTN26_SERIAL_DEVICE`. This opt-in avoids
+opening a connected ESP32 unexpectedly. The server-side code previously opened
+the environment-selected path and its adapter retries after stream errors or
+end-of-file; that is the available code evidence for repeated host access. It
+does not establish the cause of any physical badge reboot.
+
+The development-only `POST /api/serial` diagnostic remains available without a
+physical attachment and uses the same parser:
 
 ```sh
 curl -sS -X POST http://127.0.0.1:8787/api/serial \
@@ -177,7 +198,10 @@ The canonical fields and lifecycle are:
   evidence of phone-camera tracking. Missing `position` means unavailable and
   does not cause the UI to invent a location.
 - `stations`: authoritative status, progress, remaining seconds, and
-  item/contents, aligned by ID with the accepted floor plan.
+  item/contents, aligned by ID with the accepted floor plan. Stove records also
+  retain `startedAt`, `doneAt`, `warningAt`, and `burntAt`; the server derives
+  them once from the forwarded `ST:<side>:P` event and pushes projections over
+  SSE, so reconnecting frontends receive the complete cooking timeline.
 - `submissions`, `serving`, `score`, `gold`, and `tips`: authoritative
   validation outcomes and rewards. The browser never validates or scores a
   plate.
@@ -221,9 +245,10 @@ projection routes. They do not prove QNX serial enumeration, Node availability
 on a target image, phone capture, physical badges, OpenAI connectivity, or a
 QNX sidecar.
 
-A future QNX difficulty director is a sidecar only: it may observe canonical
-snapshots and return bounded recommendations through an adapter, but it must
-not own HTTP routes, duplicate orders/timers/scoring, mutate state directly, or
-become a second room-layout server. There is no current difficulty-sidecar
-endpoint or runtime. A future QNX serial adapter may replace
-`src/serial-device.mjs` while retaining the platform-independent parser.
+The optional QNX difficulty director is a sidecar only: it may receive bounded
+features and return bounded recommendations through `src/difficulty-sidecar.mjs`,
+but it does not own HTTP routes, duplicate orders/timers/scoring, mutate state
+directly, or become a second room-layout server. It is disabled unless
+`HTN26_DIFFICULTY_SIDECAR_URL` is explicitly configured. A future QNX serial
+adapter may replace `src/serial-device.mjs` while retaining the
+platform-independent parser.
