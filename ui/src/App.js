@@ -81,9 +81,9 @@ function ActionButton({ state, action, label, onCommand, compact = false }) {
 
 const STAGES = Object.freeze([
   { key: "host", label: "Wake the kitchen", description: "Turn on the game cameras", action: GAME_ACTIONS.START_HOST },
-  { key: "scan", label: "Map the room", description: "Find a safe play area", action: GAME_ACTIONS.SCAN_ROOM },
-  { key: "approve", label: "Choose the layout", description: "Check each station position", action: GAME_ACTIONS.APPROVE_LAYOUT },
-  { key: "place", label: "Place the stations", description: "Match the pieces to the map", action: null },
+  { key: "scan", label: "Map the room", description: "Take a photo of the play area", action: GAME_ACTIONS.SCAN_ROOM },
+  { key: "approve", label: "Choose the layout", description: "Review the AI-suggested spots", action: GAME_ACTIONS.APPROVE_LAYOUT },
+  { key: "place", label: "Place the stations", description: "Match pieces to those spots", action: null },
   { key: "play", label: "Start cooking", description: "Begin the two-minute round", action: GAME_ACTIONS.START_GAME },
 ]);
 
@@ -144,7 +144,7 @@ function StationContents({ station, runtimeStation, serving }) {
     h("strong", { className: "room-station-label" }, station.label || station.id),
     h("div", { className: cx("station-plate", !ingredients.length && "is-empty"), "data-station-content": contentLabel, "aria-label": `${station.label || station.id}: ${contentLabel}` },
       ingredients.length
-        ? ingredients.map((ingredient, index) => h(IngredientIcon, { key: `${ingredient}-${index}`, value: ingredient, small: true }))
+        ? ingredients.map((ingredient, index) => h(IngredientIcon, { key: `${ingredient}-${index}`, value: ingredient }))
         : h("span", null, "EMPTY"),
     ),
     h("span", { className: "room-station-state" }, upper(status), Number.isFinite(Number(remaining)) && Number(remaining) > 0 ? ` · ${seconds(remaining)}` : ""),
@@ -188,7 +188,7 @@ function RoomSurface({ state, now, gameplay = false }) {
     style: accepted ? { backgroundImage: "linear-gradient(rgba(8,16,25,.08), rgba(8,16,25,.12)), url('/assets/game-room-background.png')" } : undefined,
     role: "img",
     "aria-label": `${accepted ? "Accepted burger" : "Proposed room"} top-down floor plan with live tracked players`,
-  }, h("div", { className: "absolute inset-0 opacity-10", style: { backgroundImage: "linear-gradient(#274257 1px, transparent 1px), linear-gradient(90deg, #274257 1px, transparent 1px)", backgroundSize: "8% 12%" }, "aria-hidden": true }), walls, stations, players,
+  }, !gameplay && h("div", { className: "absolute inset-0 opacity-10", style: { backgroundImage: "linear-gradient(#274257 1px, transparent 1px), linear-gradient(90deg, #274257 1px, transparent 1px)", backgroundSize: "8% 12%" }, "aria-hidden": true }), walls, stations, players,
   !accepted && h("div", { className: "absolute inset-0 z-[6] grid place-items-center bg-[#081019]/70 p-5 text-center text-sm font-black uppercase tracking-[0.12em] text-[#ffd166]" }, "Approve floor plan to generate burger level"));
 }
 
@@ -216,18 +216,48 @@ function TimerCard({ state, compact = false }) {
   );
 }
 
-function IngredientIcon({ value, small = false, decorative = false }) {
-  const source = ingredientAsset(value);
-  return source ? h("img", { className: cx("object-contain", small ? "h-8 w-8" : "h-12 w-12"), src: source, alt: decorative ? "" : upper(value), loading: "lazy" }) : h("span", { className: "text-xs font-black text-[#8e7664]" }, upper(value).slice(0, 3));
+function OrderTimerIcon() {
+  return h("span", { className: "hud-order-time-icon", "aria-hidden": true },
+    h("svg", { viewBox: "0 0 32 32", focusable: "false" },
+      h("rect", { x: "11", y: "2.5", width: "10", height: "4", rx: "2", fill: "none" }),
+      h("path", { d: "M8.5 9 5.8 6.3M23.5 9l2.7-2.7", fill: "none" }),
+      h("circle", { cx: "16", cy: "18", r: "10.5", fill: "none" }),
+      h("line", { x1: "16", y1: "18", x2: "16", y2: "11.5" }),
+      h("line", { x1: "16", y1: "18", x2: "21.5", y2: "21" }),
+      h("circle", { cx: "16", cy: "18", r: "1.5", fill: "currentColor", stroke: "none" }),
+    ),
+  );
 }
 
+function IngredientIcon({ value, decorative = false }) {
+  // Every caller (.station-plate img, .hud-ingredient-slot img,
+  // .burger-preview-layer img) already sets its own explicit width/height/
+  // object-fit for this <img> based on its own slot. A fixed Tailwind h-*/w-*
+  // class here fought that sizing (it rendered at its own fixed pixel size
+  // instead of shrinking to fill a stacked burger layer's slot, clipping the
+  // rest of the stack), so this intentionally sets no size of its own.
+  const source = ingredientAsset(value);
+  return source ? h("img", { className: "object-contain", src: source, alt: decorative ? "" : upper(value), loading: "lazy" }) : h("span", { className: "text-xs font-black text-[#8e7664]" }, upper(value).slice(0, 3));
+}
+
+// Real burger cross-section, top to bottom. The bun is a single held item
+// (see product rules: "the bun is one object that includes both the top and
+// bottom buns together"), so it renders once as the base rather than as a
+// duplicated cap — stacking a second copy of the same icon on top produced
+// an oversized, overflowing stack that clipped inside the small HUD card.
+const BURGER_TOPPING_ORDER = ["LETTUCE", "CHEESE", "MEAT"];
+
 function burgerLayers(components) {
-  const ingredients = components.filter(Boolean);
-  if (!ingredients.length) return ["BUN"];
-  const hasBun = ingredients.some((item) => ingredientKey(item) === "BUN");
-  if (!hasBun) return ["BUN", ...ingredients, "BUN"];
-  if (ingredients.filter((item) => ingredientKey(item) === "BUN").length === 1) return [...ingredients, "BUN"];
-  return ingredients;
+  const toppings = components.filter((item) => ingredientKey(item) !== "BUN" && Boolean(item));
+  if (!toppings.length) return ["BUN"];
+  const ordered = [...toppings].sort((a, b) => {
+    const rank = (item) => {
+      const index = BURGER_TOPPING_ORDER.indexOf(ingredientKey(item));
+      return index === -1 ? BURGER_TOPPING_ORDER.length : index;
+    };
+    return rank(a) - rank(b);
+  });
+  return [...ordered, "BUN"];
 }
 
 function BurgerPreview({ order, components }) {
@@ -256,7 +286,10 @@ function BurgerPreview({ order, components }) {
     h(
       "div",
       { className: "burger-preview" },
-      h("div", { className: "burger-preview-stack" }, layerElements),
+      // --layer-count sizes and overlaps each layer as a share of the card's
+      // height so a 1-item and a 4-item burger both fill the frame without
+      // the top or bottom layer clipping against its rounded corners.
+      h("div", { className: "burger-preview-stack", style: { "--layer-count": layers.length } }, layerElements),
     ),
   );
 }
@@ -266,7 +299,7 @@ function OrderCard({ order, compact = false }) {
   const remaining = Number(order.remainingSeconds);
   const total = Number(order.totalSeconds);
   const progress = Number.isFinite(remaining) && Number.isFinite(total) && total > 0 ? Math.max(0, Math.min(100, (remaining / total) * 100)) : 0;
-  const urgency = progress <= 25 ? "is-critical" : progress <= 50 ? "is-warning" : "is-healthy";
+  const urgency = remaining < 30 ? "is-critical" : remaining <= 60 ? "is-warning" : "is-healthy";
   const titleId = `hud-title-${String(order.id || "order").replaceAll(/[^a-zA-Z0-9_-]/g, "-")}`;
   return h("section", { className: cx("hud-order", compact && "hud-order-compact", urgency), "data-node-id": "39:26", "data-order-id": order.id, "aria-labelledby": titleId },
     h(BurgerPreview, { order, components }),
@@ -275,10 +308,10 @@ function OrderCard({ order, compact = false }) {
         h("h2", { id: titleId }, orderTitle(order)),
         h("span", { className: "hud-order-recipe-count" }, `${components.length || 1} ITEMS`),
       ),
-      h("div", { className: "hud-ingredient-slots", "aria-label": `Assembly order: ${components.map((item) => upper(item)).join(", ")}` }, components.map((item, index) => h("div", { key: `${item}-${index}`, className: "hud-ingredient-slot", "data-ingredient-slot": index + 1, "aria-label": `${index + 1}. ${upper(item)}` }, h(IngredientIcon, { value: item, small: false })))),
+      h("div", { className: "hud-ingredient-slots", "aria-label": `Assembly order: ${components.map((item) => upper(item)).join(", ")}` }, components.map((item, index) => h("div", { key: `${item}-${index}`, className: "hud-ingredient-slot", "data-ingredient-slot": index + 1, "aria-label": `${index + 1}. ${upper(item)}` }, h(IngredientIcon, { value: item })))),
     ),
     h("div", { className: "hud-order-time", "aria-label": `${seconds(order.remainingSeconds)} remaining` },
-      h("img", { src: "/assets/hud-stopwatch.svg", alt: "" }),
+      h(OrderTimerIcon),
       h("strong", null, seconds(order.remainingSeconds)),
     ),
     h("div", { className: "hud-order-progress", role: "progressbar", "aria-label": `${orderTitle(order)} time remaining`, "aria-valuemin": 0, "aria-valuemax": 100, "aria-valuenow": Math.round(progress) }, h("span", { style: { width: `${progress}%` } })),
@@ -302,14 +335,51 @@ function ScoreCard({ state }) {
   );
 }
 
+// Short enough to read well under 30 seconds: five labeled steps, no
+// paragraphs. Grounded in the actual v1 rules (README.md / UPDATE_v1.1.md) —
+// pantry/fridge pickups, cutting-board chopping, stove cooking, plating, and
+// the three-player simultaneous-shake submission.
+const HOW_IT_WORKS_STEPS = Object.freeze([
+  { icon: "🧺", text: "Grab buns/lettuce at the pantry, cheese/meat at the fridge" },
+  { icon: "🔪", text: "Hold A at the cutting board to chop it" },
+  { icon: "🔥", text: "Cook cut meat on a stove (15s)" },
+  { icon: "🍽️", text: "Pick up a plate and stack the order's ingredients on it" },
+  { icon: "🤝", text: "All 3 players shake at once to submit the plate" },
+]);
+
+// Local UI-only: this never calls onCommand or touches authoritative state.
+// It appears once per gameplay mount (a fresh round re-mounts GameplayBoard,
+// so it naturally reappears next round) and only a viewer's own dismiss click
+// closes it early; the round timer underneath keeps running regardless.
+function HowItWorksOverlay() {
+  const [open, setOpen] = React.useState(true);
+  if (!open) return null;
+  return h("div", { className: "how-it-works", role: "dialog", "aria-label": "How this game works" },
+    h("div", { className: "how-it-works-card" },
+      h("p", { className: "how-it-works-kicker" }, "How this works"),
+      h("ol", { className: "how-it-works-steps" }, HOW_IT_WORKS_STEPS.map((step, index) => h("li", { key: index },
+        h("span", { className: "how-it-works-icon", "aria-hidden": true }, step.icon),
+        h("span", null, step.text),
+      ))),
+      h("button", {
+        type: "button",
+        className: "how-it-works-dismiss",
+        "data-dismiss": "how-it-works",
+        onClick: () => setOpen(false),
+      }, "Got it — start cooking"),
+    ),
+  );
+}
+
 function GameplayBoard({ state, now }) {
-  return h("section", { className: "game-board panel overflow-hidden border border-[#2a435a] bg-[#0c1824]", "aria-labelledby": "game-board-title" },
+  return h("section", { className: "game-board panel overflow-hidden bg-[#0c1824]", "aria-labelledby": "game-board-title" },
     h("h2", { id: "game-board-title", className: "sr-only" }, "Live burger game board"),
     h("div", { className: "game-board-canvas relative h-full min-h-0 w-full overflow-hidden bg-[#0c1824]" },
       h(RoomSurface, { state, now, gameplay: true }),
       h(OrdersHud, { state }),
       h("div", { className: "game-board-score" }, h(ScoreCard, { state })),
       h("div", { className: "game-board-timer" }, h(TimerCard, { state, compact: true })),
+      h(HowItWorksOverlay),
     ),
   );
 }
@@ -380,8 +450,8 @@ export function App({ state, now = Date.now(), connectionError = "", onCommand }
   const mode = displayModeForPhase(state.setup?.phase);
   const content = mode === UI_DISPLAY_MODES.GAMEPLAY ? h(GameplayView, { state, now, onCommand }) : mode === UI_DISPLAY_MODES.RESULTS ? h(ResultsView, { state, now, onCommand }) : h(SetupView, { state, now, onCommand });
   const gameplay = mode === UI_DISPLAY_MODES.GAMEPLAY;
-  return h("div", { className: cx("app-shell", gameplay && "is-gameplay"), "data-display-mode": mode },
-    !gameplay && h("header", { className: "setup-hero" }, h("div", null, h("p", { className: "setup-kicker" }, "Waterloo Goose Kitchen"), h("h1", null, mode === UI_DISPLAY_MODES.RESULTS ? "Round complete" : "Set up the burger level"), h("p", null, mode === UI_DISPLAY_MODES.RESULTS ? "See how the kitchen performed." : "Map the room, place each station, then start cooking.")), h("div", { className: "connection-pill" }, h("span", null), "Kitchen connected")),
+  const setupMode = mode === UI_DISPLAY_MODES.SETUP;
+  return h("div", { className: cx("app-shell", gameplay && "is-gameplay", setupMode && "is-setup"), "data-display-mode": mode },
     connectionError && h("div", { id: "ui-error", className: "ui-error mb-4", role: "alert" }, connectionError),
     content,
   );

@@ -30,12 +30,18 @@ test("renders the approved setup flow with the aligned physical layout", async (
   const html = renderApp(state, 1_000);
 
   assert.match(html, /data-display-mode="setup"/);
+  assert.match(html, /class="app-shell is-setup"/);
   assert.match(html, /Your burger kitchen/);
   assert.match(html, /Place the stations/);
   assert.match(html, /data-player="p1"/);
   assert.match(html, /data-player="p2"/);
   assert.doesNotMatch(html, /class="stations-panel/);
   assert.doesNotMatch(html, /4 geese waiting/);
+  // The onboarding hero banner was removed so the setup flow fits one screen.
+  assert.doesNotMatch(html, /WATERLOO GOOSE KITCHEN/i);
+  assert.doesNotMatch(html, /Set up the burger level/);
+  assert.doesNotMatch(html, /Kitchen connected/);
+  assert.doesNotMatch(html, /class="setup-hero"/);
 
   assert.equal(countStations(state.floorPlan.stations, "ingredient"), 4);
   assert.equal(countStations(state.floorPlan.stations, "chop"), 2);
@@ -97,6 +103,30 @@ test("renders gameplay as a framed room board with state shown on each station",
   assert.doesNotMatch(html, /TRACKING DEGRADED/);
   assert.doesNotMatch(html, /id="stations-title"/);
   assert.doesNotMatch(html, /footer-note/);
+});
+
+test("shows a dismissible how-it-works explainer only in gameplay mode, open by default", async () => {
+  const setupHtml = renderApp((await approvedTransport()).snapshot(), 1_000);
+  assert.doesNotMatch(setupHtml, /class="how-it-works"/);
+
+  const transport = await approvedTransport();
+  await transport.command(GAME_ACTIONS.START_GAME);
+  const gameplayHtml = renderApp(transport.snapshot(), 1_000);
+  assert.match(gameplayHtml, /class="how-it-works" role="dialog" aria-label="How this game works"/);
+  // Grounded in the real rules: pantry/fridge, cutting board, stove, plate, shake-submit.
+  assert.match(gameplayHtml, /pantry/i);
+  assert.match(gameplayHtml, /fridge/i);
+  assert.match(gameplayHtml, /cutting board/i);
+  assert.match(gameplayHtml, /stove/i);
+  assert.match(gameplayHtml, /shake/i);
+  // useState defaults it open; renderApp is a static-markup snapshot so the
+  // click-to-dismiss interaction itself isn't exercised by this harness, but
+  // the dismiss control's presence and hook are checked here.
+  assert.match(gameplayHtml, /<button type="button" class="how-it-works-dismiss" data-dismiss="how-it-works">/);
+
+  await transport.command(GAME_ACTIONS.END_GAME);
+  const resultsHtml = renderApp(transport.snapshot(), 1_000);
+  assert.doesNotMatch(resultsHtml, /class="how-it-works"/);
 });
 
 test("keeps the room mirror geometry aligned to its normalized display bounds", () => {
@@ -389,13 +419,19 @@ test("renders readable burger stacks and full-width time remaining rails", () =>
   state.floorPlan.accepted = true;
   state.clock.status = "running";
   state.orders[0] = { ...state.orders[0], remainingSeconds: 60, totalSeconds: 120 };
+  state.orders[1] = { ...state.orders[1], remainingSeconds: 29, totalSeconds: 120 };
 
   const html = renderApp(state, 1_000);
 
   assert.equal((html.match(/data-burger-preview=/g) || []).length, 4);
-  assert.match(html, /data-order-id="order-1"[\s\S]*data-burger-layer="BUN"[\s\S]*data-burger-layer="MEAT"[\s\S]*data-burger-layer="CHEESE"[\s\S]*data-burger-layer="LETTUCE"/);
+  // The bun is one held item (base only, not a duplicated top+bottom cap), so
+  // the stack renders toppings top-to-bottom above a single bun base.
+  assert.match(html, /data-order-id="order-1"[\s\S]*data-burger-layer="LETTUCE"[\s\S]*data-burger-layer="CHEESE"[\s\S]*data-burger-layer="MEAT"[\s\S]*data-burger-layer="BUN"/);
   assert.match(html, /data-order-id="order-1"[\s\S]*role="progressbar"[\s\S]*aria-valuenow="50"[\s\S]*style="width:50%"/);
   assert.equal((html.match(/class="hud-order-progress"/g) || []).length, 4);
+  assert.match(html, /class="hud-order hud-order-compact is-warning"[^>]*data-order-id="order-1"/);
+  assert.match(html, /class="hud-order hud-order-compact is-critical"[^>]*data-order-id="order-2"/);
+  assert.equal((html.match(/class="hud-order-time-icon"/g) || []).length, 4);
 });
 
 test("falls back to the legacy single order when an orders array is absent", () => {
