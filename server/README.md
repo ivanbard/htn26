@@ -65,6 +65,13 @@ start:
 node server/server.mjs --serial /dev/ttyUSB0
 ```
 
+On POSIX hosts the adapter configures a real TTY as raw, no-echo, no-hangup
+before reading it. This is required even though the file descriptor is opened
+read-only: a TTY with kernel echo enabled can send every badge log line back to
+the stock console, producing an `Unrecognized command` feedback loop. The
+adapter refuses to read a POSIX TTY when that safety configuration fails.
+Regular fixture files used by host tests are unaffected.
+
 A plain `node server/server.mjs` never attaches a device, even if the inherited
 environment or `server/.env` contains `HTN26_SERIAL_DEVICE`. This opt-in avoids
 opening a connected ESP32 unexpectedly. The server-side code previously opened

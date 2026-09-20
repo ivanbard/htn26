@@ -10,7 +10,7 @@ import { browserDocument } from "../src/http.mjs";
 import { LocalFloorplanProvider } from "../src/provider.mjs";
 import { BURGER_RECIPES, GAME_TIMINGS, MONEY_RULES, ServerProjection } from "../src/projection.mjs";
 import { createRuntime, startupGuide, usage } from "../server.mjs";
-import { openSerialDevice } from "../src/serial-device.mjs";
+import { configureSerialFd, openSerialDevice } from "../src/serial-device.mjs";
 
 const MAC = "AA:BB:CC:DD:EE:01";
 
@@ -237,6 +237,37 @@ test("configurable serial-device adapter opens a fixture stream", async () => {
   assert.equal(record.kind, "gateway-status");
   assert.equal(record.status.packetCount, 2);
   await rm(directory, { recursive: true, force: true });
+});
+
+test("POSIX serial-device adapter disables tty echo before reading", () => {
+  let invocation;
+  const configured = configureSerialFd(17, {
+    platform: "linux",
+    fstat: () => ({ isCharacterDevice: () => true }),
+    run: (...args) => {
+      invocation = args;
+      return { status: 0, stderr: "" };
+    },
+  });
+  assert.equal(configured, true);
+  assert.equal(invocation[0], "stty");
+  assert.deepEqual(invocation[1], ["raw", "-echo", "-hupcl", "clocal"]);
+  assert.deepEqual(invocation[2].stdio, [17, "ignore", "pipe"]);
+});
+
+test("serial-device adapter skips stty for fixtures and fails closed on tty configuration errors", () => {
+  let calls = 0;
+  assert.equal(configureSerialFd(9, {
+    platform: "linux",
+    fstat: () => ({ isCharacterDevice: () => false }),
+    run: () => { calls += 1; },
+  }), false);
+  assert.equal(calls, 0);
+  assert.throws(() => configureSerialFd(9, {
+    platform: "linux",
+    fstat: () => ({ isCharacterDevice: () => true }),
+    run: () => ({ status: 1, stderr: "bad tty" }),
+  }), /safe receive-only access: bad tty/);
 });
 
 test("projection keeps four recipes, validates submissions, and computes gold/tips", async () => {
