@@ -288,8 +288,11 @@ export function createHttpServer({ projection, photoStore, layoutSubmissionStore
     try {
       const result = await roomLayoutGenerator?.generate(uploads.map((upload, index) => ({ ...upload, id: submission.photos[index].id })), { preprocessMs });
       if (!result?.layout) throw new Error("no layout returned");
-      const metrics = { ...result.metrics, totalMs: (preprocessMs ?? 0) + elapsedMs(totalStart) };
-      const completed = await layoutSubmissionStore.finish(submission.requestId, { status: "success", metrics });
+      const completed = await layoutSubmissionStore.finish(submission.requestId, {
+        status: "success",
+        metrics: result.metrics,
+        finalizeMetrics: () => ({ totalMs: (preprocessMs ?? 0) + elapsedMs(totalStart) }),
+      });
       projection.proposeRoomLayout(result.layout, Date.now(), { photoCount: submission.photoCount });
       if (process.env.NODE_ENV !== "production") console.debug("[htn26] room layout generation", { requestId: submission.requestId, ...completed.metrics });
       send(res, 200, result.layout, { ...headers, ...auditHeaders, ...timingHeader(completed.metrics) });
@@ -297,9 +300,13 @@ export function createHttpServer({ projection, photoStore, layoutSubmissionStore
       const metrics = {
         preprocessMs,
         ...error?.metrics,
-        totalMs: (preprocessMs ?? 0) + elapsedMs(totalStart),
       };
-      const completed = await layoutSubmissionStore.finish(submission.requestId, { status: "failure", metrics });
+      const completed = await layoutSubmissionStore.finish(submission.requestId, {
+        status: "failure",
+        metrics,
+        finalizeMetrics: () => ({ totalMs: (preprocessMs ?? 0) + elapsedMs(totalStart) }),
+      });
+      if (process.env.NODE_ENV !== "production") console.debug("[htn26] room layout generation failed", { requestId: submission.requestId, reason: error?.name || "provider", ...completed.metrics });
       send(res, Number(error?.statusCode) || 503, { error: "Room layout generation is unavailable. Try again." }, { ...headers, ...auditHeaders, ...timingHeader(completed.metrics) });
     }
   }

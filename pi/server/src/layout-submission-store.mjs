@@ -148,7 +148,7 @@ export class LayoutSubmissionStore {
     return publicSubmission(submission);
   }
 
-  async finish(requestId, { status, metrics } = {}) {
+  async finish(requestId, { status, metrics, finalizeMetrics } = {}) {
     const submission = this.submissions.find((value) => value.requestId === requestId);
     if (!submission) throw new Error("layout submission not found");
     submission.status = status === "success" ? "success" : "failure";
@@ -156,6 +156,10 @@ export class LayoutSubmissionStore {
     submission.metrics = timingMetrics({ ...submission.metrics, ...metrics });
     submission.failure = submission.status === "failure" ? { code: "generation_unavailable" } : null;
     await this.persist(submission);
+    if (typeof finalizeMetrics === "function") {
+      submission.metrics = timingMetrics({ ...submission.metrics, ...finalizeMetrics() });
+      await this.persist(submission);
+    }
     return publicSubmission(submission);
   }
 

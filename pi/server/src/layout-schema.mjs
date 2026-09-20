@@ -83,6 +83,7 @@ export function normalizeRotation(rotationDeg) {
  */
 export function sanitizeRotatedRect(candidate, fallback = { x: 0.5, y: 0.5, width: 0.2, height: 0.2, rotationDeg: 0 }) {
   const source = candidate && typeof candidate === "object" ? candidate : {};
+  const fallbackCenter = fallback.center && typeof fallback.center === "object" ? fallback.center : fallback;
   let width = Math.max(0.01, Math.min(1, number(source.width, fallback.width)));
   let height = Math.max(0.01, Math.min(1, number(source.height, fallback.height)));
   const rotationDeg = normalizeRotation(source.rotationDeg ?? fallback.rotationDeg);
@@ -94,8 +95,8 @@ export function sanitizeRotatedRect(candidate, fallback = { x: 0.5, y: 0.5, widt
   height *= scale;
   extentX *= scale;
   extentY *= scale;
-  const x = Math.max(extentX, Math.min(1 - extentX, number(source.center?.x, fallback.x)));
-  const y = Math.max(extentY, Math.min(1 - extentY, number(source.center?.y, fallback.y)));
+  const x = Math.max(extentX, Math.min(1 - extentX, number(source.center?.x, fallbackCenter.x)));
+  const y = Math.max(extentY, Math.min(1 - extentY, number(source.center?.y, fallbackCenter.y)));
   return { center: { x, y }, width, height, rotationDeg };
 }
 

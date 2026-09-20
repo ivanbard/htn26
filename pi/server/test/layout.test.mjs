@@ -104,16 +104,20 @@ test("keeps exactly four unique station types and cleans invalid support objects
 test("sends all photos in one Responses request and returns the exact layout contract", async () => {
   let calls = 0;
   let request;
+  const generated = candidate();
+  generated.stations[1] = { ...generated.stations[0] };
   await withRuntime(async (_url, options) => {
     calls += 1;
     request = JSON.parse(options.body);
-    return responseFor({ output_text: JSON.stringify(candidate()) });
+    return responseFor({ output_text: JSON.stringify(generated) });
   }, async (base, runtime) => {
     const response = await formPhotos(base, 5);
     const layout = await response.json();
     assert.equal(response.status, 200);
     assert.deepEqual(Object.keys(layout).sort(), ["objects", "playArea", "presentationArea", "stations"]);
     assert.equal(layout.stations.length, 4);
+    assert.deepEqual(layout.stations.map(({ type }) => type), REQUIRED_STATION_TYPES);
+    assert.deepEqual(validateRoomLayout(layout), []);
     assert.equal(calls, 1);
     assert.equal(request.model, "gpt-5.6-luna");
     assert.equal(request.reasoning.effort, "low");
@@ -124,7 +128,14 @@ test("sends all photos in one Responses request and returns the exact layout con
     assert.equal(request.text.format.type, "json_schema");
     assert.equal(request.text.format.strict, true);
     assert.equal(runtime.projection.snapshot().roomLayout.stations.length, 4);
-    assert.equal(runtime.projection.snapshot().floorPlan.photoCount, 5);
+    const floorPlan = runtime.projection.snapshot().floorPlan;
+    assert.equal(floorPlan.photoCount, 5);
+    assert.equal(floorPlan.coordinateSpace, "normalized-percent");
+    assert.equal(floorPlan.units, "percent");
+    assert.equal(floorPlan.width, 100);
+    assert.equal(floorPlan.height, 100);
+    assert.ok(Math.abs(floorPlan.stations[0].x - 15) < Number.EPSILON * 100);
+    assert.equal(floorPlan.stations[0].width, 10);
   });
 });
 
@@ -190,6 +201,11 @@ test("preserves mixed-case multipart boundaries and endpoint-wide timing", async
       await new Promise((resolve) => setTimeout(resolve, 15));
       return create(...args);
     };
+    const finish = runtime.layoutSubmissionStore.finish.bind(runtime.layoutSubmissionStore);
+    runtime.layoutSubmissionStore.finish = async (...args) => {
+      await new Promise((resolve) => setTimeout(resolve, 15));
+      return finish(...args);
+    };
 
     const success = await slowMultipartPhotos(base, { preprocessMs: 11 });
     const failure = await slowMultipartPhotos(base, { preprocessMs: 7 });
@@ -201,8 +217,8 @@ test("preserves mixed-case multipart boundaries and endpoint-wide timing", async
 
     const audit = await fetch(`${base}/api/layout/submissions`).then((response) => response.json());
     assert.deepEqual(audit.submissions.map(({ status }) => status), ["success", "failure"]);
-    assert.ok(audit.submissions[0].metrics.totalMs >= 36);
-    assert.ok(audit.submissions[1].metrics.totalMs >= 32);
+    assert.ok(audit.submissions[0].metrics.totalMs >= 51);
+    assert.ok(audit.submissions[1].metrics.totalMs >= 47);
     assert.equal(JSON.parse(success.headers["x-htn26-layout-metrics"]).totalMs, audit.submissions[0].metrics.totalMs);
     assert.equal(JSON.parse(failure.headers["x-htn26-layout-metrics"]).totalMs, audit.submissions[1].metrics.totalMs);
   });
