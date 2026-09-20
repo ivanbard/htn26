@@ -5,7 +5,7 @@ import sys
 from build import ROOT, HERE, HOOK, decode
 
 sys.path.insert(0, str(ROOT / "badge/assets/icons"))
-from generate_native_icons import encode_rgb565a8, load_rgba_png, native_icon_data
+from generate_native_icons import encode_rgb565a8, load_rgba_png, native_icon_data, resized_crop, NATIVE_SIZE
 
 ICON_DATA = {name: data for name, _, data in native_icon_data()}
 ICON_NAMES_BY_PIXELS = {}
@@ -20,12 +20,13 @@ from unicorn.riscv_const import UC_RISCV_REG_A0, UC_RISCV_REG_A1, UC_RISCV_REG_R
 def scenario(nvs_error=0, radio_error=0, nfc_error=0, allocation_failure=False,
              send_error=0, role="player", timeout_recovery=False):
     cpu = Uc(UC_ARCH_RISCV, UC_MODE_RISCV32)
-    for base, size in [(0x3C000000, 0x300000), (0x3FC80000, 0x80000),
+    for base, size in [(0x3C000000, 0x270000), (0x3FC80000, 0x80000),
                        (0x40380000, 0x20000), (0x42000000, 0x140000), (0x50000000, 0x1000)]:
         cpu.mem_map(base, size)
     _, segments, _ = decode((HERE / "build/overcooked-factory.bin").read_bytes())
     for address, data in segments:
-        cpu.mem_write(address, data)
+        # Image padding extends further than the stock runtime's mapped constants.
+        cpu.mem_write(address, data[:0x3C270000-address] if address == 0x3C130020 else data)
     cpu.reg_write(UC_RISCV_REG_SP, 0x3FCDF000)
     calls, registrations, texts, stages, prints = [], [], [], [], []
     app, old_app = 0x3FCC0000, 0x3FC9AB00
@@ -93,8 +94,8 @@ def scenario(nvs_error=0, radio_error=0, nfc_error=0, allocation_failure=False,
             data_size, data_pointer, descriptor_reserved = struct.unpack(
                 '<III', cpu.mem_read(a1 + 12, 12))
             assert (magic, color_format, flags, width, height, stride, reserved) == (
-                0x19, 0x14, 0, 42, 42, 84, 0)
-            assert data_size == 42 * 42 * 3 and descriptor_reserved == 0
+                0x19, 0x14, 0, NATIVE_SIZE, NATIVE_SIZE, NATIVE_SIZE * 2, 0)
+            assert data_size == NATIVE_SIZE * NATIVE_SIZE * 3 and descriptor_reserved == 0
             pixels = bytes(cpu.mem_read(data_pointer, data_size))
             assert pixels in ICON_NAMES_BY_PIXELS
             display["icons"] = ICON_NAMES_BY_PIXELS[pixels]
@@ -474,7 +475,8 @@ def scenario(nvs_error=0, radio_error=0, nfc_error=0, allocation_failure=False,
 
 if __name__ == "__main__":
     burnt_source = load_rgba_png(ROOT / "badge/assets/icons/ing_meat_burnt.png")
-    assert ICON_DATA["burnt_meat"] == encode_rgb565a8(burnt_source)
+    assert ICON_DATA["burnt_meat"] == encode_rgb565a8(resized_crop(
+        burnt_source, (0, 0, 42, 42), NATIVE_SIZE, NATIVE_SIZE))
     scenario()
     scenario(timeout_recovery=True)
     scenario(timeout_recovery="persistent")

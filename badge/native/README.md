@@ -98,15 +98,19 @@ listed as the fixed `B/M/L/C` columns next to the plate icon. Pickup, failed or
 completed cutting, stove put/take, drop, transfer, submission, game start/end,
 and reset all rerender from the same local state used to form events.
 
-The artwork is generated from `../assets/icons/*.png` as ten 42×42 LVGL
+The artwork is generated from `../assets/icons/*.png` as ten 28×28 LVGL
 RGB565A8 descriptors. The bun deterministically stacks the checked-in top and
 bottom assets, while `BURNT_MEAT` consumes the independent named
 `../assets/icons/ing_meat_burnt.png` source directly. That source is the
 documented temporary cooked-meat placeholder until dedicated burnt artwork is
 supplied. The payload uses one reusable image widget rather than ten runtime
 image objects or the Lua display test's 196-box grid. Current build metadata
-records 55,695 bytes of total payload DROM and a 308-byte permanent app object;
-the builder enforces the existing 64 KiB DROM page and factory boundaries.
+records 26,295 bytes of total payload DROM and a 308-byte permanent app object.
+The linker and builder limit live constants to 30,880 bytes (`0x78A0`), ending
+before `0x3C270000`. The original 42×42 icon build put its registration log at
+`0x3C275EFC` and caused a reproducible MMU-entry boot panic on COM7. The 64 KiB
+file-layout growth preserves segment alignment; it is not all usable runtime
+mapping space. Emulator coverage now leaves that inaccessible page unmapped.
 
 Radio initialization has a fail-closed NVS preflight and never invokes the
 stock erase/recovery branch. The player role then enables NFC; the host role

@@ -111,6 +111,35 @@ Evidence: `build/native-soak.txt`, `build/native-soak-uninterrupted.txt`,
 Evidence: `build/regression-share.txt`, `build/regression-sync.txt`, and
 `build/regression-lua-launcher.txt`.
 
+## 2026-09-20 icon-build boot-loop repair
+
+The first icon build exceeded the stock runtime's mapped DROM window even
+though it still fit the factory partition. On COM7 this faulted while reading
+the native registration log and reset before the launcher appeared. Native
+icons were reduced to 28x28 and the build now rejects `.rodata` beyond
+`0x3c270000` (30,880 bytes from the payload base).
+
+The repaired image SHA-256 is
+`952664d4abbd7a9e247ae50e8c9cfea0b4662ff276335ba27f218d96a53e6d80`.
+A full-chip readback matched the candidate in the factory range and remained
+byte-identical to the pre-repair backup outside that range. COM7 then booted My
+Badge, launched the native Overcooked host screen, exited cleanly, rebooted,
+and returned to the launcher focused on Overcooked without a panic.
+
+Evidence: `badge-backup/COM7-bootloop-before.bin`,
+`badge-backup/COM7-bootloop-factory.bin`, and
+`badge-backup/COM7-bootloop-repaired-full.bin`. This validates one physical
+badge. A second physical badge on COM6 (MAC `e8:f6:0a:28:eb:4c`) received the
+same image: full-chip readback verified the factory image and preserved every
+byte outside the factory partition, then it booted My Badge and entered the
+launcher with its original identity. Its rollback images are under
+`badge-backup/COM6-20260920-repair/`. Further badges still need the same
+per-device deployment and smoke check.
+
+COM5 (MAC `e8:3d:c1:29:86:f4`) was also flashed and read back successfully;
+its personal storage stayed byte-identical and it booted My Badge as Adeline
+Lue Sang. Its rollback images are under `badge-backup/COM5-20260920-repair/`.
+
 An additional test forced `target=bullet_dodge` on reboot. That path hit a
 `Stack protection fault` in the 4 KiB main task before app entry completed.
 It is distinct from the working normal launcher path, which invokes Lua from

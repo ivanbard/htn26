@@ -8,7 +8,7 @@ SECTIONS {
     .bss : { *(.bss*) *(.sbss*) *(COMMON) }
     ASSERT(SIZEOF(.data) == 0, "Mutable globals need explicit initialization")
     ASSERT(SIZEOF(.bss) == 0, "BSS would overlap stock memory")
-    ASSERT(SIZEOF(.rodata) <= 0x10000, "DROM extension exceeds one page")
+    ASSERT(SIZEOF(.rodata) <= 0x78a0, "DROM payload exceeds runtime mapping at 0x3c270000")
     ASSERT(SIZEOF(.text) <= 0x38e0, "IROM would reach the stock DROM MMU pages")
     /DISCARD/ : { *(.comment) *(.riscv.attributes) *(.eh_frame*) }
 }
