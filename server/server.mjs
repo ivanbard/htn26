@@ -68,6 +68,7 @@ export async function createRuntime({ env = process.env, now = () => Date.now(),
     difficultySidecar: configuredDifficultySidecar,
   });
   const serialAdapter = createSerialStreamAdapter({
+    onLine: (line) => console.log(`[serial] ${line}`),
     onRecord: (record) => {
       const timestamp = now();
       if (record.kind === "badge-event") projection.ingestBadgeEvent(record.intent, timestamp);
