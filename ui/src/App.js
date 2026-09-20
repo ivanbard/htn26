@@ -3,8 +3,10 @@ import {
   canRunAction,
   formatSeconds,
   isStale,
+  matchRuntimeStations,
   playerPosition,
   progressPercent,
+  stationProgressPercent,
   GAME_ACTIONS,
   SETUP_PHASES,
   displayModeForPhase,
@@ -23,13 +25,27 @@ import { INGREDIENT_KINDS, ingredientSprite, ingredientStage, platedStage, plate
 const h = React.createElement;
 const FIGMA_ASSETS = Object.freeze({
   CHEF: "/assets/chef-player.svg",
-  CHEF_WITH_PLATE: "/assets/chef-player-with-plate.svg",
   PLATE: "/assets/player-plate.svg",
 });
+// A chef holding a plate is drawn in two layers — hands/arms/shoes (back),
+// then the plate sprite, then hat/body (front) — so the plate is held like
+// the original art: in front of the hands but tucked behind the hat.
 const PLAYER_ASSETS = Object.freeze({
-  green: Object.freeze({ chef: FIGMA_ASSETS.CHEF, chefWithPlate: FIGMA_ASSETS.CHEF_WITH_PLATE }),
-  red: Object.freeze({ chef: "/assets/chef-player-red.svg", chefWithPlate: "/assets/chef-player-with-plate-red.svg" }),
-  blue: Object.freeze({ chef: "/assets/chef-player-blue.svg", chefWithPlate: "/assets/chef-player-with-plate-blue.svg" }),
+  green: Object.freeze({
+    chef: FIGMA_ASSETS.CHEF,
+    holdBack: "/assets/chef-player-with-plate-back.svg",
+    holdFront: "/assets/chef-player-with-plate-front.svg",
+  }),
+  red: Object.freeze({
+    chef: "/assets/chef-player-red.svg",
+    holdBack: "/assets/chef-player-with-plate-back-red.svg",
+    holdFront: "/assets/chef-player-with-plate-front-red.svg",
+  }),
+  blue: Object.freeze({
+    chef: "/assets/chef-player-blue.svg",
+    holdBack: "/assets/chef-player-with-plate-back-blue.svg",
+    holdFront: "/assets/chef-player-with-plate-front-blue.svg",
+  }),
 });
 const STATION_ASSETS = Object.freeze({
   PANTRY: "/assets/pantry.png",
@@ -48,7 +64,7 @@ const ingredientKey = (value) => String(value || "").trim().toUpperCase().replac
 const playerTeam = (value) => Object.prototype.hasOwnProperty.call(PLAYER_ASSETS, String(value || "").toLowerCase())
   ? String(value).toLowerCase()
   : "green";
-const playerChefAsset = (player, hasPlate) => PLAYER_ASSETS[playerTeam(player?.color)][hasPlate ? "chefWithPlate" : "chef"];
+const playerChefAsset = (player) => PLAYER_ASSETS[playerTeam(player?.color)].chef;
 
 function phaseLabel(phase) {
   if (phase === SETUP_PHASES.SCANNING) return "SCANNING ROOM";
@@ -69,6 +85,41 @@ function orderTitle(order) {
 function activeOrdersFor(state) {
   const source = Array.isArray(state.orders) && state.orders.length ? state.orders : state.order ? [state.order] : [];
   return source.filter((order) => order?.status === "active").slice(0, 4);
+}
+
+const TOUR_PREVIEW_ORDER = Object.freeze({
+  id: "tour-order",
+  dish: "PLAIN MEAT BURGER",
+  recipe: "PLAIN_MEAT",
+  status: "active",
+  toppings: [],
+  components: ["BUN", "MEAT"],
+  goldValue: 100,
+  remainingSeconds: 120,
+  totalSeconds: 120,
+  patience: { segments: 3, filledSegments: 3 },
+});
+
+function tourPreviewState(state) {
+  const order = activeOrdersFor(state)[0] || TOUR_PREVIEW_ORDER;
+  const previewOrder = {
+    ...TOUR_PREVIEW_ORDER,
+    ...order,
+    status: "active",
+    remainingSeconds: Number(order.totalSeconds) > 0 ? Number(order.totalSeconds) : TOUR_PREVIEW_ORDER.totalSeconds,
+    totalSeconds: Number(order.totalSeconds) > 0 ? Number(order.totalSeconds) : TOUR_PREVIEW_ORDER.totalSeconds,
+    patience: { ...TOUR_PREVIEW_ORDER.patience, ...order.patience, filledSegments: 3 },
+  };
+  const totalSeconds = Number(state.clock?.totalSeconds) > 0 ? Number(state.clock.totalSeconds) : 240;
+  return {
+    ...state,
+    orders: [previewOrder],
+    order: previewOrder,
+    score: { ...(state.score || {}), value: 0, delivered: 0 },
+    gold: { ...(state.gold || {}), total: 0, earned: 0, lastChange: 0 },
+    tips: { ...(state.tips || {}), total: 0, earned: 0, lastChange: 0 },
+    clock: { ...(state.clock || {}), status: "ready", remainingSeconds: totalSeconds, totalSeconds },
+  };
 }
 
 function seconds(value) {
@@ -118,7 +169,7 @@ function stagesForLayout(layoutFromImage) {
   ];
 }
 
-function StageTracker({ state, onCommand, hideScanAction = false }) {
+function StageTracker({ state, onCommand }) {
   const current = stageIndex(state.setup?.phase);
   const stages = stagesForLayout(state.floorPlan?.layoutFromImage === true);
   return h("ol", { className: "setup-stages", "aria-label": "Game setup stages" }, stages.map((stage, index) => {
@@ -133,14 +184,13 @@ function StageTracker({ state, onCommand, hideScanAction = false }) {
           h("span", null, stage.description),
         ),
       ),
-      stage.action && !(hideScanAction && stage.action === GAME_ACTIONS.SCAN_ROOM) && (active || canRunAction(state, stage.action)) && h(ActionButton, { state, action: stage.action, label: stage.label, onCommand, compact: true }),
+      stage.action && (active || canRunAction(state, stage.action)) && h(ActionButton, { state, action: stage.action, label: stage.label, onCommand, compact: true }),
     );
   }));
 }
 
-function HostPanel({ state, onCommand, onGenerateLayout }) {
+function HostPanel({ state, onCommand }) {
   const phase = state.setup?.phase;
-  const [photoFiles, setPhotoFiles] = React.useState([]);
   const stages = stagesForLayout(state.floorPlan?.layoutFromImage === true);
   return h("section", { className: "setup-card setup-progress", "aria-labelledby": "host-title" },
     h("div", { className: "setup-progress-heading" },
@@ -154,14 +204,7 @@ function HostPanel({ state, onCommand, onGenerateLayout }) {
         h(ActionButton, { state, action: GAME_ACTIONS.RESET_GAME, label: "Reset", onCommand, compact: true }),
       ),
     ),
-    h(StageTracker, { state, onCommand, hideScanAction: Boolean(onGenerateLayout) }),
-    onGenerateLayout && h("div", { className: "layout-photo-controls", "data-layout-photo-controls": true },
-      h("label", { className: "setup-photo-label" }, "Classroom photos (3-5)", h("input", {
-        type: "file", accept: "image/jpeg,image/png,image/webp,image/heic", multiple: true,
-        onChange: (event) => setPhotoFiles(Array.from(event.target.files || []).slice(0, 5)),
-      })),
-      h("button", { type: "button", className: "game-action-button game-action-button-compact", disabled: photoFiles.length < 3 || photoFiles.length > 5, onClick: () => onGenerateLayout(photoFiles) }, photoFiles.length ? `Generate AI layout (${photoFiles.length})` : "Choose 3-5 photos"),
-    ),
+    h(StageTracker, { state, onCommand }),
   );
 }
 
@@ -197,17 +240,6 @@ function PlateIngredients({ ingredients, className, label, stage }) {
   })));
 }
 
-function stationProgressPercent(runtimeStation) {
-  const explicitProgress = Number(runtimeStation?.progress);
-  if (Number.isFinite(explicitProgress)) return progressPercent(explicitProgress);
-  const remaining = Number(runtimeStation?.remainingSeconds);
-  const total = Number(runtimeStation?.totalSeconds ?? runtimeStation?.durationSeconds);
-  if (Number.isFinite(remaining) && Number.isFinite(total) && total > 0) {
-    return progressPercent(1 - (remaining / total));
-  }
-  return 0;
-}
-
 function stationWarning(runtimeStation, progress) {
   if (!runtimeStation) return false;
   const status = upper(runtimeStation.status || runtimeStation.phase || runtimeStation.processing);
@@ -237,24 +269,43 @@ function StationContents({ station, runtimeStation, serving }) {
   const contentLabel = ingredients.length ? ingredients.join("+") : "EMPTY";
   const items = ingredientItems(displayItem);
   const isWorkstation = station.kind === "stove" || station.kind === "chop";
-  // Source stations are self-describing: the fridge/crate art plus the
-  // accessible label carry the meaning, so they render no icon cluster and
-  // no name caption.
+  // Source stations (fridge/crate) are self-describing art: no ingredient icon
+  // on top and no name caption. The accessible label names them.
   const isSource = station.kind === "ingredient";
+  // The stage decides which sprite variant an item shows: raw at sources,
+  // raw while a chop is in progress, chopped afterwards, chopped meat on a
+  // stove until it is cooked or burnt, and everything else as plated food.
+  const iconStage = isSource
+    ? "raw"
+    : station.kind === "chop"
+      ? (visualState === "chopping" ? "raw" : "chopped")
+      : station.kind === "stove"
+        ? (visualState === "burnt" ? "burnt" : visualState === "cooked" ? "cooked" : "chopped")
+        : "plated";
+  // An assembly plate with drawn art for its exact mix renders as one sprite.
+  const comboSprite = station.kind === "assembly" ? plateSprite(ingredients) : null;
+  const hasComboPlate = Boolean(comboSprite);
   const isWarning = isWorkstation && stationWarning(runtimeStation, progress);
   const stateLabel = station.kind === "ingredient"
     ? "SOURCE"
     : isWarning && visualState !== "burnt" ? "WARNING" : cookingStateLabel(visualState);
   const timingLabel = Number.isFinite(Number(remaining)) && Number(remaining) > 0 ? ` · ${seconds(remaining)}` : "";
-  const timingStation = runtimeStation && (isWorkstation
-    || runtimeStation.progress != null
-    || runtimeStation.totalSeconds != null
-    || runtimeStation.durationSeconds != null);
+  // Only stoves and chopping boards run timers, so only they get a progress
+  // bar: never pantry/fridge/ingredient sources or the assembly counter, even
+  // if a snapshot carries a progress value for them. An idle workstation with
+  // nothing on it shows no bar until it holds an item or is cooking, chopping,
+  // done, warning, or burnt.
+  const workstationBusy = /COOK|CHOP|DONE|WARN|BURN/.test(upper(status));
+  const timingStation = Boolean(runtimeStation) && isWorkstation && (ingredients.length > 0 || workstationBusy);
   const totalSeconds = Number(runtimeStation?.totalSeconds ?? runtimeStation?.durationSeconds);
   return h("div", { className: cx("station-visual", `station-visual-${station.kind}`, `station-state-${visualState}`, isWarning && "station-state-warning"), "data-station-content": contentLabel, "data-station-phase": visualState, "data-cook-progress": isWorkstation ? progress : undefined, "data-station-warning": isWarning ? "true" : "false", "aria-label": `${station.label || station.id}: ${contentLabel}, ${stateLabel}${timingLabel}` },
     h("img", { className: "station-art", src: stationAsset(station), alt: "" }),
-    (station.kind === "delivery" || station.kind === "assembly") && h("img", { className: "station-plate-art", src: FIGMA_ASSETS.PLATE, alt: "" }),
-    !isSource && h(PlateIngredients, { ingredients: items, stage: station.kind === "stove" ? "cooked" : station.kind === "chop" ? "chopped" : "plated", className: "station-ingredients", label: `${station.label || station.id} contents: ${contentLabel}` }),
+    hasComboPlate
+      ? h("img", { className: "station-plate-art is-combo", src: comboSprite, alt: "", "data-plate-sprite": "combo" })
+      : h(React.Fragment, null,
+        (station.kind === "delivery" || station.kind === "assembly") && h("img", { className: "station-plate-art", src: FIGMA_ASSETS.PLATE, alt: "" }),
+        !isSource && h(PlateIngredients, { ingredients: items, stage: iconStage, className: "station-ingredients", label: `${station.label || station.id} contents: ${contentLabel}` }),
+      ),
     // The knife is baked into the chop board art, which would put it *under* the
     // ingredient. A cut-out copy of it is layered above the item so the knife
     // reads as cutting it.
@@ -324,7 +375,14 @@ function AnimatedPlayer({ player, position, walls, stale, plannedPath, delayMs =
   const plateItems = plateableIngredientKeys(playerPlateItems(player));
   const heldItems = playerHeldItems(player, plateItems);
   const hasPlate = Array.isArray(player?.plate) || (Array.isArray(player?.inventory) && player.inventory.some((item) => ingredientKey(item) === "PLATE"));
+  // The chef art no longer carries its own plate: one ready-made plate sprite
+  // (plate + food in a single image) fills the plate region instead, so items
+  // can never spill off. Only combos without drawn art (cheese+lettuce) keep
+  // the loose icon grid, laid on the empty-plate art.
+  const plateCombo = hasPlate && plateItems.length > 0 ? plateSprite(plateItems) : null;
+  const plateArt = hasPlate ? plateCombo || plateSprite([]) : null;
   const team = playerTeam(player?.color);
+  const chefArt = PLAYER_ASSETS[team];
 
   React.useEffect(() => {
     const from = previousPoint.current;
@@ -379,44 +437,22 @@ function AnimatedPlayer({ player, position, walls, stale, plannedPath, delayMs =
   },
   h("div", { className: "player-token" },
     h("div", { className: "player-avatar" },
-      h("img", { className: "player-chef-art", src: playerChefAsset(player, hasPlate), alt: "" }),
-      hasPlate && h(PlateIngredients, { ingredients: plateItems, stage: "plated", className: "player-plate-ingredients", label: `${label} plate: ${plateItems.join(", ") || "empty"}` }),
+      h("img", { className: "player-chef-art", src: hasPlate ? chefArt.holdBack : playerChefAsset(player), alt: "" }),
+      hasPlate && plateArt && h("img", { className: "player-plate-sprite", "data-plate-sprite": plateCombo ? "combo" : "base", src: plateArt, alt: `${label} plate: ${plateItems.join(", ") || "empty"}` }),
+      hasPlate && h("img", { className: "player-chef-art player-chef-hold-front", src: chefArt.holdFront, alt: "" }),
+      hasPlate && !plateCombo && h(PlateIngredients, { ingredients: plateItems, stage: "plated", className: "player-plate-ingredients", label: `${label} plate: ${plateItems.join(", ") || "empty"}` }),
       !hasPlate && heldItems.length > 0 && h("div", { className: "player-held-item", "aria-label": `${label} is holding ${heldItems[0]}` }, h(IngredientIcon, { value: heldItems[0], stage: "plated" })),
     ),
     h("span", { className: "player-tag" }, label),
   ));
 }
 
-function layoutRect(rect, className, debug, label) {
-  const center = rect?.center || { x: 0.5, y: 0.5 };
-  const width = Number(rect?.width) || 0;
-  const height = Number(rect?.height) || 0;
-  const x = center.x - width / 2;
-  const y = center.y - height / 2;
-  const rotation = Number(rect?.rotationDeg) || 0;
-  return h(React.Fragment, { key: `${className}-${label || "rect"}` },
-    h("rect", { className, x, y, width, height, rx: 0.008, transform: `rotate(${rotation} ${center.x} ${center.y})` }),
-    debug && h("text", { x: center.x, y: center.y, className: "room-layout-debug-label", textAnchor: "middle", dominantBaseline: "middle" }, label),
-  );
-}
-
-function RoomLayoutSurface({ layout, debug = false, proposed = false }) {
-  return h("svg", { className: "room-layout-svg", viewBox: "0 0 1 1", preserveAspectRatio: "xMidYMid meet", role: "img", "aria-label": `${proposed ? "Proposed" : "Active"} AI-generated normalized room layout` },
-    h("rect", { className: "room-layout-background", x: 0, y: 0, width: 1, height: 1 }),
-    layoutRect(layout.playArea, "room-layout-play-area", debug, "play area"),
-    layoutRect(layout.presentationArea, "room-layout-presentation", debug, "presentation area"),
-    ...(layout.objects || []).map((object) => layoutRect(object, "room-layout-object", debug, object.id)),
-    ...(layout.stations || []).map((station) => layoutRect(station, `room-layout-station station-${station.type}`, debug, station.type)),
-  );
-}
-
 function RoomSurface({ state, now, gameplay = false }) {
   const plan = state.floorPlan || {};
   const accepted = plan.accepted === true;
   const layoutFromImage = plan.layoutFromImage === true;
-  const layout = accepted ? state.roomLayout : state.proposedRoomLayout;
-  const layoutSurface = layout && h("div", { className: "absolute inset-0 z-0", "data-layout-state": accepted ? "active" : "proposed" }, h(RoomLayoutSurface, { layout, debug: state.roomLayoutDebug === true }));
-  const runtimeStations = new Map((state.stations || []).map((station) => [station.id, station]));
+  // Exact id first; a Pi `stove` tile falls back to `stove-left`/`stove-right`, etc.
+  const runtimeStations = matchRuntimeStations(plan.stations, state.stations);
   const movementWalls = [
     ...(plan.walls || []),
     ...(plan.stations || [])
@@ -485,7 +521,7 @@ function RoomSurface({ state, now, gameplay = false }) {
     "data-grid-rows": plan.grid?.rows,
     role: "img",
     "aria-label": `${accepted ? "Accepted burger" : "Proposed room"} top-down kitchen with scan-animated players`,
-  }, layoutSurface, !layoutFromImage && h("div", { className: "kitchen-floor", "aria-hidden": true }), !gameplay && h("div", { className: "room-plan-grid", "aria-hidden": true }), walls, stations, players,
+  }, !layoutFromImage && h("div", { className: "kitchen-floor", "aria-hidden": true }), !gameplay && h("div", { className: "room-plan-grid", "aria-hidden": true }), walls, stations, players,
   !accepted && h("div", { className: "room-approval-overlay" }, "Approve floor plan to generate burger level"));
 }
 
@@ -570,7 +606,15 @@ function OrderCard({ order, compact = false }) {
   const remaining = Number(order.remainingSeconds);
   const total = Number(order.totalSeconds);
   const progress = Number.isFinite(remaining) && Number.isFinite(total) && total > 0 ? Math.max(0, Math.min(100, (remaining / total) * 100)) : 0;
-  const urgency = remaining < 30 ? "is-critical" : remaining <= 60 ? "is-warning" : "is-healthy";
+  // Urgency is a share of this order's own patience (the Pi's orders run 8-35 s,
+  // the mock's 120 s): the last third is critical, the middle third a warning.
+  // Falls back to the Pi's 3-segment meter only when no total is supplied.
+  const segments = Number(order.patience?.filledSegments);
+  const urgency = total > 0 && Number.isFinite(remaining)
+    ? remaining * 3 <= total ? "is-critical" : remaining * 3 <= total * 2 ? "is-warning" : "is-healthy"
+    : order.patience?.filledSegments != null && Number.isFinite(segments)
+      ? segments <= 1 ? "is-critical" : segments === 2 ? "is-warning" : "is-healthy"
+      : "is-healthy";
   const titleId = `hud-title-${String(order.id || "order").replaceAll(/[^a-zA-Z0-9_-]/g, "-")}`;
   return h("section", { className: cx("hud-order", compact && "hud-order-compact", urgency), "data-node-id": "39:26", "data-order-id": order.id, "aria-labelledby": titleId },
     h(BurgerPreview, { order, components }),
@@ -651,7 +695,7 @@ const DELIVERY_TOAST_LIFETIME_MS = 3200;
 // behavior"): a correct plate reports gold plus a tip that scales with how
 // much patience was left (the order's 3-segment meter — see
 // mock-transport.js's orderTip()/patience.filledSegments, ported from
-// server's projection.mjs), or a wrong plate applies a penalty. This is
+// pi/server's projection.mjs), or a wrong plate applies a penalty. This is
 // the live, in-round version of that result; ServingPanel (ResultsView)
 // still shows the final round's last event after the round ends.
 function DeliveryToast({ state, now }) {
@@ -693,16 +737,170 @@ function GameplayBoard({ state, now }) {
   );
 }
 
-function SetupView({ state, now, onCommand, transportKind, onUploadPhotos, uploadStatus, onGenerateLayout }) {
+function SetupView({ state, now, onCommand, transportKind, onUploadPhotos, uploadStatus }) {
   const accepted = state.floorPlan?.accepted === true;
   // The room map already draws every station at its approved position with
   // its own label (see RoomSurface), so a separate "Kitchen pieces" checklist
   // next to it was just restating the same nine labels as a plain text list —
   // dropped in favor of letting the map be the single placement reference.
   return h("div", { className: "setup-flow" },
-    h(HostPanel, { state, onCommand, onGenerateLayout }),
+    h(HostPanel, { state, onCommand }),
     h("div", { className: "setup-workspace" },
-      h("section", { className: "setup-card map-card", "aria-labelledby": "map-title" }, h("div", { className: "map-heading" }, h("div", null, h("p", { className: "setup-kicker" }, accepted ? "Layout ready" : "Room preview"), h("h2", { id: "map-title" }, accepted ? "Your burger kitchen" : "Check the play area")), h("span", { className: cx("map-state", accepted && "is-ready") }, accepted ? "Ready to place" : "Needs approval")), h("p", null, accepted ? "Match each printed ingredient and station to its labelled spot on the map below. Keep chopping boards and stoves still once the round begins." : "Approve the layout to see where every station belongs."), transportKind === "http" && h("div", { className: "server-photo-upload" }, h("label", { htmlFor: "room-photo-input" }, "Upload 3–4 room photos to the master Pi"), h("input", { id: "room-photo-input", type: "file", accept: "image/jpeg,image/png", multiple: true, onChange: (event) => onUploadPhotos?.(event.target.files) }), uploadStatus && h("span", { role: "status" }, uploadStatus)), h("div", { className: "map-frame" }, h(RoomStage, { state, now }))),
+      h("section", { className: "setup-card map-card", "aria-labelledby": "map-title" }, h("div", { className: "map-heading" }, h("div", null, h("p", { className: "setup-kicker" }, accepted ? "Layout ready" : "Room preview"), h("h2", { id: "map-title" }, accepted ? "Your burger kitchen" : "Check the play area")), h("span", { className: cx("map-state", accepted && "is-ready") }, accepted ? "Ready to place" : "Needs approval")), h("p", null, accepted ? "Match each printed ingredient and station to its labelled spot on the map below. Keep chopping boards and stoves still once the round begins." : "Approve the layout to see where every station belongs."), transportKind === "http" && h("div", { className: "server-photo-upload" }, h("label", { htmlFor: "room-photo-input" }, "Room photos are uploaded from the phone to the master Pi"), h("input", { id: "room-photo-input", type: "file", accept: "image/*", multiple: true, onChange: (event) => onUploadPhotos?.(event.target.files) }), uploadStatus && h("span", { role: "status" }, uploadStatus)), h("div", { className: "map-frame" }, h(RoomStage, { state, now }))),
+    ),
+  );
+}
+
+function OnboardingView({ state, onCommand }) {
+  return h("main", { className: "onboarding-screen", "data-onboarding": "welcome", "aria-labelledby": "onboarding-title" },
+    h("div", { className: "onboarding-content" },
+      h("img", { className: "onboarding-burger", src: "/assets/order-burger.png", alt: "Burger" }),
+      h("div", { className: "onboarding-copy" },
+        h("h1", { id: "onboarding-title" }, "UnderCooked"),
+        h("p", null, "Overcooked, but IRL (and with geese)"),
+        h("p", null, "A Cooperative Burger Game!"),
+      ),
+      h("button", {
+        type: "button",
+        className: "onboarding-button",
+        disabled: !canRunAction(state, GAME_ACTIONS.START_HOST),
+        "data-command": GAME_ACTIONS.START_HOST,
+        onClick: () => onCommand?.(GAME_ACTIONS.START_HOST),
+      }, "Get Started"),
+    ),
+  );
+}
+
+function playerSlotNumber(player) {
+  const raw = player?.playerNumber ?? player?.slot ?? player?.id ?? player?.label;
+  const match = String(raw || "").match(/[123]/);
+  return match ? Number(match[0]) : null;
+}
+
+function playerIsReady(player) {
+  if (!player) return false;
+  if (Object.prototype.hasOwnProperty.call(player, "ready")) return player.ready === true;
+  if (Object.prototype.hasOwnProperty.call(player, "connected")) return player.connected === true;
+  if (Object.prototype.hasOwnProperty.call(player, "badgeMac")) return Boolean(player.badgeMac);
+  const status = String(player.status || player.connection?.status || "").toLowerCase();
+  if (status) return ["ready", "connected", "online", "healthy"].includes(status);
+  return true;
+}
+
+function playersForSlots(state) {
+  const players = Array.isArray(state?.players) ? state.players : [];
+  return [1, 2, 3].map((slot) => players.find((player) => playerSlotNumber(player) === slot) || null);
+}
+
+function roomPhotoCount(state) {
+  const photoCount = Array.isArray(state?.photos) ? state.photos.length : Number(state?.photoCount ?? state?.setup?.photoCount);
+  return Number.isFinite(photoCount) ? Math.max(0, Math.floor(photoCount)) : 0;
+}
+
+function PlayerReadinessCard({ slot, player }) {
+  const ready = playerIsReady(player);
+  const label = player?.name || `PLAYER ${slot}`;
+  return h("div", {
+    className: cx("player-readiness-card", !ready && "is-unavailable"),
+    "data-player-slot": String(slot),
+    "data-player-ready": ready ? "true" : "false",
+    role: "status",
+    "aria-label": `${label}: ${ready ? "ready" : "waiting for player"}`,
+  },
+    h("div", { className: "player-readiness-main" },
+      h("span", { className: "player-readiness-icon" }, h("img", { src: playerChefAsset(player || { color: "green" }), alt: "" })),
+      h("span", { className: "player-readiness-copy" },
+        h("strong", null, `PLAYER ${slot}`),
+        h("span", null, ready ? "READY" : "WAITING FOR PLAYER"),
+      ),
+    ),
+  );
+}
+
+function RoomPhotoUpload({ state, uploadStatus }) {
+  const count = roomPhotoCount(state);
+  return h("section", { className: "room-upload", "aria-labelledby": "room-upload-title" },
+    h("div", { className: "room-upload-copy" },
+      h("h2", { id: "room-upload-title" }, "Room photos"),
+      h("p", null, count >= 3 ? `${count} photos received. The server is ready to map the room.` : `${count} photos received. Waiting for the room upload.`),
+      uploadStatus && h("span", { className: "room-upload-status", role: "status" }, uploadStatus),
+    ),
+  );
+}
+
+function PlayerSetupView({ state, onCommand, transportKind, onUploadPhotos, uploadStatus }) {
+  const players = playersForSlots(state);
+  const readyCount = players.filter(playerIsReady).length;
+  const photoCount = roomPhotoCount(state);
+  const hasMinimumPlayers = readyCount >= 1;
+  const hasPhotos = transportKind !== "http" || photoCount >= 3;
+  const canScan = canRunAction(state, GAME_ACTIONS.SCAN_ROOM) && hasMinimumPlayers && hasPhotos;
+  return h("main", { className: "onboarding-screen player-setup-screen", "data-onboarding": "players", "aria-labelledby": "player-setup-title" },
+    h("div", { className: "player-setup-content" },
+      h("div", { className: "onboarding-copy" },
+        h("h1", null, "UnderCooked"),
+        h("p", null, "Get your kitchen ready"),
+      ),
+      h("section", { className: "player-readiness", "aria-labelledby": "player-setup-title" },
+        h("h2", { id: "player-setup-title" }, "Players ready"),
+        h("p", null, `${readyCount} of 3 players connected · minimum 1`),
+        h("div", { className: "player-readiness-list" }, players.map((player, index) => h(PlayerReadinessCard, { key: index, slot: index + 1, player }))),
+      ),
+      h(RoomPhotoUpload, { state, uploadStatus }),
+      h("button", {
+        type: "button",
+        className: "onboarding-button player-setup-continue",
+        disabled: !canScan,
+        "data-command": GAME_ACTIONS.SCAN_ROOM,
+        onClick: () => onCommand?.(GAME_ACTIONS.SCAN_ROOM),
+      }, "Continue"),
+    ),
+  );
+}
+
+function TourWalkthrough({ state, onCommand, onClose }) {
+  const [step, setStep] = React.useState(0);
+  const finalStep = step === HOW_IT_WORKS_STEPS.length - 1;
+  const current = HOW_IT_WORKS_STEPS[step];
+  return h("div", { className: "tour-welcome-layer", role: "dialog", "aria-labelledby": "tour-step-title" },
+    h("div", { className: "tour-step-content" },
+      h("p", { className: "tour-kicker" }, `Tour ${step + 1} of ${HOW_IT_WORKS_STEPS.length}`),
+      h("div", { className: "tour-step-icon", "aria-hidden": true }, current.icon),
+      h("h1", { id: "tour-step-title" }, current.text),
+      h("div", { className: "tour-actions" },
+        h("button", {
+          type: "button",
+          className: "tour-primary-button",
+          onClick: () => finalStep ? onCommand?.(GAME_ACTIONS.START_GAME) : setStep((value) => value + 1),
+        }, finalStep ? "Start Cooking" : "Continue"),
+        h("button", { type: "button", className: "tour-secondary-button", onClick: onClose }, "Back"),
+        h("button", { type: "button", className: "tour-skip-button", "data-command": GAME_ACTIONS.START_GAME, onClick: () => onCommand?.(GAME_ACTIONS.START_GAME) }, "Skip to the Game"),
+      ),
+    ),
+  );
+}
+
+function TourIntroView({ state, now, onCommand }) {
+  const [tourStarted, setTourStarted] = React.useState(false);
+  const preview = tourPreviewState(state);
+  return h("main", { className: "tour-screen", "data-onboarding": "tour", "aria-labelledby": "tour-title" },
+    h("div", { className: "tour-game-board" },
+      h(RoomStage, { state: preview, now, gameplay: true }),
+      h(OrdersHud, { state: preview }),
+      h("div", { className: "game-board-score" }, h(ScoreCard, { state: preview })),
+      h("div", { className: "game-board-timer" }, h(TimerCard, { state: preview, compact: true })),
+      tourStarted
+        ? h(TourWalkthrough, { state: preview, onCommand, onClose: () => setTourStarted(false) })
+        : h("div", { className: "tour-welcome-layer", role: "dialog", "aria-labelledby": "tour-title" },
+          h("div", { className: "tour-welcome-content" },
+            h("img", { className: "tour-burger", src: "/assets/order-burger.png", alt: "" }),
+            h("h1", { id: "tour-title" }, "Welcome to ", h("strong", null, "UnderCooked Interactive Tour")),
+            h("div", { className: "tour-actions" },
+              h("button", { type: "button", className: "tour-primary-button", "data-tour-action": "start", onClick: () => setTourStarted(true) }, "Start Tour"),
+              h("button", { type: "button", className: "tour-skip-button", "data-command": GAME_ACTIONS.START_GAME, onClick: () => onCommand?.(GAME_ACTIONS.START_GAME) }, "Skip to the Game"),
+            ),
+          ),
+        ),
     ),
   );
 }
@@ -746,15 +944,28 @@ function ResultsView({ state, now, onCommand }) {
   return h(React.Fragment, null, h("section", { className: "flex flex-col justify-between gap-4 border border-[#ffd166] bg-[#2a2415] p-5 md:flex-row md:items-center" }, h("div", null, h("p", { className: "mb-1 text-xs font-black uppercase tracking-[0.16em] text-[#ffd166]" }, "Round complete"), h("h2", { className: "text-2xl font-black text-white" }, phaseLabel(state.setup?.phase)), h("p", { className: "mt-1 text-sm text-[#a9bac9]" }, state.setup?.message)), h(ActionButton, { state, action: GAME_ACTIONS.RESET_GAME, label: "Reset game", onCommand })), h("div", { className: "mt-5 grid gap-5 xl:grid-cols-[minmax(0,1.55fr)_minmax(320px,.85fr)]" }, h("section", { className: "border border-[#2a435a] bg-[#101c29] p-5" }, h("div", { className: "mb-4 flex items-center justify-between" }, h("h2", { className: "text-xl font-black text-white" }, "Room mirror"), h(StatusBadge, { status: "healthy", label: "Final layout" })), h("div", { className: "aspect-[1672/941] overflow-hidden border border-[#45647d]" }, h(RoomSurface, { state, now }))), h(ServingPanel, { state })));
 }
 
-export function App({ state, now = Date.now(), connectionError = "", uploadStatus = "", transportKind, onCommand, onUploadPhotos, onGenerateLayout }) {
+export function App({ state, now = Date.now(), connectionError = "", uploadStatus = "", transportKind, onCommand, onUploadPhotos }) {
   if (!state) return h("section", { className: "mx-auto mt-24 max-w-2xl border border-[#2a435a] bg-[#101c29] p-8 text-center" }, h("p", { className: "text-xs font-black uppercase tracking-[0.16em] text-[#a9bac9]" }, "Burger level"), h("h1", { className: "mt-2 text-3xl font-black text-white" }, "Waiting for authoritative state…"), connectionError && h("div", { id: "ui-error", className: "ui-error", role: "alert" }, connectionError));
   const validation = validateFrontendSnapshot(state);
   if (!validation.valid) return h("section", { className: "mx-auto mt-24 max-w-3xl border border-[#ff6f6f] bg-[#2c1820] p-8", role: "alert" }, h("p", { className: "text-xs font-black uppercase tracking-[0.16em] text-[#ff6f6f]" }, "Burger level"), h("h1", { className: "mt-2 text-3xl font-black text-white" }, "Authoritative state unavailable"), h("p", { className: "mt-3 text-[#a9bac9]" }, "The received snapshot does not match the frontend contract. No game values were rendered."), h("p", { className: "mt-3 text-white" }, validation.errors.map((error) => error.message).join(" ")));
   const mode = displayModeForPhase(state.setup?.phase);
-  const content = mode === UI_DISPLAY_MODES.GAMEPLAY ? h(GameplayView, { state, now, onCommand }) : mode === UI_DISPLAY_MODES.RESULTS ? h(ResultsView, { state, now, onCommand }) : h(SetupView, { state, now, onCommand, transportKind, onUploadPhotos, uploadStatus, onGenerateLayout });
+  const onboarding = state.setup?.phase === SETUP_PHASES.IDLE;
+  const playerSetup = state.setup?.phase === SETUP_PHASES.SCANNING;
+  const tour = [SETUP_PHASES.BURGER_PLACEMENT, SETUP_PHASES.LAYOUT_ACCEPTED].includes(state.setup?.phase);
+  const content = onboarding
+    ? h(OnboardingView, { state, onCommand })
+    : playerSetup
+      ? h(PlayerSetupView, { state, onCommand, transportKind, onUploadPhotos, uploadStatus })
+      : tour
+        ? h(TourIntroView, { state, now, onCommand })
+      : mode === UI_DISPLAY_MODES.GAMEPLAY
+      ? h(GameplayView, { state, now, onCommand })
+      : mode === UI_DISPLAY_MODES.RESULTS
+        ? h(ResultsView, { state, now, onCommand })
+        : h(SetupView, { state, now, onCommand, transportKind, onUploadPhotos, uploadStatus });
   const gameplay = mode === UI_DISPLAY_MODES.GAMEPLAY;
   const setupMode = mode === UI_DISPLAY_MODES.SETUP;
-  return h("div", { className: cx("app-shell", gameplay && "is-gameplay", setupMode && "is-setup"), "data-display-mode": mode },
+  return h("div", { className: cx("app-shell", gameplay && "is-gameplay", setupMode && "is-setup", onboarding && "is-onboarding", playerSetup && "is-player-setup", tour && "is-tour"), "data-display-mode": mode },
     connectionError && h("div", { id: "ui-error", className: "ui-error mb-4", role: "alert" }, connectionError),
     content,
   );

@@ -4,7 +4,6 @@ export const SETUP_PHASES = Object.freeze({
   LAYOUT_PROPOSED: "layout-proposed",
   BURGER_PLACEMENT: "burger-placement",
   LAYOUT_ACCEPTED: "layout-accepted",
-  WAITING_FOR_HOST_START: "waiting-for-host-start",
   RUNNING: "running",
   ENDED: "ended",
 });
@@ -24,7 +23,6 @@ const SETUP_PHASE_DISPLAY_MODES = Object.freeze({
   [SETUP_PHASES.LAYOUT_PROPOSED]: UI_DISPLAY_MODES.SETUP,
   [SETUP_PHASES.BURGER_PLACEMENT]: UI_DISPLAY_MODES.SETUP,
   [SETUP_PHASES.LAYOUT_ACCEPTED]: UI_DISPLAY_MODES.SETUP,
-  [SETUP_PHASES.WAITING_FOR_HOST_START]: UI_DISPLAY_MODES.SETUP,
   [SETUP_PHASES.RUNNING]: UI_DISPLAY_MODES.GAMEPLAY,
   [SETUP_PHASES.ENDED]: UI_DISPLAY_MODES.RESULTS,
 });
@@ -39,7 +37,7 @@ export const GAME_ACTIONS = Object.freeze({
   START_HOST: "START_HOST",
   SCAN_ROOM: "SCAN_ROOM",
   APPROVE_LAYOUT: "APPROVE_LAYOUT",
-  // Kept as a protocol alias for existing laptop-server adapters.
+  // Kept as a protocol alias for existing master-Pi adapters.
   ACCEPT_LAYOUT: "APPROVE_LAYOUT",
   RESCAN: "RESCAN",
   START_GAME: "START_GAME",
@@ -109,6 +107,59 @@ export function progressPercent(value) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return 0;
   return Math.max(0, Math.min(100, numeric <= 1 ? numeric * 100 : numeric));
+}
+
+/**
+ * Station progress as a 0-100 percentage. The Pi projection sends `progress` as
+ * a 0..1 fraction (values above 1 are read as an already-percent value). A
+ * station that only reports `remainingSeconds` + `totalSeconds` (or
+ * `durationSeconds`) is derived from those; a missing/null `progress` never
+ * counts as "0", so it cannot mask the remaining/total pair.
+ */
+export function stationProgressPercent(station) {
+  const raw = station?.progress;
+  if (raw != null && raw !== "" && Number.isFinite(Number(raw))) return progressPercent(raw);
+  const remaining = Number(station?.remainingSeconds);
+  const total = Number(station?.totalSeconds ?? station?.durationSeconds);
+  if (station?.remainingSeconds != null && Number.isFinite(remaining) && Number.isFinite(total) && total > 0) {
+    return progressPercent(1 - (remaining / total));
+  }
+  return 0;
+}
+
+// Only workstations run timers. Ingredient sources, the assembly counter and
+// serving never show a progress bar.
+const WORKSTATION_KINDS = new Set(["stove", "chop"]);
+
+/**
+ * Pair each layout station with its runtime (authoritative) station.
+ *
+ * An exact id match always wins. The Pi plan names one physical `stove` while
+ * its runtime stations are `stove-left` / `stove-right` (and `cutting-board`),
+ * so a workstation with no id match falls back to the first runtime station of
+ * the same `kind` that no other layout station has claimed.
+ */
+export function matchRuntimeStations(layoutStations, runtimeStations) {
+  const layout = Array.isArray(layoutStations) ? layoutStations : [];
+  const runtime = Array.isArray(runtimeStations) ? runtimeStations.filter((station) => station && typeof station === "object") : [];
+  const matches = new Map();
+  const claimed = new Set();
+  for (const station of layout) {
+    const exact = runtime.find((candidate) => candidate.id === station?.id && !claimed.has(candidate));
+    if (exact) {
+      matches.set(station.id, exact);
+      claimed.add(exact);
+    }
+  }
+  for (const station of layout) {
+    if (!station || matches.has(station.id) || !WORKSTATION_KINDS.has(station.kind)) continue;
+    const fallback = runtime.find((candidate) => candidate.kind === station.kind && !claimed.has(candidate));
+    if (fallback) {
+      matches.set(station.id, fallback);
+      claimed.add(fallback);
+    }
+  }
+  return matches;
 }
 
 export function canRunAction(state, action) {
