@@ -7,6 +7,7 @@ import { createSerialStreamAdapter } from "./src/protocol.mjs";
 import { openSerialDevice } from "./src/serial-device.mjs";
 import { PhotoStore, createHttpServer } from "./src/http.mjs";
 import { createRoomLayoutGenerator } from "./src/layout-generator.mjs";
+import { LayoutSubmissionStore } from "./src/layout-submission-store.mjs";
 
 function parseArgs(argv) {
   const options = {};
@@ -28,6 +29,8 @@ export async function createRuntime({ env = process.env, now = () => Date.now(),
   const directory = dataDir || env.HTN26_DATA_DIR || path.join(path.dirname(fileURLToPath(import.meta.url)), "data");
   const photoStore = new PhotoStore({ directory });
   await photoStore.init();
+  const layoutSubmissionStore = new LayoutSubmissionStore({ directory, now });
+  await layoutSubmissionStore.init();
   const provider = createFloorplanProvider({ env, fetchImpl, now });
   const roomLayoutGenerator = createRoomLayoutGenerator({ env, fetchImpl, now });
   const projection = new ServerProjection({
@@ -59,7 +62,7 @@ export async function createRuntime({ env = process.env, now = () => Date.now(),
       onError: (error) => console.error(`serial device ${env.HTN26_SERIAL_DEVICE}: ${error.message}`),
     })
     : null;
-  const server = createHttpServer({ projection, photoStore, roomLayoutGenerator });
+  const server = createHttpServer({ projection, photoStore, layoutSubmissionStore, roomLayoutGenerator });
   const interval = setInterval(() => projection.snapshot(now()), 250);
   interval.unref?.();
   return {
@@ -67,6 +70,7 @@ export async function createRuntime({ env = process.env, now = () => Date.now(),
     provider,
     projection,
     photoStore,
+    layoutSubmissionStore,
     roomLayoutGenerator,
     serialAdapter,
     serialDevice,

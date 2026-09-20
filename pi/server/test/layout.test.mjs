@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { createRuntime } from "../server.mjs";
@@ -33,10 +33,10 @@ async function withRuntime(fetchImpl, callback) {
   finally { await runtime.close(); await rm(dataDir, { recursive: true, force: true }); }
 }
 
-async function formPhotos(base, count = 3) {
+async function formPhotos(base, count = 3, headers = {}) {
   const form = new FormData();
   for (let index = 0; index < count; index += 1) form.append("photos", new Blob([`photo-${index}`], { type: "image/jpeg" }), `room-${index}.jpg`);
-  return fetch(`${base}/api/layout/generate`, { method: "POST", body: form, headers: { accept: "application/json" } });
+  return fetch(`${base}/api/layout/generate`, { method: "POST", body: form, headers: { accept: "application/json", ...headers } });
 }
 
 test("sanitizes rotated geometry, boundaries, and normalized rotation", () => {
@@ -90,15 +90,58 @@ test("sends all photos in one Responses request and returns the exact layout con
     assert.equal(request.text.format.type, "json_schema");
     assert.equal(request.text.format.strict, true);
     assert.equal(runtime.projection.snapshot().roomLayout.stations.length, 4);
+    assert.equal(runtime.projection.snapshot().floorPlan.photoCount, 5);
   });
 });
 
-test("generation failure is generic and does not expose provider errors", async () => {
-  await withRuntime(async () => responseFor({ error: { message: "secret upstream details" } }, false, 500), async (base) => {
-    const response = await formPhotos(base, 3);
-    const body = await response.json();
-    assert.equal(response.status, 503);
-    assert.deepEqual(body, { error: "Room layout generation is unavailable. Try again." });
-    assert.doesNotMatch(JSON.stringify(body), /secret|OpenAI|upstream/i);
+test("retains isolated audit submissions across failure and retry", async () => {
+  let attempts = 0;
+  await withRuntime(async () => {
+    attempts += 1;
+    return attempts === 1
+      ? responseFor({ error: { message: "secret upstream details" } }, false, 500)
+      : responseFor({ output_text: JSON.stringify(candidate()) });
+  }, async (base, runtime) => {
+    const failedResponse = await formPhotos(base, 5, { "x-htn26-photo-preprocess-ms": "42" });
+    const failedBody = await failedResponse.json();
+    assert.equal(failedResponse.status, 503);
+    assert.deepEqual(failedBody, { error: "Room layout generation is unavailable. Try again." });
+    assert.doesNotMatch(JSON.stringify(failedBody), /secret|OpenAI|upstream/i);
+
+    const successfulResponse = await formPhotos(base, 5, { "x-htn26-photo-preprocess-ms": "21" });
+    assert.equal(successfulResponse.status, 200);
+    await successfulResponse.json();
+
+    const legacyPhotos = await fetch(`${base}/api/photos`).then((response) => response.json());
+    assert.equal(legacyPhotos.count, 0);
+    const audit = await fetch(`${base}/api/layout/submissions`).then((response) => response.json());
+    assert.equal(audit.submissions.length, 2);
+    assert.deepEqual(audit.submissions.map(({ status }) => status), ["failure", "success"]);
+    assert.deepEqual(audit.submissions.map(({ photoCount }) => photoCount), [5, 5]);
+    assert.notEqual(audit.submissions[0].requestId, audit.submissions[1].requestId);
+    assert.equal(failedResponse.headers.get("x-htn26-layout-request-id"), audit.submissions[0].requestId);
+    assert.equal(successfulResponse.headers.get("x-htn26-layout-audit-folder"), audit.submissions[1].folder);
+    assert.equal(audit.submissions[0].metrics.preprocessMs, 42);
+    assert.equal(audit.submissions[1].metrics.preprocessMs, 21);
+    assert.deepEqual(Object.keys(audit.submissions[0].metrics).sort(), ["preprocessMs", "requestMs", "totalMs", "validationMs"]);
+    assert.deepEqual(audit.submissions[0].failure, { code: "generation_unavailable" });
+    assert.equal(audit.submissions[1].failure, null);
+    assert.doesNotMatch(JSON.stringify(audit), /secret upstream details|test-key/i);
+
+    for (const submission of audit.submissions) {
+      const persisted = JSON.parse(await readFile(path.join(runtime.directory, submission.folder, "metadata.json"), "utf8"));
+      assert.equal(persisted.requestId, submission.requestId);
+      assert.equal(persisted.photos.length, 5);
+      assert.equal(persisted.status, submission.status);
+    }
+
+    for (let index = 0; index < 5; index += 1) {
+      const upload = await fetch(`${base}/api/photos`, {
+        method: "POST",
+        body: Buffer.from(`legacy-${index}`),
+        headers: { "content-type": "image/jpeg", "x-photo-name": `legacy-${index}.jpg` },
+      });
+      assert.equal(upload.status, 201);
+    }
   });
 });

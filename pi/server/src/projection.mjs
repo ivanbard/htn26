@@ -534,7 +534,7 @@ export class ServerProjection {
     this._touch(now);
   }
 
-  setRoomLayout(candidate, now = this.now()) {
+  setRoomLayout(candidate, now = this.now(), { photoCount = this._state.photos.length } = {}) {
     const layout = sanitizeRoomLayout(candidate);
     this._state.roomLayout = clone(layout);
     const stations = layout.stations.map((station, index) => ({
@@ -562,7 +562,7 @@ export class ServerProjection {
       walls: [],
       stations: clone(stations),
       placementInstructions: stations.map(({ id, label, instruction, x, y }) => ({ id, label, instruction, x, y })),
-      photoCount: this._state.photos.length,
+      photoCount,
       generatedAt: iso(now),
     };
     this._state.burgerLevel = { status: "placement-ready", recipe: "BURGER", placementInstructions: clone(this._state.floorPlan.placementInstructions) };

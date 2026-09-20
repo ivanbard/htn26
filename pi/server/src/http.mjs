@@ -231,9 +231,10 @@ events.onerror = () => { element('status').textContent += ' (live event stream r
 </html>`;
 }
 
-export function createHttpServer({ projection, photoStore, roomLayoutGenerator, bindOrigin = process.env.HTN26_CORS_ORIGIN || "*" } = {}) {
+export function createHttpServer({ projection, photoStore, layoutSubmissionStore, roomLayoutGenerator, bindOrigin = process.env.HTN26_CORS_ORIGIN || "*" } = {}) {
   if (!projection) throw new Error("projection is required");
   if (!photoStore) throw new Error("photoStore is required");
+  if (!layoutSubmissionStore) throw new Error("layoutSubmissionStore is required");
   const clients = new Set();
   const unsubscribe = projection.subscribe((state) => {
     const packet = `event: state\ndata: ${json(state)}\n\n`;
@@ -270,14 +271,23 @@ export function createHttpServer({ projection, photoStore, roomLayoutGenerator, 
       ? parseMultipart(body, type)
       : [{ filename: req.headers["x-photo-name"] || "room-photo", mime: type.split(";")[0] || "application/octet-stream", bytes: body }];
     if (uploads.length < 3 || uploads.length > 5) throw Object.assign(new Error("upload 3 to 5 room photos"), { statusCode: 400 });
+    const preprocessMs = Number(req.headers["x-htn26-photo-preprocess-ms"]);
+    const submission = await layoutSubmissionStore.create(uploads, { preprocessMs });
+    const auditHeaders = {
+      "x-htn26-layout-request-id": submission.requestId,
+      "x-htn26-layout-audit-folder": submission.folder,
+    };
+    const totalStart = process.hrtime.bigint();
     try {
-      const result = await roomLayoutGenerator?.generate(uploads, { preprocessMs: Number(req.headers["x-htn26-photo-preprocess-ms"]) });
+      const result = await roomLayoutGenerator?.generate(uploads.map((upload, index) => ({ ...upload, id: submission.photos[index].id })), { preprocessMs });
       if (!result?.layout) throw new Error("no layout returned");
-      projection.proposeRoomLayout(result.layout, Date.now(), { photoCount: uploads.length });
-      send(res, 200, result.layout, { ...headers, ...timingHeader(result.metrics) });
+      const completed = await layoutSubmissionStore.finish(submission.requestId, { status: "success", metrics: result.metrics });
+      projection.proposeRoomLayout(result.layout, Date.now(), { photoCount: submission.photoCount });
+      send(res, 200, result.layout, { ...headers, ...auditHeaders, ...timingHeader(completed.metrics) });
     } catch (error) {
-      const metrics = error?.metrics || {};
-      send(res, Number(error?.statusCode) || 503, { error: "Room layout generation is unavailable. Try again." }, { ...headers, ...timingHeader(metrics) });
+      const metrics = { preprocessMs, ...error?.metrics, totalMs: error?.metrics?.totalMs ?? Number(process.hrtime.bigint() - totalStart) / 1_000_000 };
+      const completed = await layoutSubmissionStore.finish(submission.requestId, { status: "failure", metrics });
+      send(res, Number(error?.statusCode) || 503, { error: "Room layout generation is unavailable. Try again." }, { ...headers, ...auditHeaders, ...timingHeader(completed.metrics) });
     }
   }
 
@@ -296,6 +306,8 @@ export function createHttpServer({ projection, photoStore, roomLayoutGenerator, 
     try {
       if (req.method === "GET" && url.pathname === "/api/state") { send(res, 200, projection.snapshot(), headers); return; }
       if (req.method === "GET" && url.pathname === "/api/floorplan") { send(res, 200, projection.snapshot().floorPlan, headers); return; }
+      if (req.method === "GET" && url.pathname === "/api/layout") { send(res, 200, projection.snapshot().roomLayout || null, headers); return; }
+      if (req.method === "GET" && url.pathname === "/api/layout/submissions") { send(res, 200, { submissions: layoutSubmissionStore.list() }, headers); return; }
       if (req.method === "GET" && url.pathname === "/api/photos") { send(res, 200, { photos: photoStore.list(), count: photoStore.photos.length, reviewReady: photoStore.photos.length >= 3 }, headers); return; }
       if (req.method === "GET" && url.pathname === "/api/orders") { const state = projection.snapshot(); send(res, 200, { order: state.order, activeOrders: state.activeOrders, orders: state.orders }, headers); return; }
       if (req.method === "GET" && url.pathname === "/api/gold") { send(res, 200, projection.snapshot().gold, headers); return; }
