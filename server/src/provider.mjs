@@ -48,45 +48,74 @@ const STATIONS = [
   },
 ];
 
-const PLACEMENT_INSTRUCTIONS = STATIONS.map(({ id, label, instruction, x, y }) => ({
-  id,
-  label,
-  instruction,
-  x,
-  y,
-}));
+function percent(value, extent) {
+  return Number(((Number(value) / extent) * 100).toFixed(6));
+}
+
+function projectRectangle(rectangle, widthMeters, heightMeters) {
+  return {
+    ...rectangle,
+    x: percent(rectangle.x, widthMeters),
+    y: percent(rectangle.y, heightMeters),
+    width: percent(rectangle.width, widthMeters),
+    height: percent(rectangle.height, heightMeters),
+  };
+}
 
 function localPlan(extra = {}) {
+  const {
+    accepted: _accepted,
+    coordinateSpace: _coordinateSpace,
+    height: suppliedHeight,
+    placementInstructions: _placementInstructions,
+    room: suppliedRoom,
+    stations: suppliedStations,
+    units: _units,
+    walls: _walls,
+    width: suppliedWidth,
+    photoCount = 0,
+    generatedAt = new Date().toISOString(),
+    ...metadata
+  } = extra;
+  const widthMeters = Number(suppliedRoom?.widthMeters ?? suppliedWidth) || 10;
+  const heightMeters = Number(suppliedRoom?.heightMeters ?? suppliedHeight) || 10;
+  const stationMeters = Array.isArray(suppliedStations) ? suppliedStations : STATIONS;
+  const stations = stationMeters.map((station) => projectRectangle(station, widthMeters, heightMeters));
+  const wallThickness = 0.15;
+  const walls = [
+    { x: 0, y: 0, width: widthMeters, height: wallThickness },
+    { x: 0, y: heightMeters - wallThickness, width: widthMeters, height: wallThickness },
+    { x: 0, y: 0, width: wallThickness, height: heightMeters },
+    { x: widthMeters - wallThickness, y: 0, width: wallThickness, height: heightMeters },
+  ].map((wall) => projectRectangle(wall, widthMeters, heightMeters));
   return {
     accepted: false,
     provider: "local-fallback",
     mode: "deterministic",
     reviewMessage: LOCAL_MESSAGE,
-    room: { widthMeters: 10, heightMeters: 10 },
-    width: 10,
-    height: 10,
-    units: "m",
-    walls: [
-      { x: 0, y: 0, width: 10, height: 0.15 },
-      { x: 0, y: 9.85, width: 10, height: 0.15 },
-      { x: 0, y: 0, width: 0.15, height: 10 },
-      { x: 9.85, y: 0, width: 0.15, height: 10 },
-    ],
-    stations: STATIONS.map((station) => ({ ...station })),
-    placementInstructions: PLACEMENT_INSTRUCTIONS.map((instruction) => ({ ...instruction })),
-    photoCount: Number(extra.photoCount || 0),
-    generatedAt: extra.generatedAt || new Date().toISOString(),
-    ...extra,
+    ...metadata,
+    room: { widthMeters, heightMeters },
+    width: 100,
+    height: 100,
+    units: "percent",
+    coordinateSpace: "normalized-percent",
+    walls,
+    stations,
+    placementInstructions: stations.map(({ id, label, instruction, x, y }) => ({ id, label, instruction, x, y })),
+    photoCount: Number(photoCount || 0),
+    generatedAt,
     accepted: false,
   };
 }
 
-function safeStation(station, index) {
+function safeStation(station, index, roomWidth, roomHeight) {
   if (!station || typeof station !== "object") return null;
   const number = (key, fallback) => Number.isFinite(Number(station[key])) ? Number(station[key]) : fallback;
   const id = String(station.id || station.name || `station-${index + 1}`).toLowerCase().replace(/[^a-z0-9-]+/g, "-");
-  const x = Math.max(0, Math.min(9.8, number("x", STATIONS[index]?.x ?? 1)));
-  const y = Math.max(0, Math.min(9.8, number("y", STATIONS[index]?.y ?? 1)));
+  const width = Math.max(0.2, Math.min(roomWidth, 3, number("width", 1.5)));
+  const height = Math.max(0.2, Math.min(roomHeight, 3, number("height", 1.4)));
+  const x = Math.max(0, Math.min(roomWidth - width, number("x", STATIONS[index]?.x ?? 1)));
+  const y = Math.max(0, Math.min(roomHeight - height, number("y", STATIONS[index]?.y ?? 1)));
   return {
     id,
     label: String(station.label || station.name || id).slice(0, 48).toUpperCase(),
@@ -94,8 +123,8 @@ function safeStation(station, index) {
     nfcTag: String(station.nfcTag || id).slice(0, 48),
     x,
     y,
-    width: Math.max(0.2, Math.min(3, number("width", 1.5))),
-    height: Math.max(0.2, Math.min(3, number("height", 1.4))),
+    width,
+    height,
     instruction: String(station.instruction || "Place the matching station marker here.").slice(0, 200),
   };
 }
@@ -103,7 +132,9 @@ function safeStation(station, index) {
 export function normalizeFloorplan(candidate, { photoCount = 0, generatedAt } = {}) {
   const width = Number(candidate?.width ?? candidate?.room?.widthMeters);
   const height = Number(candidate?.height ?? candidate?.room?.heightMeters);
-  const stations = Array.isArray(candidate?.stations) ? candidate.stations.map(safeStation).filter(Boolean) : [];
+  const stations = Array.isArray(candidate?.stations)
+    ? candidate.stations.map((station, index) => safeStation(station, index, width, height)).filter(Boolean)
+    : [];
   if (!Number.isFinite(width) || !Number.isFinite(height) || width < 8 || width > 20 || height < 8 || height > 20 || stations.length !== 4) {
     return null;
   }
@@ -114,11 +145,7 @@ export function normalizeFloorplan(candidate, { photoCount = 0, generatedAt } = 
     mode: "ai",
     reviewMessage: "OpenAI produced a reviewable station proposal. Approve it before play.",
     room: { widthMeters: width, heightMeters: height },
-    width,
-    height,
-    units: "m",
     stations,
-    placementInstructions: stations.map(({ id, label, instruction, x, y }) => ({ id, label, instruction, x, y })),
     photoCount,
     generatedAt: generatedAt || new Date().toISOString(),
   });

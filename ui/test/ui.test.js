@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { createApp } from "../src/main.js";
 import { createInitialMockState, createMockTransport } from "../src/mock-transport.js";
 import { renderApp } from "../src/render.js";
+import { createHttpTransport } from "../src/transport.js";
 import { ROOM_COORDINATE_SPACE, validateFrontendSnapshot } from "../src/contracts.js";
 import { normalizeServerSnapshot } from "../src/server-snapshot.js";
 import { createHttpTransport } from "../src/transport.js";
@@ -870,4 +871,47 @@ test("exposes room-photo generation only for capable transports", () => {
   assert.doesNotMatch(httpRoot.innerHTML, /data-command="SCAN_ROOM"/);
   assert.match(httpRoot.innerHTML, /data-layout-photo-controls/);
   httpApp.destroy();
+});
+
+test("HTTP transport consumes named state events", async () => {
+  class FakeEventSource {
+    constructor(url) {
+      this.url = url;
+      this.listeners = new Map();
+      this.closed = false;
+      FakeEventSource.instance = this;
+    }
+
+    addEventListener(type, listener) {
+      this.listeners.set(type, listener);
+    }
+
+    emit(type, state) {
+      this.listeners.get(type)?.({ data: JSON.stringify(state) });
+    }
+
+    close() {
+      this.closed = true;
+    }
+  }
+
+  const initial = createInitialMockState(1_000);
+  const updated = { ...initial, setup: { ...initial.setup, message: "named SSE update" } };
+  const received = [];
+  const transport = createHttpTransport({
+    baseUrl: "http://laptop.test",
+    eventSourceFactory: FakeEventSource,
+    fetchImpl: async (url) => {
+      assert.equal(url, "http://laptop.test/api/state");
+      return { ok: true, async json() { return initial; } };
+    },
+  });
+
+  const cleanup = await transport.connect((state) => received.push(state));
+  assert.equal(FakeEventSource.instance.url, "http://laptop.test/api/events");
+  assert.deepEqual(received, [initial]);
+  FakeEventSource.instance.emit("state", updated);
+  assert.deepEqual(received, [initial, updated]);
+  cleanup();
+  assert.equal(FakeEventSource.instance.closed, true);
 });

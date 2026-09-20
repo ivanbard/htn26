@@ -544,11 +544,26 @@ test("HTTP upload, review, approval, serial projection, and browser reads work",
     const initial = await fetch(`${base}/api/state`).then((response) => response.json());
     assert.equal(initial.players.length, 3);
     assert.equal(initial.timer.totalSeconds, 240);
+    assert.equal(initial.floorPlan.coordinateSpace, "normalized-percent");
+    assert.equal(initial.floorPlan.units, "percent");
+    assert.equal(initial.floorPlan.width, 100);
+    assert.equal(initial.floorPlan.height, 100);
+    assert.deepEqual(
+      initial.floorPlan.stations.map(({ id, x, y, width, height }) => ({ id, x, y, width, height })),
+      [
+        { id: "pantry", x: 8, y: 8, width: 16, height: 14 },
+        { id: "fridge", x: 76, y: 8, width: 16, height: 14 },
+        { id: "cutting-board", x: 12, y: 74, width: 24, height: 15 },
+        { id: "stove", x: 64, y: 74, width: 24, height: 15 },
+      ],
+    );
+    assert.ok(initial.floorPlan.walls.every((wall) => wall.x + wall.width <= 100 && wall.y + wall.height <= 100));
     const state = await approveAndStart(base);
     assert.equal(state.setup.phase, "running");
     assert.equal(state.eventHistory[0].startSource, "physical host badge");
     assert.equal(state.floorPlan.room.widthMeters, 10);
     assert.equal(state.floorPlan.stations.length, 4);
+    assert.equal(state.floorPlan.coordinateSpace, "normalized-percent");
     const serial = await post(base, "/api/serial", { line: `noise HTN26|RX|${MAC}|-40|OC1|99|N|ING:MEAT` });
     assert.equal(serial.response.status, 200);
     assert.equal(serial.data.result.ok, true);
