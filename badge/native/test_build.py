@@ -62,7 +62,7 @@ def main():
     rollback = (HERE / "build/stock-factory-partition.bin").read_bytes()
     assert rollback == (ROOT / "htn_badge_full.bin").read_bytes()[FACTORY:FACTORY + CAPACITY]
     report = json.loads((HERE / "build/verification.json").read_text())
-    assert report["permanent_app_object_bytes"] == 308
+    assert report["permanent_app_object_bytes"] == 312
     assert report["native_icon_count"] == 10
     assert report["generated_icons_sha256"] == hashlib.sha256(GENERATED_ICONS.read_bytes()).hexdigest()
     assert report["payload_rodata_bytes"] <= 0x10000

@@ -95,25 +95,29 @@ export function parseLegacyGameLine(line) {
   if (fields[2] === "START_GAME" && fields.length === 5) {
     const durationSeconds = parseInteger(fields[3], 1, 3600);
     const playerCount = parseInteger(fields[4], 1, 3);
-    if (durationSeconds == null || playerCount !== 3) return invalid("invalid GAME start values");
+    if (durationSeconds == null || playerCount == null) return invalid("invalid GAME start values");
     return { ok: true, kind: "host-control", framing: "legacy-game", control: "START", durationSeconds, playerCount };
   }
   if (fields[2] === "GAME_END" && fields.length === 4) {
     const playerCount = parseInteger(fields[3], 1, 3);
-    if (playerCount !== 3) return invalid("invalid GAME end player count");
+    if (playerCount == null) return invalid("invalid GAME end player count");
     return { ok: true, kind: "host-control", framing: "legacy-game", control: "END", playerCount };
   }
   if (fields[2] === "RESET_GAME" && (fields.length === 3 || fields.length === 4)) {
-    if (fields.length === 4 && parseInteger(fields[3], 1, 3) !== 3) return invalid("invalid GAME reset player count");
-    return { ok: true, kind: "host-control", framing: "legacy-game", control: "RESET", playerCount: 3 };
+    const playerCount = fields.length === 4 ? parseInteger(fields[3], 1, 3) : 3;
+    if (playerCount == null) return invalid("invalid GAME reset player count");
+    return { ok: true, kind: "host-control", framing: "legacy-game", control: "RESET", playerCount };
   }
   return invalid("unsupported GAME record");
 }
 
 function parseCanonicalHost(fields) {
   const control = fields[3];
-  if ((control === "END" || control === "RESET") && fields.length === 4) {
-    return { ok: true, kind: "host-control", framing: "canonical", protocolVersion: 1, control, playerCount: 3 };
+  if (control === "END" || control === "RESET") {
+    if (fields.length !== 4 && fields.length !== 5) return invalid("canonical HOST control has invalid player count");
+    const playerCount = fields.length === 5 ? parseInteger(fields[4], 1, 3) : 3;
+    if (playerCount == null) return invalid("canonical HOST control has invalid player count");
+    return { ok: true, kind: "host-control", framing: "canonical", protocolVersion: 1, control, playerCount };
   }
   if (control === "START" && (fields.length === 4 || fields.length === 6)) {
     if (fields.length === 4) {
@@ -121,7 +125,7 @@ function parseCanonicalHost(fields) {
     }
     const durationSeconds = parseInteger(fields[4], 1, 3600);
     const playerCount = parseInteger(fields[5], 1, 3);
-    if (durationSeconds == null || playerCount !== 3) return invalid("canonical HOST START requires duration and three players");
+    if (durationSeconds == null || playerCount == null) return invalid("canonical HOST START requires a duration and 1-3 players");
     return { ok: true, kind: "host-control", framing: "canonical", protocolVersion: 1, control, durationSeconds, playerCount };
   }
   return invalid("unsupported canonical HOST record");

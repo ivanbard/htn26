@@ -81,7 +81,7 @@ test("fixture parser accepts noisy and chunk-framed gateway records", async () =
 
 test("canonical protocol covers host, gateway, player actions, and submissions while legacy frames remain valid", () => {
   const records = [
-    parseCanonicalLine("log HTN26|1|HOST|START|120|3"),
+    parseCanonicalLine("log HTN26|1|HOST|START|120|2"),
     parseCanonicalLine("HTN26|1|HOST|END"),
     parseCanonicalLine("HTN26|1|HOST|RESET"),
     parseCanonicalLine("HTN26|1|GATEWAY|UP|12|1"),
@@ -101,6 +101,7 @@ test("canonical protocol covers host, gateway, player actions, and submissions w
   ];
   assert.ok(records.every((record) => record.ok), records.map((record) => record.error).join(", "));
   assert.equal(records[0].kind, "host-control");
+  assert.equal(records[0].playerCount, 2);
   assert.equal(records[3].kind, "gateway-status");
   assert.equal(records[4].kind, "player-action");
   assert.equal(records.at(-1).kind, "submission");
@@ -109,6 +110,7 @@ test("canonical protocol covers host, gateway, player actions, and submissions w
 
   assert.equal(parseGatewaySerialLine("noise HTN26|GW|DOWN|4|2").kind, "gateway-status");
   assert.equal(parseGatewaySerialLine("noise HTN26|GAME|START_GAME|120|3").kind, "host-control");
+  assert.equal(parseGatewaySerialLine("noise HTN26|GAME|START_GAME|120|1").playerCount, 1);
   assert.equal(parseGatewaySerialLine("noise HTN26|GAME|GAME_END|3").control, "END");
   assert.equal(parseGatewaySerialLine(`noise HTN26|RX|${MAC}|-44|OC2|7|E|P2:PU:R`).kind, "badge-event");
 });
@@ -444,11 +446,11 @@ test("native GAME and complete E event path is parsed and projected by the lapto
     state = event(1, "PU:R");
     assert.equal(state.players[0].heldItem, "RAW_MEAT");
     event(1, "CH:S");
-    state = event(1, "CH:D:M");
+    state = event(1, "CH:D:D");
     assert.equal(state.players[0].heldItem, "RAW_MEAT");
     assert.equal(state.eventHistory.at(-1).type, "rejected-action");
     now += GAME_TIMINGS.chopSeconds * 1_000;
-    state = event(1, "CH:D:M");
+    state = event(1, "CH:D:D");
     assert.equal(state.players[0].heldItem, "CHOPPED_MEAT");
     assert.match(state.eventHistory.at(-1).message, /confirmed completed chop/);
 
@@ -525,6 +527,20 @@ test("native GAME and complete E event path is parsed and projected by the lapto
       HTN26_ORDER_PATIENCE_SECONDS: "30",
     },
   });
+});
+
+test("one-player rounds only require the active player's submission readiness", () => {
+  const now = 70_000;
+  const projection = new ServerProjection({ now: () => now, random: () => 0 });
+  projection.ingestHostControl({ control: "START", durationSeconds: 120, playerCount: 1 }, now);
+  const target = projection.snapshot(now).activeOrders[0];
+  projection.ingestPlayerAction({ playerId: "p1", action: "PLATE", plate: target.components.map((item) => ({ BUN: "B", MEAT: "M", LETTUCE: "L", CHEESE: "C" }[item] || "-")).join("") }, now);
+  const result = projection.ingestSubmission({ playerId: "p1", plate: target.recipe }, now);
+  const state = projection.snapshot(now);
+  assert.equal(state.playerCount, 1);
+  assert.equal(result.accepted, true);
+  assert.equal(result.submission.status, "success");
+  assert.equal(state.submissions[0].status, "success");
 });
 
 test("legacy tip frames remain parseable but cannot change server money", () => {
