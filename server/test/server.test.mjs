@@ -45,8 +45,8 @@ async function approveAndStart(base) {
   const host = await post(base, "/api/command", { type: "START_HOST" });
   assert.equal(host.response.status, 200);
   const scan = await post(base, "/api/command", { type: "SCAN_ROOM" });
-  assert.equal(scan.response.status, 200);
-  assert.equal(scan.data.setup.phase, "layout-proposed");
+  assert.equal(scan.response.status, 400);
+  assert.match(scan.data.error, /api\/layout\/generate/);
   const review = await post(base, "/api/floorplan/review", {});
   assert.equal(review.response.status, 200);
   assert.equal(review.data.floorPlan.stations.length, 4);

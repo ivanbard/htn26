@@ -4,12 +4,10 @@
 
 All Raspberry Pis run QNX.
 
-The current v1 Pi layer owns:
-
-* embedded AI inference
-* phone-camera setup processing
-* authoritative game-state execution
-* host-badge and UI transport, with the local web/serial boundary documented in
+The current Pi layer owns authoritative game-state execution and host-badge/UI
+transport. Laptop-first room-photo processing and AI layout review belong to
+root `server/` and `ui/`; QNX/on-device setup inference is future-only. The
+local web/serial boundary is documented in
   [`../server/README.md`](../server/README.md)
 
 The current v1 deployment uses one Raspberry Pi and an Apple phone camera.
@@ -30,7 +28,7 @@ Owns:
 
 * authoritative game state
 * USB gateway-badge serial input
-* phone-camera setup inference
+* consumption of approved setup layouts
 * station-zone evaluation
 * orders
 * cooking and order timers (the host badge owns the four-minute round lifecycle)
@@ -53,7 +51,8 @@ serial setup, provider boundary, and QNX validation limits are documented in
 
 `pi/slave/`
 
-The same worker software can be deployed to future additional camera Pis.
+The same worker software can be deployed to future additional camera Pis;
+this is a future QNX boundary, not the current laptop room-layout path.
 
 When enabled, each worker owns:
 

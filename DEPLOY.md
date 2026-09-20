@@ -2,7 +2,7 @@
 
 This guide deploys the current one-Pi burger game: one QNX Raspberry Pi, one host badge, and three fixed player badges.
 
-The first playable setup uses the deterministic static floorplan. Phone photos and AI floorplan generation are optional follow-up features.
+The current hackathon setup uses the root `server/` and `ui/` surfaces. Upload 3-5 classroom photos to the server-side OpenAI room-layout endpoint, review the generated proposal, and explicitly approve it. The deterministic floorplan remains available; QNX/on-device inference is future-only.
 
 ## Components
 
@@ -21,9 +21,9 @@ The Pi is authoritative for orders, cooking, scoring, gold, tips, and submission
 - Three Hacker Badges for players 1, 2, and 3.
 - One USB data connection from the host badge to the Pi.
 - NFC zones for pantry, fridge, cutting board, and stove.
-- Optional Apple phone for future setup photographs.
+- Apple phone for the 3-5 classroom setup photographs.
 
-The current v1 does not require cloud services, camera tracking, or player-location inference.
+The laptop-first room-layout path uses the server-side `OPENAI_API_KEY`; never expose it to browser code. The current v1 still does not use camera tracking or player-location inference, and QNX/on-device AI validation remains future work.
 
 ## Badge deployment profile
 
@@ -221,7 +221,7 @@ curl -X POST http://PI_ADDRESS:8787/api/photos \
   --data-binary @room.jpg
 ```
 
-If OpenAI setup inference is later enabled, set `OPENAI_API_KEY` only in the Pi server environment. Never put it in Lua, browser JavaScript, a URL, or this repository. The local fixture remains the fallback for missing or failed provider responses.
+For laptop room-layout generation, set `OPENAI_API_KEY` only in the root server environment. Never put it in Lua, browser JavaScript, a URL, or this repository. The deterministic floorplan remains available when generation is unavailable.
 
 ## Optional Cloudflare Tunnel
 

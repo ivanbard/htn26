@@ -1,7 +1,8 @@
 const DEFAULT_LONG_EDGE = 1280;
 const DEFAULT_QUALITY = 0.76;
 
-function canvasToBlob(canvas, type, quality) {
+async function canvasToBlob(canvas, type, quality) {
+  if (typeof canvas.convertToBlob === "function") return canvas.convertToBlob({ type, quality });
   return new Promise((resolve, reject) => canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error("photo compression failed")), type, quality));
 }
 

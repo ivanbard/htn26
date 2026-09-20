@@ -29,6 +29,9 @@ button:focus-visible { outline: 3px solid var(--yellow); outline-offset: 3px; }
 }
 
 /* Keep the room mirror deterministic across the setup and live-game surfaces. */
+.layout-photo-controls { display: flex; flex-wrap: wrap; align-items: end; gap: .75rem; margin-top: .8rem; padding: .75rem; border: 1px solid #2a435a; background: #101c29; }
+.setup-photo-label { display: flex; flex-direction: column; gap: .35rem; color: #a9bac9; font-size: .72rem; font-weight: 800; text-transform: uppercase; letter-spacing: .08em; }
+.setup-photo-label input { max-width: 18rem; color: #fff; font-size: .8rem; text-transform: none; letter-spacing: normal; }
 .room-layout-svg { width: 100%; height: 100%; display: block; background: #0c1824; }
 .room-layout-background { fill: #0c1824; }
 .room-layout-play-area { fill: rgba(87, 227, 137, .12); stroke: #57e389; stroke-width: .006; stroke-dasharray: .018 .012; }

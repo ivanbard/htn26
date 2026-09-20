@@ -354,7 +354,7 @@ export function createHttpServer({ projection, photoStore, layoutSubmissionStore
       }
       if (req.method === "POST" && ["/api/floorplan/review", "/api/floorplan/propose", "/api/floorplan"].includes(url.pathname)) {
         const payload = parseJsonBody(await readBody(req));
-        if (!photoStore.photos.length && !payload.allowEmpty) throw Object.assign(new Error("upload 3-4 still room photos before review (or use allowEmpty for a local fixture)"), { statusCode: 400 });
+        if (!photoStore.photos.length && !payload.allowEmpty) throw Object.assign(new Error("upload room photos before deterministic floorplan review (or use allowEmpty for a local fixture)"), { statusCode: 400 });
         const proposed = await projection.proposeFloorplan({ photos: photoStore.photos, readPhoto: (photo) => photoStore.read(photo), room: payload.room });
         send(res, 200, proposed, headers); return;
       }
@@ -365,13 +365,8 @@ export function createHttpServer({ projection, photoStore, layoutSubmissionStore
       if (req.method === "POST" && url.pathname === "/api/command") {
         const payload = parseJsonBody(await readBody(req));
         const type = commandType(payload);
-        if (type === "SCAN_ROOM" && !photoStore.photos.length) {
-          send(res, 400, publicError("upload 3-4 room photos before scanning"), headers); return;
-        }
         if (type === "SCAN_ROOM") {
-          projection.command(type, payload);
-          send(res, 200, await projection.proposeFloorplan({ photos: photoStore.photos, readPhoto: (photo) => photoStore.read(photo) }), headers);
-          return;
+          send(res, 400, publicError("upload 3-5 photos to POST /api/layout/generate; deterministic review remains at POST /api/floorplan/review"), headers); return;
         }
         send(res, 200, projection.command(type, payload), headers); return;
       }

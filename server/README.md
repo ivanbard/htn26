@@ -37,13 +37,12 @@ Useful environment variables:
 - `OPENAI_LAYOUT_TIMEOUT_MS`: bounded Responses request timeout in
   milliseconds; defaults to 12000.
 
-The default floorplan provider is a deterministic local fixture for an
-approximately 10 m x 10 m room with exactly four stations: pantry, fridge,
-cutting board, and stove. The upload/review/provider seam is present for the
-next camera/AI slice. When an OpenAI credential is configured, the replaceable
-provider can send uploaded image bytes server-side and falls back visibly to
-the same local fixture on missing/failed AI responses. No cloud service is
-needed to run the first slice.
+The deterministic floorplan provider remains the default local fixture for
+an approximately 10 m x 10 m room with exactly four stations: pantry, fridge,
+cutting board, and stove. The laptop-first AI room-layout path is isolated in
+`POST /api/layout/generate`; it uses the server-only OpenAI credential and
+never changes game authority. No cloud service is needed for deterministic
+floorplan development.
 
 ## Physical host-badge serial path
 
@@ -133,9 +132,10 @@ Setup and photos:
 - `GET /api/photos`, `GET /api/floorplan`: inspect setup state.
 
 Commands use `{ "type": "START_HOST|SCAN_ROOM|APPROVE_LAYOUT|START_GAME|END_GAME|RESET_GAME" }`.
-`SCAN_ROOM` requires uploaded photos and runs the review provider, so the
-existing UI flow can use its command seam. `POST /api/floorplan/review` is the
-explicit equivalent. `APPROVE_LAYOUT` is also retained as a UI protocol alias.
+`SCAN_ROOM` is retained as a compatibility signal but returns guidance to use
+`POST /api/layout/generate` with 3-5 photos. The deterministic
+`POST /api/floorplan/review` endpoint remains separate. `APPROVE_LAYOUT` is
+retained as a UI protocol alias.
 
 Projection reads:
 
@@ -147,7 +147,7 @@ Projection reads:
   while a round runs.
 - `GET /api/gold`, `/api/tips`, `/api/timer`, `/api/players`,
   `/api/submissions`: small browser-friendly projections.
-- `GET /api/events`: SSE snapshots; clients should use the `version` field.
+- `GET /api/events`: SSE snapshots; clients should use the `revision` field for change ordering. `version` is the stable snapshot schema version.
 
 When the QNX master adapter is connected, pass it to `createRuntime` as
 `authoritativeEngine`. Its `ingestBadgeEvent` and `submit` methods return the

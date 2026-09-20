@@ -132,67 +132,9 @@ export class LocalFloorplanProvider {
   }
 }
 
-export class OpenAIFloorplanProvider {
-  constructor({ apiKey, model = "gpt-4o-mini", fetchImpl = globalThis.fetch, fallback = new LocalFloorplanProvider() } = {}) {
-    this.apiKey = apiKey;
-    this.model = model;
-    this.fetchImpl = fetchImpl;
-    this.fallback = fallback;
-  }
-
-  async propose({ photos = [], readPhoto } = {}) {
-    if (typeof this.fetchImpl !== "function") {
-      return this.fallbackResult(photos, "OpenAI is configured but fetch is unavailable in this runtime.");
-    }
-    try {
-      const imageParts = [];
-      for (const photo of photos.slice(0, 4)) {
-        const bytes = await readPhoto(photo);
-        imageParts.push({ type: "image_url", image_url: { url: `data:${photo.mime || "image/jpeg"};base64,${Buffer.from(bytes).toString("base64")}` } });
-      }
-      const response = await this.fetchImpl("https://api.openai.com/v1/chat/completions", {
-        method: "POST",
-        headers: { authorization: `Bearer ${this.apiKey}`, "content-type": "application/json" },
-        body: JSON.stringify({
-          model: this.model,
-          temperature: 0,
-          response_format: { type: "json_object" },
-          messages: [
-            {
-              role: "system",
-              content: "Return only JSON describing a reviewable floorplan for a roughly 10 by 10 metre room. It must contain width, height, and exactly four stations. Each station needs id, label, kind, nfcTag, x, y, width, height, and instruction. Use metres and keep stations inside the room.",
-            },
-            { role: "user", content: [{ type: "text", text: "Infer four practical burger-game stations from these still room photos: pantry, fridge, cutting board, and stove." }, ...imageParts] },
-          ],
-        }),
-      });
-      if (!response.ok) throw new Error(`OpenAI request returned HTTP ${response.status}`);
-      const payload = await response.json();
-      const content = payload?.choices?.[0]?.message?.content;
-      const candidate = typeof content === "string" ? JSON.parse(content) : content;
-      const normalized = normalizeFloorplan(candidate, { photoCount: photos.length });
-      if (!normalized) throw new Error("OpenAI returned a floorplan outside the four-station schema");
-      return normalized;
-    } catch (error) {
-      return this.fallbackResult(photos, `OpenAI review unavailable (${error.message}); showing the local fallback.`);
-    }
-  }
-
-  async fallbackResult(photos, reason) {
-    const result = await this.fallback.propose({ photos });
-    return { ...result, provider: "local-fallback", mode: "fallback", reviewMessage: `${reason} ${LOCAL_MESSAGE}` };
-  }
-}
-
-export function createFloorplanProvider({ env = process.env, fetchImpl = globalThis.fetch, now } = {}) {
-  if (env.OPENAI_API_KEY) {
-    return new OpenAIFloorplanProvider({
-      apiKey: env.OPENAI_API_KEY,
-      model: env.OPENAI_FLOORPLAN_MODEL || "gpt-4o-mini",
-      fetchImpl,
-      fallback: new LocalFloorplanProvider({ now }),
-    });
-  }
+export function createFloorplanProvider({ now } = {}) {
+  // The legacy floorplan endpoint is intentionally deterministic. AI room
+  // generation lives exclusively in /api/layout/generate.
   return new LocalFloorplanProvider({ now });
 }
 
