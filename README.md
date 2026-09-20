@@ -4,13 +4,13 @@
 
 HTN26 is a local cooperative cooking game inspired by Overcooked.
 
-The first playable server runs on the captain's laptop and accepts setup photos
-from an Apple phone.
+The first playable version uses one Raspberry Pi and one phone camera.
 
-The current setup path uploads Apple-phone room photographs to the laptop server.
+The phone camera supplies 3-5 classroom photos to the current laptop-first root `server/` and `ui/` development surfaces. The server-side OpenAI room-layout endpoint reconciles them into a reviewable proposal; the API key remains server-side.
 
-QNX is only a possible future server target. The current run, test, and
-deployment path does not require a Raspberry Pi or claim QNX validation.
+The deterministic floorplan and authoritative game engine remain available. QNX/on-device inference is a future deployment path, not a claim made by the laptop-hosted OpenAI endpoint.
+
+The qualifying open-source QNX AI module is still unresolved and its status is owned by [`pi/README.md`](pi/README.md).
 
 The v1 round uses one host or gateway badge and exactly three fixed player badges.
 
@@ -28,8 +28,8 @@ This README records product intent and system ownership, while component READMEs
 
 Use these sources in this order for new work.
 
-- [`updates/UPDATE_v1.1.md`](updates/UPDATE_v1.1.md) contains the accepted v1 gameplay clarifications and supersedes conflicting v1 planning details.
-- [`updates/UPDATE_v1.md`](updates/UPDATE_v1.md) contains the four-zone, phone-photo v1 plan as updated for the laptop-hosted launch.
+- [`updates/UPDATE_v1.1.md`](updates/UPDATE_v1.1.md) contains the accepted v1 clarifications and supersedes conflicting v1 planning details.
+- [`updates/UPDATE_v1.md`](updates/UPDATE_v1.md) contains the four-zone, one-Pi, phone-camera v1 plan.
 - [`README.md`](README.md) defines the current product intent, architecture, and ownership boundaries.
 - [`badge/badge-app-guide.md`](badge/badge-app-guide.md) is authoritative for Hacker Badge capabilities and APIs.
 - Component READMEs define implementation responsibilities and local validation.
@@ -41,11 +41,11 @@ If a product summary here conflicts with a component implementation contract, ke
 
 ## v1 setup
 
-1. Photograph the play area with the phone and upload the stills to the laptop server.
-2. Run the server's setup provider to propose a floor plan.
-3. Approve the proposed floor plan in the laptop-hosted local UI.
+1. Use the phone camera to take 3-5 photos of the classroom.
+2. Open the root `ui/` against the root `server/` and generate a laptop-hosted AI room-layout proposal.
+3. Review and explicitly approve the proposed floor plan on the local UI.
 4. Generate the burger level and follow the placement instructions for the four NFC zones.
-5. Connect the host badge to the captain's laptop and assign unique numbers to the three player badges.
+5. Connect the host badge to the Pi and assign unique numbers to the three player badges.
 6. Select host mode on the host badge and player mode on the other badges.
 7. Start the round from the host badge.
 
@@ -53,17 +53,20 @@ The setup photographs define the level layout only.
 
 The v1 product does not use the phone camera to maintain live player locations.
 
-The plain simulator UI lists each player only under the server-inferred station
-or center/default location, with their held item and explicit action state,
-instead of claiming camera-tracked live locations.
+The UI renders each player's snapshot-provided position when one exists, plus
+held item and action state. A missing position is shown as unavailable; the UI
+does not invent a location or claim that setup photos provide live tracking.
 
 ## Hardware and ownership
 
 ```text
-Apple phone setup photos
+phone camera
      |
      v
-captain's laptop - setup provider, authoritative game state, cooking/order timers, and UI transport
+Laptop root server/ui - room-layout generation and operator review
+     |
+     v
+Raspberry Pi - authoritative game state, cooking/order timers, and UI transport
      |
      v
 host or gateway badge - radio and host controls
@@ -73,21 +76,19 @@ host or gateway badge - radio and host controls
 player badge 1      player badge 2      player badge 3
 ```
 
-The host badge is the gateway between the player badges and the laptop server.
+The host badge is the gateway between the player badges and the Pi.
 
-The host badge initiates the physical round, shows its local four-minute
-countdown, and emits the `START_GAME`/`GAME_END` lifecycle records. The laptop
-server applies those records as authoritative start/end transitions and owns
-the game countdown, reset, cooking and order timers, orders, score, and
-submission results.
+The host badge owns the four-minute round lifecycle, START_GAME/GAME_END records,
+and reset of the three fixed-player session. The Pi owns authoritative game
+state, cooking and order timers, orders, score, and submission results.
 
 Player badges read NFC and motion input, provide local feedback, and report player intent.
 
-The UI mirrors state from the laptop server and does not become a second game authority.
+The UI mirrors state from the Pi and does not become a second game authority.
 
 Badge API limits and gateway behavior belong to the badge guide and badge component READMEs.
 
-Laptop-server and possible future Pi/QNX adapter boundaries belong to the [`pi/`](pi/README.md) component documentation.
+Pi engine and adapter boundaries belong to the [`pi/`](pi/README.md) component documentation.
 
 UI transport and rendering boundaries belong to the [`ui/`](ui/README.md) component documentation.
 
@@ -155,12 +156,7 @@ When both badges have plates, their plate items are swapped.
 
 When neither badge has a plate, their held items are swapped.
 
-A player holding a plate and an empty-handed player both keep their inventories
-when they touch.
-
-The owning badge component README defines the event representation for these
-interactions. Simulator-only inferred-location behavior belongs to
-[`pi/server/README.md`](pi/server/README.md).
+The owning badge component README defines the event representation for these interactions.
 
 ## Host start and end lifecycle
 
@@ -168,18 +164,15 @@ Events received before the host starts the game are ignored.
 
 Pressing START on the host badge begins the round.
 
-The host start action broadcasts the start state to all badges and reaches the
-laptop server and UI through the gateway serial path.
+The host start action broadcasts the start state to all badges and reaches the Pi and UI through the gateway serial path.
 
 Starting a round clears prior badge and game state before play begins.
 
-The host badge shows a local countdown during the round; the laptop server's
-countdown remains authoritative for game state and UI snapshots.
+The host badge shows a countdown timer during the round.
 
 A round lasts approximately four minutes.
 
-After the round duration, the host badge broadcasts game end to all badges and
-the laptop server and UI.
+After the round duration, the host badge broadcasts game end to all badges and the Pi and UI.
 
 Game end wipes held items, plates, timers, and other round state on every badge and in the authoritative game state.
 
@@ -203,11 +196,9 @@ A failed submission applies a penalty and has no retry.
 
 The badges broadcast the submission result and drop any remaining held items as part of the submission transition.
 
-The UI displays orders, station-grouped player names, held items, explicit
-chopping/action state, cooking progress, and the submission result without a
-separate global player-card list.
+The UI displays orders, player icons, held items, chopping state, cooking progress, and the submission result.
 
-The authoritative laptop-server projection applies the configured penalty, tip, or bonus-gold result for the submitted order; the UI displays that result and does not independently validate or score the plate.
+The authoritative Pi projection applies the configured penalty, tip, or bonus-gold result for the submitted order; the UI displays that result and does not independently validate or score the plate.
 
 ## v1 radio assumption
 
@@ -220,9 +211,6 @@ The actual radio and serial contracts remain owned by [`badge/badge-app-guide.md
 The first playable acceptance test should therefore validate the full path before adding more recovery behavior.
 
 ## Validation boundaries
-
-Use the laptop simulator validation documented in
-[`pi/server/README.md`](pi/server/README.md) for the current server path.
 
 Run the badge tests from the repository root as documented by the badge component READMEs.
 
@@ -237,14 +225,14 @@ These commands validate host-side behavior and do not claim physical badge, phon
 ## v1 success criteria
 
 1. The host badge starts a clean round for three fixed players.
-2. The laptop server receives player NFC and motion intent through the gateway serial path.
+2. The Pi receives player NFC and motion intent through the gateway path.
 3. The four NFC zones support the ingredient, cutting, and stove interactions above.
 4. Plate transfer and duplicate prevention follow the v1 rules.
 5. Cooking follows the 15-second, done, warning, and burnt timeline.
 6. All three players can perform the simultaneous shake submission.
-7. The laptop server accepts or rejects the submission once and the UI shows the result.
+7. The Pi accepts or rejects the submission once and the UI shows the result.
 8. The host badge ends the round after approximately four minutes and all round state is wiped.
-9. The first playable run completes on the captain's laptop using the reliable-enough radio assumption without cloud services.
+9. The first playable run completes using the reliable-enough radio assumption; the deterministic layout path does not require cloud services.
 
 ## Repository layout
 

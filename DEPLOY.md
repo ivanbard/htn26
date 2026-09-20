@@ -1,6 +1,9 @@
-# HTN26 v1 Deployment
+# HTN26 v1 laptop runbook
 
-This guide deploys the current one-Pi burger game: one QNX Raspberry Pi, one host badge, and three fixed player badges.
+This guide runs the current room-layout and browser surfaces on a laptop. The
+QNX Raspberry Pi remains the target for the authoritative game engine, but its
+runtime, device integration, and any difficulty sidecar are future validation,
+not prerequisites or claims in this runbook.
 
 The current hackathon setup uses the root `server/` and `ui/` surfaces. Upload 3-5 classroom photos to the server-side OpenAI room-layout endpoint, review the generated proposal, and explicitly approve it. The deterministic floorplan remains available; QNX/on-device inference is future-only.
 
@@ -12,14 +15,21 @@ The current hackathon setup uses the root `server/` and `ui/` surfaces. Upload 3
 - `badge/master/`: retained stationary-host Lua rollback profile.
 - `badge/slave/`: retained fixed-player Lua rollback profile.
 
-The Pi is authoritative for orders, cooking, scoring, gold, tips, and submissions. The host badge owns the four-minute round lifecycle. Player badges own local interaction feedback and send intent through the host.
+The master-engine contract is authoritative for orders, cooking, scoring,
+gold, tips, and submissions. Root `server/` uses its local projection only as a
+workstation fixture until that adapter is connected. The host badge owns the
+four-minute round lifecycle. Player badges own local interaction feedback and
+send intent through the host.
 
 ## Hardware
 
-- One QNX Raspberry Pi with a writable application-data directory.
+- One laptop with Node.js 20+, a writable application-data directory, and the
+  root `server/` and `ui/` checkouts.
+- A Raspberry Pi/QNX target only for future integration validation.
 - One Hacker Badge for the host/gateway.
 - Three Hacker Badges for players 1, 2, and 3.
-- One USB data connection from the host badge to the Pi.
+- One USB data connection from the host badge to the laptop for the current
+  serial-adapter path.
 - NFC zones for pantry, fridge, cutting board, and stove.
 - Apple phone for the 3-5 classroom setup photographs.
 
@@ -66,23 +76,25 @@ candidate image has already been built and `--image PATH` to select a specific
 candidate. Do not run it until the selected badge is in its established
 bootloader mode.
 
-## Root server
+## Laptop server
 
-The QNX image must provide Node.js 20 or newer, or an equivalent supported Node runtime. QNX serial-device enumeration, permissions, baud settings, and Node availability remain target-hardware validation items.
-
-From the repository root on the Pi:
+From the repository root on the laptop:
 
 ```sh
-cd htn26/server
+cd server
 
-HTN26_BIND_HOST=0.0.0.0 \
+OPENAI_API_KEY=sk-... \
+HTN26_BIND_HOST=127.0.0.1 \
 HTN26_PORT=8787 \
-HTN26_DATA_DIR=/var/lib/htn26 \
-HTN26_SERIAL_DEVICE=/dev/ser1 \
+HTN26_DATA_DIR=./data \
 node server.mjs
 ```
 
-The serial device is board-specific. Replace `/dev/ser1` with the readable QNX serial device for the host badge. If the serial path is omitted, the server starts without physical serial input and can be tested with the diagnostic route.
+Add `HTN26_SERIAL_DEVICE` with the laptop's readable host-badge device when
+testing serial input. If omitted, the server starts without physical serial
+input and the diagnostic route remains available. Do not copy this command to
+QNX and claim deployment; Node availability, serial enumeration, permissions,
+and baud settings still require target validation.
 
 Health check:
 
@@ -104,7 +116,8 @@ Useful settings:
 - `HTN26_ORDER_INTERVAL_MIN_SECONDS=8`
 - `HTN26_ORDER_INTERVAL_MAX_SECONDS=35`
 - `HTN26_MAX_ACTIVE_ORDERS=3`
-- `OPENAI_API_KEY` is optional and must remain server-only.
+- `OPENAI_API_KEY` is required for active 3-5-photo generation and must remain
+  server-only; omit it only for the separate deterministic path.
 
 The server supports four recipes: plain meat, cheeseburger, lettuce-meat, and cheese-lettuce-meat. Every recipe includes meat. Active orders have independent three-segment patience meters.
 
@@ -113,20 +126,20 @@ The server supports four recipes: plain meat, cheeseburger, lettuce-meat, and ch
 The UI development server requires Node.js 20 or newer:
 
 ```sh
-cd htn26/ui
+cd ui
 HOST=0.0.0.0 PORT=4173 npm run dev
 ```
 
 The mock UI is available at:
 
 ```text
-http://PI_ADDRESS:4173/
+http://LAPTOP_ADDRESS:4173/
 ```
 
 The HTTP transport is selected with:
 
 ```text
-http://PI_ADDRESS:4173/?transport=http
+http://LAPTOP_ADDRESS:4173/?transport=http
 ```
 
 The current UI HTTP transport expects `/api/state`, `/api/command`, and `/api/events` to be same-origin. For integrated testing, place a reverse proxy in front of both processes:
@@ -139,16 +152,19 @@ The current UI HTTP transport expects `/api/state`, `/api/command`, and `/api/ev
 Then open the proxy address with `?transport=http`, for example:
 
 ```text
-http://PI_ADDRESS:8080/?transport=http
+http://LAPTOP_ADDRESS:8080/?transport=http
 ```
 
-The UI displays authoritative timer, order patience, players, holdings, actions, submissions, gold, and tips. It does not move player icons from camera data or independently score plates.
+The UI displays snapshot timer, order patience, player positions when supplied,
+holdings, actions, submissions, gold, and tips. Setup photos do not supply live
+player tracking; absent positions remain absent. The UI never independently
+scores plates.
 
 ## Host badge selection
 
 After the native backup/factory-only flash/readback gate, boot the gateway,
 open **Overcooked**, and press START once to select host mode. Leave it in the
-foreground and connect its USB data cable to the Pi. Host mode starts the radio
+foreground and connect its USB data cable to the laptop. Host mode starts the radio
 without NFC and logs `HTN26|GW|UP|0|0` on success; stop on `GW|DOWN` rather than
 starting a round.
 
@@ -159,7 +175,9 @@ HTN26|GAME|START_GAME|240|3
 HTN26|GAME|GAME_END|3
 ```
 
-It forwards player radio events as records beginning with `HTN26|RX|...`. The Pi should search for that marker anywhere in a serial line because badge runtime logs may add prefix text.
+It forwards player radio events as records beginning with `HTN26|RX|...`. The
+root server parser searches for that marker anywhere in a serial line because
+badge runtime logs may add prefix text.
 
 ## Player badge selection
 
@@ -175,7 +193,10 @@ three fixed players and no late joins. For rollback, restore the pre-write
 factory partition on all four badges, then follow `badge/master/README.md` and
 `badge/slave/README.md` to select the retained Lua apps.
 
-Player controls include NFC ingredient pickup, cutting, cooking, plate assembly, badge-to-badge transfer, dropping, and simultaneous-shake submission. The player app does not communicate directly with the Pi.
+Player controls include NFC ingredient pickup, cutting, cooking, plate
+assembly, badge-to-badge transfer, dropping, and simultaneous-shake
+submission. The player app communicates only through the host/gateway badge,
+not directly with the laptop server or future Pi master.
 
 ## Physical burger setup
 
@@ -198,30 +219,53 @@ all required ingredients -> submit
 
 Cooking takes 15 seconds, followed by the documented done, warning, and burnt states.
 
-## First playable run
+## Laptop-first room-layout run
 
-1. Start the Pi server.
-2. Start the UI or reverse proxy.
-3. Connect the host badge, open Overcooked, and select host mode.
-4. Open Overcooked on all three player badges and confirm unique player numbers.
-5. Review and approve the static four-station floorplan.
-6. Press START on the host badge.
-7. Test ingredient pickup, chopping, cooking, plate assembly, transfers, and simultaneous submission.
-8. Confirm host serial records arrive at `/api/health` and the UI.
-9. Confirm orders, patience, gold, tips, and submission results.
-10. Wait for GAME_END and confirm round state is cleared.
+1. Start root `server/` on the laptop with `OPENAI_API_KEY` set only in its
+   environment.
+2. Start root `ui/` and open the HTTP transport through the same-origin proxy.
+3. Start host mode, choose 3-5 overlapping classroom photos, and submit them
+   once. The browser performs orientation-aware parallel resize/compression.
+4. Review the complete proposed presentation area, objects, play area, and
+   four stations. A new generation replaces the unaccepted proposal.
+5. Explicitly approve the proposal, then place the pantry, fridge, cutting
+   board, and stove NFC zones. `START_GAME` stays unavailable before approval.
+6. Connect the host badge if exercising laptop serial input, select unique
+   player numbers on all three badges, and start the round.
+7. Confirm lifecycle, orders, patience, players, stations, submissions, gold,
+   tips, and safe end/reset behavior in the snapshot and UI.
 
-## Optional phone photos and AI
-
-The first playable run should use the static floorplan. The server has an optional photo/provider seam:
+The equivalent direct API request sends all photos in one multipart upload:
 
 ```sh
-curl -X POST http://PI_ADDRESS:8787/api/photos \
-  -H 'content-type: image/jpeg' \
-  --data-binary @room.jpg
+curl -X POST http://127.0.0.1:8787/api/layout/generate \
+  -F 'photos=@room-front.jpg' \
+  -F 'photos=@room-left.jpg' \
+  -F 'photos=@room-right.jpg'
 ```
 
-For laptop room-layout generation, set `OPENAI_API_KEY` only in the root server environment. Never put it in Lua, browser JavaScript, a URL, or this repository. The deterministic floorplan remains available when generation is unavailable.
+Never put `OPENAI_API_KEY` in Lua, browser JavaScript, a URL, or this
+repository. Generation stores an unaccepted proposal and returns safe generic
+failures. Audit request/folder IDs are returned in headers.
+
+For an offline deterministic review, keep the path explicit and separate:
+
+```sh
+curl -sS -X POST http://127.0.0.1:8787/api/floorplan/review \
+  -H 'content-type: application/json' \
+  -d '{"allowEmpty":true}'
+curl -sS -X POST http://127.0.0.1:8787/api/floorplan/approve \
+  -H 'content-type: application/json' \
+  -d '{"approved":true}'
+```
+
+## Future QNX boundary
+
+Do not move the root server back under `pi/`. A future QNX adapter may supply
+authoritative master snapshots and a future difficulty director may return
+bounded recommendations, but neither may duplicate game rules or own the
+photo/layout API. No host-side check here proves QNX serial, OpenAI, camera,
+difficulty-sidecar, or physical classroom behavior.
 
 ## Optional Cloudflare Tunnel
 

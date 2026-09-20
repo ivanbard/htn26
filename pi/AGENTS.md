@@ -4,10 +4,15 @@ Read [`../README.md`](../README.md), [`../updates/UPDATE_v1.md`](../updates/UPDA
 
 Use [`README.md`](README.md), [`master/README.md`](master/README.md), and [`slave/README.md`](slave/README.md) as the implementation owners for the Pi components.
 
-The current server run, test, and deployment path is the captain's laptop. QNX,
-Pi-hosted execution, and multi-camera workers are possible future boundaries.
+The current development flow sends phone setup photos to root `server/` on the
+laptop. Pi-side setup inference, multi-camera tracking, and a QNX difficulty
+sidecar are future boundaries, not current validated behavior.
 
-Keep authoritative game state, timers, order evaluation, and submission decisions in the laptop server or a future authoritative-engine adapter.
+Keep authoritative game state, timers, order evaluation, and submission decisions in the master Pi.
+
+A future difficulty sidecar may recommend bounded adjustments through an
+adapter but must not duplicate rules, mutate authoritative state directly, or
+own HTTP/photo/layout routes.
 
 Keep camera, inference, and worker code behind the adapter seams owned by the relevant Pi README.
 

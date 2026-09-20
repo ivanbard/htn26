@@ -1,52 +1,48 @@
-# HTN26 server (laptop-first, QNX-oriented)
+# HTN26 laptop server
 
-The room-layout generation endpoint is a laptop-first hackathon path. It is
-not a claim that OpenAI connectivity is suitable for the QNX deployment; the
-existing deterministic floorplan path remains available and the endpoint can
-be replaced by on-device inference later.
+This directory is the only current HTTP/SSE, photo, provider, room-layout, and
+browser-projection server. Run it on the laptop with the root `ui/`; there is no
+competing server under `pi/`. The server owns the current setup proposal and UI
+snapshot, while `pi/master` remains the authoritative owner of gameplay rules
+and supplies canonical results when its adapter is connected.
 
-This directory contains the first locally runnable HTTP/serial boundary for the
-Raspberry Pi host. It is intentionally a small Node.js 20+ process so the
-protocol and web behavior can be exercised on a workstation before a QNX image
-is available. The existing `pi/master` engine remains the authoritative game
-engine; this process is a web/projection adapter and must consume canonical
-master results when that adapter is connected.
+OpenAI room-layout generation is a laptop-first hackathon path. It is not a
+claim of QNX or on-device OpenAI support. The deterministic default layout is a
+separate development/recovery path, and any QNX inference or difficulty
+sidecar remains future-only.
 
 ## Run locally
 
 ```sh
 cd server
-node server.mjs --host 127.0.0.1 --port 8787
-# or make it reachable on the LAN:
-node server.mjs --host 0.0.0.0 --port 8787
+OPENAI_API_KEY=sk-... node server.mjs --host 127.0.0.1 --port 8787
 ```
 
-Useful environment variables:
+Use `--host 0.0.0.0` only for a trusted LAN. Useful environment variables:
 
-- `HTN26_BIND_HOST`, `HTN26_PORT`: bind address and port (CLI flags win).
-- `HTN26_DATA_DIR`: persistent photo/metadata directory.
-- `HTN26_SERIAL_DEVICE`: USB serial device, for example a QNX `/dev/ser*`
-  path. `--serial DEVICE` is equivalent.
+- `HTN26_BIND_HOST`, `HTN26_PORT`: bind address and port; CLI flags win.
+- `HTN26_DATA_DIR`: persistent photo and audit-metadata directory.
+- `HTN26_SERIAL_DEVICE`: host-badge USB serial device; `--serial DEVICE` is
+  equivalent.
 - `HTN26_ROUND_SECONDS`: round length, default 240.
 - `HTN26_ORDER_INTERVAL_MIN_SECONDS` and
   `HTN26_ORDER_INTERVAL_MAX_SECONDS`: randomized order-spawn interval,
   default 8-35 seconds.
 - `HTN26_MAX_ACTIVE_ORDERS`: active order-card limit, default 3.
-- `OPENAI_API_KEY`: optional server-only image provider credential. It is
-  never included in an API response or browser bundle.
+- `OPENAI_API_KEY`: required for the active 3-5-photo AI flow and kept only in
+  this server process. It may be omitted only for the deterministic path.
 - `OPENAI_LAYOUT_TIMEOUT_MS`: bounded Responses request timeout in
-  milliseconds; defaults to 12000.
+  milliseconds, default 12000.
 
-The deterministic floorplan provider remains the default local fixture for
-an approximately 10 m x 10 m room with exactly four stations: pantry, fridge,
-cutting board, and stove. The laptop-first AI room-layout path is isolated in
-`POST /api/layout/generate`; it uses the server-only OpenAI credential and
-never changes game authority. No cloud service is needed for deterministic
-floorplan development.
+The deterministic default is an approximately 10 m x 10 m room with exactly
+four station types: pantry, fridge, cutting board, and stove. Review it through
+`POST /api/floorplan/review`; it is not an AI fallback response. The active
+camera flow uses `POST /api/layout/generate`, and both paths require explicit
+approval before `START_GAME`.
 
-## Physical host-badge serial path
+## Host-badge serial adapter
 
-The expected logical gateway records are the existing badge contract:
+The parser consumes the existing logical gateway records:
 
 ```text
 HTN26|RX|AA:BB:CC:DD:EE:FF|-48|OC1|42|H|START
@@ -55,25 +51,15 @@ HTN26|RX|AA:BB:CC:DD:EE:FF|-48|OC1|000044|E|P2:PU:R
 HTN26|GW|UP|12|0
 ```
 
-The parser searches for `HTN26|` anywhere in a line, accepts human-readable
-prefix noise, validates MAC/RSSI/protocol/sequence/type/payload size, accepts
-the fixed-player `E|P<player>:<action>` transport without rewriting it, and
-handles USB chunks that split a record across reads. The stream adapter is
-shared by fixtures, `/api/serial`, and the physical device. Duplicate
-`MAC + sequence` events are ignored by the projection.
-
-On QNX, configure the USB serial device using the board's serial driver and
-permissions, then run:
+It searches for `HTN26|` amid log noise, validates the record, handles USB
+chunks that split a line, and suppresses duplicate `MAC + sequence` events.
+For laptop serial integration, set the discovered device before starting:
 
 ```sh
-HTN26_SERIAL_DEVICE=/dev/ser1 HTN26_BIND_HOST=0.0.0.0 node server/server.mjs
+HTN26_SERIAL_DEVICE=/dev/ttyUSB0 node server/server.mjs
 ```
 
-The exact `/dev/ser*` name, baud configuration, USB enumeration, and device
-permissions are board-image-specific and are not asserted by host tests. The
-startup log prints the selected device. If events do not appear, first check
-that the device exists and is readable, check the QNX serial-driver/baud
-configuration, then post a known fixture line to the local diagnostic route:
+The development-only `POST /api/serial` diagnostic uses the same parser:
 
 ```sh
 curl -sS -X POST http://127.0.0.1:8787/api/serial \
@@ -82,87 +68,123 @@ curl -sS -X POST http://127.0.0.1:8787/api/serial \
 curl -sS http://127.0.0.1:8787/api/health
 ```
 
-`/api/serial` is a development diagnostic and uses the same parser boundary;
-production input should use `HTN26_SERIAL_DEVICE`.
+## HTTP API
 
-## HTTP protocol
+Normal responses are JSON. Errors use `{ "error": "safe message" }` and do
+not contain raw provider details. `/api/events` is an SSE stream. The browser
+HTTP transport uses `GET /api/state`, `GET /api/events`, `POST /api/command`,
+and `POST /api/layout/generate`.
 
-All responses are JSON except `/api/events`, which is server-sent events.
-The existing UI HTTP transport can consume `GET /api/state`, `POST
-/api/command`, and `GET /api/events`.
+| Method and route | Input | Successful output | Expected errors |
+| --- | --- | --- | --- |
+| `GET /api/state` | none | complete canonical UI snapshot | `500` generic server error |
+| `GET /api/events` | `Accept: text/event-stream` optional | initial and subsequent `event: state` frames whose `data` is the complete snapshot | connection/transport failure |
+| `GET /api/orders` | none | `{ "order": object, "orders": array }` | `500` generic server error |
+| `GET /api/timer` | none | authoritative `{ status, remainingSeconds, totalSeconds }` | `500` generic server error |
+| `GET /api/gold` / `GET /api/tips` | none | authoritative reward totals and last change | `500` generic server error |
+| `GET /api/players` | none | `{ "players": [...] }` | `500` generic server error |
+| `GET /api/submissions` | none | `{ "submissions": [...] }` | `500` generic server error |
+| `GET /api/health` | none | `{ "ok": true, "state": health }` | `500` generic server error |
+| `POST /api/serial` | JSON `{ "line": "HTN26|..." }` | parser result plus current `state`; invalid protocol records remain parser results | `400` missing/non-string line or invalid JSON |
+| `POST /api/players/assign` | JSON `{ "mac": "AA:BB:CC:DD:EE:FF", "playerId": "p1" }` | updated snapshot | `400` invalid MAC/player or JSON |
+| `POST /api/command` | JSON command described below | updated snapshot | `400` invalid JSON or HTTP `SCAN_ROOM`; `500` unsupported/invalid state transition |
 
-Setup and photos:
+The command body is `{ "type": "COMMAND" }`. Supported server commands are
+`START_HOST`, `APPROVE_LAYOUT` (alias `ACCEPT_LAYOUT`), `START_GAME`,
+`END_GAME`, and `RESET_GAME`. `START_GAME` requires an explicitly approved
+proposal. `SCAN_ROOM` on the HTTP transport returns `400` with guidance to
+send 3-5 photos to `POST /api/layout/generate`; it remains executable in the
+offline mock so that setup can progress without OpenAI. Deterministic review
+remains separate.
 
-- `POST /api/photos`: deprecated cumulative-upload compatibility for the
-  deterministic floorplan flow. New room-photo work should use the isolated
-  3-5 photo submissions accepted by `POST /api/layout/generate`.
-- `POST /api/layout/generate`: multipart `photos` upload containing 3-5
-  classroom photos. The server sends all photos in exactly one Responses API
-  request and returns the strict normalized layout contract with only
-  `presentationArea`, `objects`, `playArea`, and `stations` at the top level.
-  It stores that sanitized layout as an unaccepted proposal; the existing
-  floorplan approval step must promote it to the active room layout before a
-  game can start. The browser can preprocess photos with
-  `ui/src/photo.js` (EXIF orientation, parallel resize to a roughly 1280px
-  long edge, and JPEG quality 0.76). Configure locally with:
+### Photo, layout, and approval routes
 
-  ```sh
-  OPENAI_API_KEY=sk-... node server/server.mjs
-  ```
+| Method and route | Input | Successful output | Expected errors |
+| --- | --- | --- | --- |
+| `POST /api/layout/generate` | one `multipart/form-data` request with 3-5 `photos`; optional `X-HTN26-Photo-Preprocess-Ms` | sanitized layout proposal; request/audit IDs in headers | `400` wrong count/malformed multipart; `413` too large; `503` missing key, timeout, provider, body, or validation failure |
+| `GET /api/layout` | none | approved `roomLayout`, or `null` before approval | `500` generic server error |
+| `GET /api/layout/submissions` | none | `{ "submissions": [...] }` audit summaries | `500` generic server error |
+| `POST /api/floorplan/review` | JSON `{ "allowEmpty": true }` for the no-photo fixture, otherwise previously uploaded compatibility photos | unaccepted deterministic `floorPlan` proposal | `400` no photos/invalid JSON; `500` provider failure |
+| `POST /api/floorplan/approve` | JSON `{ "approved": true }` | updated snapshot with accepted plan and active `roomLayout` for AI output | `400` invalid JSON; `500` no proposal |
+| `GET /api/floorplan` | none | current deterministic or AI-derived floor-plan projection | `500` generic server error |
+| `GET /api/photos` | none | deprecated cumulative-photo metadata with `Deprecation: true` | `500` generic server error |
+| `POST /api/photos` | deprecated raw image or multipart compatibility upload | cumulative photo metadata with `Deprecation: true` | `400` empty/malformed; `409` more than five cumulative photos; `413` too large |
 
-  Generation failures return a generic 503 message; provider details are not
-  exposed to the browser. Development responses include `Server-Timing` for
-  preprocessing, request, validation, and aggregate duration (including
-  reported client preprocessing, request upload, and audit persistence).
-  Provider requests time out after 12 seconds by default. The normal target is
-  under 15 seconds, not a hard guarantee.
-  Every generation attempt is retained
-  independently under `HTN26_DATA_DIR/layout-submissions/<request-id>/`, with
-  its 3-5 photos and safe success/failure and timing metadata. Responses expose
-  the request ID and audit folder in `X-HTN26-Layout-Request-Id` and
-  `X-HTN26-Layout-Audit-Folder`; `GET /api/layout/submissions` lists the same
-  audit identities. Operators can manually delete a request folder when its
-  audit record is no longer needed. Interrupted submissions are reconciled as
-  safe failures at startup while their photos remain available for audit.
-- `POST /api/floorplan/review`: runs the provider boundary and returns the
-  reviewable four-station plan. For the static local fixture, the uploaded
-  bytes are metadata only.
-- `POST /api/floorplan/approve` with `{ "approved": true }`: approves the
-  plan and enables `START_GAME`.
-- `GET /api/photos`, `GET /api/floorplan`: inspect setup state.
+The active browser path preprocesses selected images in parallel, honors EXIF
+orientation, limits the long edge to about 1280 px, and encodes JPEG at quality
+0.76. It sends every image together in one server request. The server makes
+exactly one OpenAI Responses request using `gpt-5.6-luna`, low reasoning, low
+image detail, strict structured JSON, and no tools, web access, image
+generation, prose response, or multi-call pipeline.
 
-Commands use `{ "type": "START_HOST|SCAN_ROOM|APPROVE_LAYOUT|START_GAME|END_GAME|RESET_GAME" }`.
-`SCAN_ROOM` is retained as a compatibility signal but returns guidance to use
-`POST /api/layout/generate` with 3-5 photos. The deterministic
-`POST /api/floorplan/review` endpoint remains separate. `APPROVE_LAYOUT` is
-retained as a UI protocol alias.
+The normalized square layout has presentation/front oriented to `y=0` and
+contains only `presentationArea`, `objects`, `playArea`, and `stations` at the
+top level. Every rectangle uses `{ center: { x, y }, width, height,
+rotationDeg }` in 0..1 space. Objects add unique `id`, `type`, and
+`usableSurface`; stations add `supportObjectId` and contain exactly one each of
+`pantry`, `fridge`, `cutting_board`, and `stove`. Local sanitization removes
+unknown fields, non-finite geometry, duplicate object IDs/stations, invalid
+support references, and out-of-bounds rotated rectangles, and supplies
+deterministic missing-station fallbacks. A new generation replaces only the
+unaccepted proposal. Approval promotes it; no layout-editing workflow exists.
 
-Projection reads:
+Every attempt has its own timestamped
+`HTN26_DATA_DIR/layout-submissions/<request-id>/` folder containing the 3-5
+photos and safe metadata. `X-HTN26-Layout-Request-Id` and
+`X-HTN26-Layout-Audit-Folder` expose its identity for manual audit or deletion.
+Startup reconciles interrupted `processing` records as failures without
+combining batches. `Server-Timing` and `X-HTN26-Layout-Metrics` cover reported
+client preprocessing, provider upload/request and response parsing, local
+validation, audit persistence, and total time. The provider timeout defaults
+to 12 seconds; under 15 seconds is a typical target, not a guarantee.
 
-- `GET /api/state`: setup, floorplan, players, station projection, active and
-  historical order cards, timer, gold, tips, submissions, and health.
-- `GET /api/orders`: `{order, orders}`. `orders` contains cards with recipe,
-  `issuedAt`, `deadlineAt`, `remainingSeconds`, and a three-segment
-  `patience` meter. Multiple cards may be active; at least one is retained
-  while a round runs.
-- `GET /api/gold`, `/api/tips`, `/api/timer`, `/api/players`,
-  `/api/submissions`: small browser-friendly projections.
-- `GET /api/events`: SSE snapshots; clients should use the `revision` field for change ordering. `version` is the stable snapshot schema version.
+## Canonical UI snapshot
 
-When the QNX master adapter is connected, pass it to `createRuntime` as
-`authoritativeEngine`. Its `ingestBadgeEvent` and `submit` methods return the
-canonical result and optional state snapshot; the HTTP projection mirrors that
-snapshot. The local projection rules are retained as the workstation fixture
-path until the QNX adapter is available.
+`version` is the stable schema version (`2`) and changes only for an
+incompatible contract. `revision` is the projection-owned monotonic change
+counter used to discard stale HTTP/SSE snapshots; it is not a schema version.
+Each `state` SSE event carries the same complete shape as `GET /api/state`, so
+a client replaces its prior snapshot rather than merging partial events.
 
-Exactly four recipes are generated: `PLAIN_MEAT`, `CHEESEBURGER`,
-`LETTUCE_MEAT`, and `CHEESE_LETTUCE_MEAT`. Every recipe contains meat; cheese
-and lettuce are optional. A submission event should carry
-`B|SUBMIT:<RECIPE_ID>` (the `SUBMIT:SUCCESS` value is retained only as a
-compatibility fixture for a canonical upstream result). The server matches the
-recipe against an active order, derives gold from the recipe, derives a tip
-from remaining patience, consumes the submitting player's projected plate,
-and records success/failure. Browser code cannot award gold or tips.
+The canonical fields and lifecycle are:
+
+- `setup`: `{ phase, message, updatedAt }`. Phases move through `idle` ->
+  `scanning` -> `layout-proposed` -> `burger-placement` -> `running` ->
+  `ended`; reset returns to `idle`.
+- `floorPlan`: the 0-100 `normalized-percent` renderer projection, including
+  `accepted`, walls, station rectangles, and placement instructions.
+  `proposedRoomLayout` contains an unaccepted normalized 0..1 AI layout;
+  `roomLayout` is `null` until approval, then contains the approved layout and
+  `proposedRoomLayout` becomes `null`.
+- `timer` and `clock`: matching authoritative `{ status, remainingSeconds,
+  totalSeconds }` values. `clock` is the UI name; clients never decrement it.
+- `orders` and `activeOrders`: cards with recipe, issue/deadline,
+  remaining/total seconds, and `patience: { segments, filledSegments,
+  remainingSeconds, totalSeconds }`. `order` is the first-active compatibility
+  alias.
+- `players`: fixed player records with identity, optional `position` in 0-100
+  display coordinates, inventory, `heldItem`, `actionState`, and tracking
+  health. An optional fixture-only `simulatedLocation` may preserve a mock
+  source location, but an adapter must project it into `position`; it is not
+  evidence of phone-camera tracking. Missing `position` means unavailable and
+  does not cause the UI to invent a location.
+- `stations`: authoritative status, progress, remaining seconds, and
+  item/contents, aligned by ID with the accepted floor plan.
+- `submissions`, `serving`, `score`, `gold`, and `tips`: authoritative
+  validation outcomes and rewards. The browser never validates or scores a
+  plate.
+- `health.gateway`, `health.inference`, and `health.workers`: last-seen and
+  status data. Setup-inference health does not imply live player tracking.
+
+The deterministic fixture and current tests use this same lifecycle: review a
+default proposal, approve it, then start. The 3-5-photo path differs only in
+how the unaccepted proposal is produced.
+
+When a master adapter is connected, pass it to `createRuntime` as
+`authoritativeEngine`. Its badge-event and submission results are canonical;
+the local projection rules remain a workstation fixture. Exactly four recipes
+are generated: `PLAIN_MEAT`, `CHEESEBURGER`, `LETTUCE_MEAT`, and
+`CHEESE_LETTUCE_MEAT`. Browser code cannot award gold or tips.
 
 ## Cloudflare Tunnel / LAN
 
@@ -174,48 +196,26 @@ node server/server.mjs --host 127.0.0.1 --port 8787
 cloudflared tunnel --url http://127.0.0.1:8787
 ```
 
-For a named tunnel, configure the tunnel ingress to
-`http://127.0.0.1:8787` and run `cloudflared tunnel run NAME`; authenticate
-`cloudflared` through its own login/credential flow. Do not put an OpenAI key,
-tunnel token, or other secret in browser JavaScript, the UI query string, or
-this repository. A tunnel endpoint is not automatically an authenticated
-product endpoint; use Cloudflare Access or an equivalent private policy before
-sharing it beyond the trusted demo network. Binding `0.0.0.0` is only needed
-for direct LAN clients and does not embed a secret.
+Do not put an OpenAI key, tunnel token, or other secret in browser JavaScript,
+the UI query string, or this repository. A tunnel endpoint is not
+automatically authenticated; apply a private access policy before sharing it
+beyond the trusted demo network.
 
-## Tests and QNX boundary
-
-From this directory:
+## Tests and future QNX boundary
 
 ```sh
 node --test test/*.test.mjs
 ```
 
-The tests use a deterministic serial fixture and a temporary data directory to
-cover noisy/chunked serial parsing, duplicate suppression, photo upload and
-review/approval, order cards, recipe validation, gold/tip calculation, SSE,
-and the browser projection routes. They do **not** prove QNX serial-driver
-enumeration, baud settings, Node availability in a target image, phone-camera
-capture, physical badges, or OpenAI connectivity. QNX integration still needs
-on-target validation. The QNX-specific replacement point is
-`src/serial-device.mjs`; it opens the configured device and feeds bytes into
-the platform-independent parser.
+Tests cover host-side serial parsing, duplicate suppression, uploads,
+generation/audit behavior, review/approval, orders, rewards, SSE, and browser
+projection routes. They do not prove QNX serial enumeration, Node availability
+on a target image, phone capture, physical badges, OpenAI connectivity, or a
+QNX sidecar.
 
-## UI worker contract assumptions
-
-The UI worker can keep its current transport seam and should:
-
-1. Treat `GET /api/state` as authoritative and never decrement `timer` or
-   order patience locally.
-2. Render `activeOrders`/`orders` as cards; `order` is only the first active
-   card compatibility alias. Use `patience.filledSegments` and
-   `remainingSeconds` from the server.
-3. Render `gold.total`, `tips.total`, `players`, and `submissions` exactly as
-   supplied. A submission's `validation` and `status` are authoritative.
-4. Use `POST /api/floorplan/approve` or the existing `APPROVE_LAYOUT` command;
-   the proposed plan has metre coordinates and four station IDs.
-5. Keep the existing fallback/mock transport for offline UI tests. The server
-   currently exposes fixed player cards `p1`, `p2`, and `p3`; badge assignment
-   may be added through `POST /api/players/assign`.
-
-The server does not claim live camera player positions in this first slice.
+A future QNX difficulty director is a sidecar only: it may observe canonical
+snapshots and return bounded recommendations through an adapter, but it must
+not own HTTP routes, duplicate orders/timers/scoring, mutate state directly, or
+become a second room-layout server. There is no current difficulty-sidecar
+endpoint or runtime. A future QNX serial adapter may replace
+`src/serial-device.mjs` while retaining the platform-independent parser.

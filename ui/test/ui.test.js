@@ -842,3 +842,32 @@ test("cleans up a connection that resolves after app destruction", async () => {
   assert.equal(cleanupCount, 1);
   assert.equal(closeCount, 1);
 });
+
+test("exposes room-photo generation only for capable transports", () => {
+  const makeRoot = () => ({
+    innerHTML: "",
+    addEventListener() {},
+    removeEventListener() {},
+  });
+  const scanningState = createInitialMockState(1_000);
+  scanningState.setup.phase = SETUP_PHASES.SCANNING;
+  const mockRoot = makeRoot();
+  const mockApp = createApp({
+    root: mockRoot,
+    transport: createMockTransport({ initialState: scanningState, now: () => 1_000 }),
+  });
+  assert.match(mockRoot.innerHTML, /data-command="SCAN_ROOM"/);
+  assert.doesNotMatch(mockRoot.innerHTML, /data-layout-photo-controls/);
+  mockApp.destroy();
+
+  const httpRoot = makeRoot();
+  const capableTransport = {
+    connect(listener) { listener(scanningState); },
+    async command() { return scanningState; },
+    async generateLayout() { return scanningState; },
+  };
+  const httpApp = createApp({ root: httpRoot, transport: capableTransport, now: () => 1_000 });
+  assert.doesNotMatch(httpRoot.innerHTML, /data-command="SCAN_ROOM"/);
+  assert.match(httpRoot.innerHTML, /data-layout-photo-controls/);
+  httpApp.destroy();
+});

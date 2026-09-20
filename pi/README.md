@@ -8,7 +8,7 @@ The current Pi layer owns authoritative game-state execution and host-badge/UI
 transport. Laptop-first room-photo processing and AI layout review belong to
 root `server/` and `ui/`; QNX/on-device setup inference is future-only. The
 local web/serial boundary is documented in
-  [`../server/README.md`](../server/README.md)
+[`../server/README.md`](../server/README.md).
 
 The current v1 deployment uses one Raspberry Pi and an Apple phone camera.
 The worker and multi-camera responsibilities below remain implementation seams
@@ -40,12 +40,22 @@ Owns:
 
 `server/`
 
-The current laptop-first server slice is the locally runnable HTTP/SSE and USB-serial boundary for
-the QNX deployment. It owns protocol adaptation, browser projections, photo
-upload/review plumbing, and deterministic workstation fixtures; it does not
-replace the master engine as the authoritative game-state owner. Its routes,
-serial setup, provider boundary, and QNX validation limits are documented in
+The current laptop-first server slice is the locally runnable HTTP/SSE,
+USB-serial, photo, and AI-layout boundary. It is not a QNX deployment. It owns
+protocol adaptation, browser projections, audit persistence, and deterministic
+workstation fixtures; it does not replace the master engine as the
+authoritative game-state owner. Its routes, schema, serial setup, provider
+boundary, and validation limits are documented in
 [`../server/README.md`](../server/README.md).
+
+### Future QNX difficulty sidecar
+
+A difficulty director may later run beside the QNX master. It may observe
+canonical snapshots and return bounded recommendations through an explicit
+adapter. The master validates and applies any accepted recommendation. The
+sidecar must not mutate state directly, duplicate order/timer/scoring rules,
+host HTTP/photo/layout routes, or claim authority. No such sidecar is currently
+implemented or validated.
 
 ### Worker Pi
 

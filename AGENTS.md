@@ -15,7 +15,11 @@ whole-fleet native/rollback and factory-only safety gate in
 
 Use the nearest component README as the implementation contract for [`badge/`](badge/README.md), [`pi/`](pi/README.md), [`server/`](server/README.md), and [`ui/`](ui/README.md).
 
-The current/latest laptop development surfaces are root [`server/`](server/) and [`ui/`](ui/). Keep the HTTP/SSE, photo, provider, and AI layout implementation in `server/`; do not create a competing server under `pi/`.
+The current/latest laptop development surfaces are root [`server/`](server/) and [`ui/`](ui/). Keep the HTTP/SSE, photo, provider, AI layout, endpoint catalog, and canonical snapshot contract in `server/`; do not create a competing server under `pi/`.
+
+Treat QNX setup inference and difficulty direction as future adapter/sidecar
+boundaries. They must not duplicate game rules or take ownership of the root
+HTTP/photo/layout surface.
 
 Keep product intent in the root README and implementation-specific packet, API, state, and transport details in their existing component owners.
 
