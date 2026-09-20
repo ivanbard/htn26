@@ -1,19 +1,34 @@
 import { LocalFloorplanProvider, localPlan } from "./provider.mjs";
 
 const ROUND_SECONDS = 240;
+const CHOP_SECONDS = 3;
+const COOK_SECONDS = 15;
+const DONE_SECONDS = 2;
+const WARNING_SECONDS = 3;
 const DEFAULT_ORDER_INTERVAL_SECONDS = 30;
+const WRONG_ORDER_PENALTY = 25;
+const EXPIRED_ORDER_PENALTY = 20;
+const HISTORY_LIMIT = 100;
+
 export const BURGER_RECIPES = Object.freeze([
   { id: "PLAIN_MEAT", name: "PLAIN MEAT BURGER", toppings: [], components: ["BUN", "MEAT"], gold: 100 },
   { id: "CHEESEBURGER", name: "CHEESEBURGER", toppings: ["CHEESE"], components: ["BUN", "MEAT", "CHEESE"], gold: 120 },
   { id: "LETTUCE_MEAT", name: "LETTUCE-MEAT BURGER", toppings: ["LETTUCE"], components: ["BUN", "MEAT", "LETTUCE"], gold: 120 },
   { id: "CHEESE_LETTUCE_MEAT", name: "CHEESE-LETTUCE-MEAT BURGER", toppings: ["CHEESE", "LETTUCE"], components: ["BUN", "MEAT", "CHEESE", "LETTUCE"], gold: 150 },
 ]);
+
 const RECIPE_BY_ID = new Map(BURGER_RECIPES.map((recipe) => [recipe.id, recipe]));
 const DEFAULT_PLAYERS = [
   { id: "p1", label: "P1", name: "PLAYER 1", color: "orange" },
   { id: "p2", label: "P2", name: "PLAYER 2", color: "cyan" },
   { id: "p3", label: "P3", name: "PLAYER 3", color: "violet" },
 ];
+const SHORT_ITEMS = Object.freeze({
+  B: "BUN", R: "RAW_MEAT", M: "CHOPPED_MEAT", X: "BURNT_MEAT",
+  Q: "RAW_LETTUCE", L: "LETTUCE", K: "RAW_CHEESE", C: "CHEESE",
+});
+const PLATE_ITEMS = new Set(["BUN", "COOKED_MEAT", "MEAT", "LETTUCE", "CHEESE"]);
+const RAW_TO_CHOPPED = Object.freeze({ RAW_MEAT: "CHOPPED_MEAT", RAW_LETTUCE: "LETTUCE", RAW_CHEESE: "CHEESE" });
 
 function clone(value) { return structuredClone(value); }
 function iso(ms) { return new Date(ms).toISOString(); }
@@ -21,8 +36,75 @@ function numeric(value, fallback = 0) {
   const number = Number(value);
   return Number.isFinite(number) ? number : fallback;
 }
-
-function makeOrder(id = "order-1", recipe = BURGER_RECIPES[0], now = Date.now(), patienceSeconds = DEFAULT_ORDER_INTERVAL_SECONDS) {
+function clampInteger(value, minimum, maximum, fallback) {
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.max(minimum, Math.min(maximum, Math.floor(number))) : fallback;
+}
+function plateComponent(item) {
+  if (item === "BUN") return "BUN";
+  if (item === "MEAT" || item === "COOKED_MEAT") return "MEAT";
+  if (item === "LETTUCE") return "LETTUCE";
+  if (item === "CHEESE") return "CHEESE";
+  return null;
+}
+function plateSummary(items = []) {
+  const values = new Set(items.map(plateComponent).filter(Boolean));
+  return `${values.has("BUN") ? "B" : "-"}${values.has("MEAT") ? "M" : "-"}${values.has("LETTUCE") ? "L" : "-"}${values.has("CHEESE") ? "C" : "-"}`;
+}
+function itemsFromPlateSummary(summary) {
+  if (!/^(?:B|-)(?:M|-)(?:L|-)(?:C|-)$/.test(String(summary || ""))) return null;
+  const items = [];
+  if (summary[0] === "B") items.push("BUN");
+  if (summary[1] === "M") items.push("MEAT");
+  if (summary[2] === "L") items.push("LETTUCE");
+  if (summary[3] === "C") items.push("CHEESE");
+  return items;
+}
+function sameComponents(left, right) {
+  return [...left].sort().join("|") === [...right].sort().join("|");
+}
+function patienceTier(remaining, total) {
+  if (remaining <= 0 || total <= 0) return 0;
+  const ratio = remaining / total;
+  if (ratio > 2 / 3) return 3;
+  if (ratio > 1 / 3) return 2;
+  return 1;
+}
+function makePlayer(player) {
+  return {
+    ...player,
+    badgeMac: null,
+    position: null,
+    tracking: { status: "unknown", source: "badge-projection", lastSeenAt: null, staleAfterMs: 2000 },
+    inventory: [],
+    hand: null,
+    hasPlate: false,
+    plate: [],
+    heldItem: "EMPTY",
+    actionState: "idle",
+    processing: null,
+    submissionReadyUntil: null,
+  };
+}
+function makeStations() {
+  return [
+    { id: "pantry", label: "PANTRY", kind: "ingredient", status: "idle", progress: 0, remainingSeconds: 0, item: null },
+    { id: "fridge", label: "FRIDGE", kind: "ingredient", status: "idle", progress: 0, remainingSeconds: 0, item: null },
+    { id: "cutting-board", label: "CUTTING BOARD", kind: "chop", status: "idle", progress: 0, remainingSeconds: 0, item: null },
+    { id: "stove-left", label: "STOVE LEFT", kind: "stove", side: "LEFT", status: "idle", progress: 0, remainingSeconds: 0, item: null, startedAt: null, doneAt: null, warningAt: null, burntAt: null },
+    { id: "stove-right", label: "STOVE RIGHT", kind: "stove", side: "RIGHT", status: "idle", progress: 0, remainingSeconds: 0, item: null, startedAt: null, doneAt: null, warningAt: null, burntAt: null },
+  ];
+}
+function makeMoney() {
+  return {
+    gold: 0,
+    tips: 0,
+    penalties: 0,
+    net: 0,
+    lastChange: 0,
+  };
+}
+function makeOrder(id, recipe, now, patienceSeconds) {
   return {
     id,
     dish: "BURGER",
@@ -34,42 +116,39 @@ function makeOrder(id = "order-1", recipe = BURGER_RECIPES[0], now = Date.now(),
     deadlineAt: iso(now + patienceSeconds * 1000),
     remainingSeconds: patienceSeconds,
     totalSeconds: patienceSeconds,
-    patience: { segments: 3, filledSegments: 3, remainingSeconds: patienceSeconds, totalSeconds: patienceSeconds },
+    patienceState: 3,
+    patience: { segments: 3, filledSegments: 3, remainingSeconds: patienceSeconds, totalSeconds: patienceSeconds, state: 3 },
     toppings: [...recipe.toppings],
     components: [...recipe.components],
     goldValue: recipe.gold,
+    penalty: 0,
   };
 }
 
-export function createInitialProjectionState(now = Date.now()) {
+export function createInitialProjectionState(now = Date.now(), roundSeconds = ROUND_SECONDS) {
   const plan = localPlan({ generatedAt: iso(now), photoCount: 0 });
   return {
     version: 1,
-    source: "pi-server",
-    setup: { phase: "idle", message: "Upload 3-4 room photos, then review the proposed floorplan.", updatedAt: iso(now) },
+    source: "pi-server-simulator",
+    setup: { phase: "idle", message: "Upload 3-4 room photos for setup, or start the local simulator with a host serial record.", updatedAt: iso(now) },
     floorPlan: plan,
     burgerLevel: { status: "not-generated", recipe: "BURGER", placementInstructions: clone(plan.placementInstructions) },
     photos: [],
-    players: DEFAULT_PLAYERS.map((player) => ({
-      ...player,
-      badgeMac: null,
-      position: null,
-      tracking: { status: "unknown", source: "badge-projection", lastSeenAt: null, staleAfterMs: 2000 },
-      inventory: [],
-      heldItem: "EMPTY",
-      actionState: "idle",
-    })),
-    orders: [makeOrder("order-1", BURGER_RECIPES[0], now)],
-    activeOrders: [makeOrder("order-1", BURGER_RECIPES[0], now)],
-    order: makeOrder("order-1", BURGER_RECIPES[0], now),
+    players: DEFAULT_PLAYERS.map(makePlayer),
+    orders: [],
+    activeOrders: [],
+    order: null,
     gold: { total: 0, earned: 0, lastChange: 0 },
     tips: { total: 0, earned: 0, lastChange: 0 },
+    penalties: { total: 0, lastChange: 0 },
+    money: makeMoney(),
     score: { value: 0, delivered: 0 },
-    timer: { status: "ready", remainingSeconds: ROUND_SECONDS, totalSeconds: ROUND_SECONDS },
-    clock: { status: "ready", remainingSeconds: ROUND_SECONDS, totalSeconds: ROUND_SECONDS },
+    timer: { status: "ready", remainingSeconds: roundSeconds, totalSeconds: roundSeconds },
+    clock: { status: "ready", remainingSeconds: roundSeconds, totalSeconds: roundSeconds },
     submissions: [],
+    eventHistory: [],
     serving: { lastEvent: null, gooseQueue: 4, location: "SERVING" },
-    stations: plan.stations.map((station) => ({ id: station.id, label: station.label, kind: station.kind, status: "idle", progress: 0, remainingSeconds: 0, item: null })),
+    stations: makeStations(),
     health: {
       gateway: { id: "gateway", label: "GATEWAY BADGE", status: "unknown", lastSeenAt: null, detail: "Waiting for host-badge serial" },
       inference: { id: "inference", label: "SETUP INFERENCE", status: "healthy", lastSeenAt: iso(now), detail: plan.reviewMessage },
@@ -82,30 +161,27 @@ export function createInitialProjectionState(now = Date.now()) {
 export class ServerProjection {
   constructor({ provider, now = () => Date.now(), roundSeconds = ROUND_SECONDS,
     orderIntervalSeconds, orderIntervalMinSeconds = 8, orderIntervalMaxSeconds = 35,
-    maxActiveOrders = 3, random = Math.random, authoritativeEngine } = {}) {
+    orderPatienceSeconds, maxActiveOrders = 3, random = Math.random, authoritativeEngine } = {}) {
     this.now = now;
     this.provider = provider || new LocalFloorplanProvider({ now });
-    this.roundSeconds = roundSeconds;
+    this.roundSeconds = clampInteger(roundSeconds, 1, 3600, ROUND_SECONDS);
     const fixedInterval = Number(orderIntervalSeconds);
-    this.orderIntervalMinSeconds = Math.max(1, Math.min(120, Number.isFinite(fixedInterval) ? fixedInterval : Number(orderIntervalMinSeconds)));
-    this.orderIntervalMaxSeconds = Math.max(this.orderIntervalMinSeconds, Math.min(180, Number.isFinite(fixedInterval) ? fixedInterval : Number(orderIntervalMaxSeconds)));
-    this.maxActiveOrders = Math.max(1, Math.min(6, Number(maxActiveOrders) || 3));
+    this.orderIntervalMinSeconds = clampInteger(Number.isFinite(fixedInterval) ? fixedInterval : orderIntervalMinSeconds, 1, 120, 8);
+    this.orderIntervalMaxSeconds = clampInteger(Number.isFinite(fixedInterval) ? fixedInterval : orderIntervalMaxSeconds, this.orderIntervalMinSeconds, 180, 35);
+    this.orderPatienceSeconds = Number.isFinite(Number(orderPatienceSeconds)) ? clampInteger(orderPatienceSeconds, 3, 600, DEFAULT_ORDER_INTERVAL_SECONDS) : null;
+    this.maxActiveOrders = clampInteger(maxActiveOrders, 1, 6, 3);
     this.random = typeof random === "function" ? random : Math.random;
     this.authoritativeEngine = authoritativeEngine || null;
     this._nextOrderAt = null;
     this._orderSequence = 0;
-    this._state = createInitialProjectionState(now());
-    this._state.timer.totalSeconds = roundSeconds;
-    this._state.timer.remainingSeconds = roundSeconds;
-    this._state.clock = { ...this._state.timer };
-    this._state.order = makeOrder("order-1", BURGER_RECIPES[0], now(), this._patienceSeconds());
-    this._state.orders[0] = clone(this._state.order);
-    this._orderSequence = 1;
-    this._nextOrderAt = null;
+    this._state = createInitialProjectionState(now(), this.roundSeconds);
     this._badges = new Map();
     this._seenEvents = new Set();
     this._listeners = new Set();
     this._roundStartedAt = null;
+    this._roundDurationSeconds = this.roundSeconds;
+    this._pendingTransfer = null;
+    this._historySequence = 0;
   }
 
   subscribe(listener) {
@@ -126,18 +202,35 @@ export class ServerProjection {
 
   _touch(now = this.now()) { this._publish(now); }
 
+  _record(type, message, now = this.now(), details = {}) {
+    this._state.eventHistory.push({
+      id: `event-${++this._historySequence}`,
+      type,
+      message,
+      at: iso(now),
+      ...clone(details),
+    });
+    while (this._state.eventHistory.length > HISTORY_LIMIT) this._state.eventHistory.shift();
+  }
+
   applyAuthoritativeSnapshot(snapshot, now = this.now()) {
     if (!snapshot || typeof snapshot !== "object") throw new Error("an authoritative snapshot is required");
     this._state = clone(snapshot);
     this._state.setup ??= { phase: "idle", message: "", updatedAt: iso(now) };
     this._state.setup.updatedAt = iso(now);
+    this._state.eventHistory ??= [];
     this._emit(now);
     return this.snapshot(now);
   }
 
+  _randomSeconds(minimum = this.orderIntervalMinSeconds, maximum = this.orderIntervalMaxSeconds) {
+    const span = maximum - minimum;
+    const value = Math.max(0, Math.min(0.999999, Number(this.random()) || 0));
+    return minimum + Math.floor(value * (span + 1));
+  }
+
   _patienceSeconds() {
-    const span = this.orderIntervalMaxSeconds - this.orderIntervalMinSeconds;
-    return this.orderIntervalMinSeconds + Math.floor(Math.max(0, Math.min(0.999999, Number(this.random()) || 0)) * (span + 1));
+    return this.orderPatienceSeconds || this._randomSeconds();
   }
 
   _activeOrders() { return this._state.orders.filter((order) => order.status === "active"); }
@@ -145,7 +238,7 @@ export class ServerProjection {
   _syncActiveOrder() {
     const active = this._activeOrders();
     this._state.activeOrders = clone(active);
-    this._state.order = active[0] || this._state.order;
+    this._state.order = active[0] ? clone(active[0]) : null;
   }
 
   _issueOrder(now = this.now()) {
@@ -155,50 +248,193 @@ export class ServerProjection {
     this._state.orders.push(order);
     while (this._state.orders.length > 32) this._state.orders.shift();
     this._syncActiveOrder();
+    this._record("order-created", `${order.recipeName} ordered`, now, { orderId: order.id, recipe: order.recipe });
     return order;
+  }
+
+  _syncMoney(lastChange = 0) {
+    const gold = this._state.gold.total;
+    const tips = this._state.tips.total;
+    const penalties = this._state.penalties.total;
+    this._state.money = { gold, tips, penalties, net: gold + tips - penalties, lastChange };
+    this._state.score.value = this._state.money.net;
+  }
+
+  _applyPenalty(amount, reason, now, order = null) {
+    const penalty = Math.max(0, Math.floor(amount));
+    this._state.penalties.total += penalty;
+    this._state.penalties.lastChange = -penalty;
+    this._state.gold.lastChange = 0;
+    this._state.tips.lastChange = 0;
+    if (order) order.penalty = (order.penalty || 0) + penalty;
+    this._syncMoney(-penalty);
+    this._record("penalty", `${reason}: -${penalty}`, now, { amount: -penalty, orderId: order?.id || null, net: this._state.money.net });
+  }
+
+  _syncPlayer(player) {
+    if (player.hasPlate) {
+      player.plate = [...new Set(player.plate.map(plateComponent).filter(Boolean))];
+      player.hand = null;
+      player.heldItem = "PLATE";
+      player.inventory = [...player.plate];
+    } else {
+      player.plate = [];
+      player.heldItem = player.hand || "EMPTY";
+      player.inventory = player.hand ? [player.hand] : [];
+    }
+  }
+
+  _clearPlayer(player) {
+    player.hand = null;
+    player.hasPlate = false;
+    player.plate = [];
+    player.processing = null;
+    player.submissionReadyUntil = null;
+    player.actionState = "idle";
+    this._syncPlayer(player);
+  }
+
+  _clearStations() {
+    this._state.stations = makeStations();
+  }
+
+  _updateChopping(now) {
+    let changed = false;
+    const station = this._state.stations.find((value) => value.id === "cutting-board");
+    const chopping = this._state.players.find((player) => player.processing?.type === "chop");
+    if (!chopping) {
+      if (station.status !== "idle") {
+        Object.assign(station, { status: "idle", progress: 0, remainingSeconds: 0, item: null });
+        changed = true;
+      }
+      return changed;
+    }
+    const deadline = Date.parse(chopping.processing.deadlineAt);
+    const started = Date.parse(chopping.processing.startedAt);
+    const remainingMs = Math.max(0, deadline - now);
+    const progress = Math.max(0, Math.min(1, (now - started) / (CHOP_SECONDS * 1000)));
+    const remainingSeconds = Math.ceil(remainingMs / 1000);
+    if (station.status !== "chopping" || station.progress !== progress || station.remainingSeconds !== remainingSeconds) changed = true;
+    Object.assign(station, { status: "chopping", progress, remainingSeconds, item: chopping.hand });
+    if (now >= deadline) {
+      const result = RAW_TO_CHOPPED[chopping.hand];
+      if (result) chopping.hand = result;
+      chopping.processing = null;
+      chopping.actionState = result ? `holding ${result.toLowerCase()}` : "cut failed";
+      this._syncPlayer(chopping);
+      Object.assign(station, { status: "idle", progress: 0, remainingSeconds: 0, item: null });
+      this._record("chop-complete", `${chopping.label} finished chopping`, now, { playerId: chopping.id, item: result || null });
+      changed = true;
+    }
+    return changed;
+  }
+
+  _updateStoves(now) {
+    let changed = false;
+    for (const station of this._state.stations.filter((value) => value.kind === "stove" && value.startedAt)) {
+      const started = Date.parse(station.startedAt);
+      const elapsed = Math.max(0, (now - started) / 1000);
+      let status;
+      let item;
+      let progress;
+      let remainingSeconds;
+      if (elapsed < COOK_SECONDS) {
+        status = "cooking";
+        item = "CHOPPED_MEAT";
+        progress = Math.max(0, Math.min(1, elapsed / COOK_SECONDS));
+        remainingSeconds = Math.ceil(COOK_SECONDS - elapsed);
+      } else if (elapsed < COOK_SECONDS + DONE_SECONDS) {
+        status = "done";
+        item = "COOKED_MEAT";
+        progress = 1;
+        remainingSeconds = Math.ceil(COOK_SECONDS + DONE_SECONDS - elapsed);
+      } else if (elapsed < COOK_SECONDS + DONE_SECONDS + WARNING_SECONDS) {
+        status = "warning";
+        item = "COOKED_MEAT";
+        progress = 1;
+        remainingSeconds = Math.ceil(COOK_SECONDS + DONE_SECONDS + WARNING_SECONDS - elapsed);
+      } else {
+        status = "burnt";
+        item = "BURNT_MEAT";
+        progress = 1;
+        remainingSeconds = 0;
+      }
+      if (station.status !== status) {
+        this._record("stove-state", `${station.label} is ${status}`, now, { stationId: station.id, status });
+        changed = true;
+      }
+      if (station.item !== item || station.progress !== progress || station.remainingSeconds !== remainingSeconds) changed = true;
+      Object.assign(station, { status, item, progress, remainingSeconds });
+    }
+    return changed;
   }
 
   _tick(now = this.now()) {
     if (this._state.timer.status !== "running" || this._roundStartedAt == null) return false;
-    const remainingRound = Math.max(0, this.roundSeconds - Math.floor((now - this._roundStartedAt) / 1000));
+    const remainingRound = Math.max(0, this._roundDurationSeconds - Math.floor((now - this._roundStartedAt) / 1000));
     let changed = remainingRound !== this._state.timer.remainingSeconds;
     this._state.timer.remainingSeconds = remainingRound;
     this._state.clock.remainingSeconds = remainingRound;
-    for (const order of this._activeOrders()) {
-      const remaining = Math.max(0, Math.ceil((Date.parse(order.deadlineAt) - now) / 1000));
-      const segment = Math.max(0, Math.min(3, Math.ceil((remaining / order.totalSeconds) * 3)));
-      if (remaining !== order.remainingSeconds || segment !== order.patience.filledSegments) changed = true;
-      order.remainingSeconds = remaining;
-      order.patience.remainingSeconds = remaining;
-      order.patience.filledSegments = segment;
-      if (remaining === 0) {
-        order.status = "expired";
+    changed = this._updateChopping(now) || changed;
+    changed = this._updateStoves(now) || changed;
+
+    for (const player of this._state.players) {
+      if (player.submissionReadyUntil && now > Date.parse(player.submissionReadyUntil)) {
+        player.submissionReadyUntil = null;
+        if (player.actionState === "ready to submit") player.actionState = "idle";
         changed = true;
       }
     }
-    const active = this._activeOrders();
-    if (this._nextOrderAt == null) this._nextOrderAt = now + this._patienceSeconds() * 1000;
-    if (remainingRound > 0 && active.length === 0) {
-      this._issueOrder(now);
-      this._nextOrderAt = now + this._patienceSeconds() * 1000;
-      changed = true;
-    } else if (remainingRound > 0 && now >= this._nextOrderAt && active.length < this.maxActiveOrders) {
-      this._issueOrder(now);
-      this._nextOrderAt = now + this._patienceSeconds() * 1000;
-      changed = true;
-    } else if (remainingRound > 0 && now >= this._nextOrderAt) {
-      this._nextOrderAt = now + this._patienceSeconds() * 1000;
-    }
-    this._syncActiveOrder();
+
     if (remainingRound === 0) {
-      for (const order of this._activeOrders()) order.status = "expired";
+      for (const order of this._activeOrders()) {
+        order.status = "cancelled";
+        order.remainingSeconds = 0;
+        order.patienceState = 0;
+        Object.assign(order.patience, { remainingSeconds: 0, filledSegments: 0, state: 0 });
+      }
+      this._syncActiveOrder();
+      this._roundStartedAt = null;
       this._state.timer.status = "ended";
       this._state.clock.status = "ended";
       this._state.setup.phase = "ended";
-      this._state.setup.message = "Round ended. Reset to host another burger level.";
-      this._roundStartedAt = null;
+      this._state.setup.message = "Round timer reached zero. Round state was cleared; reset or start to play again.";
+      this._state.burgerLevel.status = "ended";
+      for (const player of this._state.players) this._clearPlayer(player);
+      this._clearStations();
+      this._record("round-ended", "Round timer reached zero", now);
       changed = true;
+    } else {
+      for (const order of this._activeOrders()) {
+        const remaining = Math.max(0, Math.ceil((Date.parse(order.deadlineAt) - now) / 1000));
+        const tier = patienceTier(remaining, order.totalSeconds);
+        if (remaining !== order.remainingSeconds || tier !== order.patience.filledSegments) changed = true;
+        order.remainingSeconds = remaining;
+        order.patienceState = tier;
+        Object.assign(order.patience, { remainingSeconds: remaining, filledSegments: tier, state: tier });
+        if (remaining === 0) {
+          order.status = "expired";
+          this._applyPenalty(EXPIRED_ORDER_PENALTY, `${order.recipeName} expired`, now, order);
+          this._record("order-expired", `${order.recipeName} expired`, now, { orderId: order.id, recipe: order.recipe });
+          changed = true;
+        }
+      }
+      const active = this._activeOrders();
+      if (this._nextOrderAt == null) this._nextOrderAt = now + this._randomSeconds() * 1000;
+      if (active.length === 0) {
+        this._issueOrder(now);
+        this._nextOrderAt = now + this._randomSeconds() * 1000;
+        changed = true;
+      } else if (now >= this._nextOrderAt) {
+        if (active.length < this.maxActiveOrders) {
+          this._issueOrder(now);
+          changed = true;
+        }
+        this._nextOrderAt = now + this._randomSeconds() * 1000;
+      }
+      this._syncActiveOrder();
     }
+
     if (changed) {
       this._state.version += 1;
       this._emit(now);
@@ -215,6 +451,12 @@ export class ServerProjection {
     const normalized = String(mac || "").toUpperCase();
     const player = this._state.players.find((candidate) => candidate.id === playerId || candidate.id === `p${playerId}` || String(candidate.id) === String(playerId));
     if (!/^([0-9A-F]{2}:){5}[0-9A-F]{2}$/.test(normalized) || !player) return false;
+    const previous = this._badges.get(normalized);
+    if (previous && previous !== player.id) {
+      const previousPlayer = this._state.players.find((candidate) => candidate.id === previous);
+      if (previousPlayer) previousPlayer.badgeMac = null;
+    }
+    if (player.badgeMac && player.badgeMac !== normalized) this._badges.delete(player.badgeMac);
     this._badges.set(normalized, player.id);
     player.badgeMac = normalized;
     return true;
@@ -257,6 +499,74 @@ export class ServerProjection {
     return this.snapshot(now);
   }
 
+  _resetEconomy() {
+    this._state.gold = { total: 0, earned: 0, lastChange: 0 };
+    this._state.tips = { total: 0, earned: 0, lastChange: 0 };
+    this._state.penalties = { total: 0, lastChange: 0 };
+    this._state.money = makeMoney();
+    this._state.score = { value: 0, delivered: 0 };
+  }
+
+  _startRound(now, { durationSeconds = this.roundSeconds, allowUnapproved = false } = {}) {
+    if (this._state.floorPlan.accepted !== true) {
+      if (!allowUnapproved) throw new Error("approve the floorplan before starting the game");
+      this._state.floorPlan.accepted = true;
+      this._state.floorPlan.reviewMessage = "Local simulator fixture accepted by the host START record.";
+    }
+    this._roundDurationSeconds = clampInteger(durationSeconds, 1, 3600, this.roundSeconds);
+    this._roundStartedAt = now;
+    this._state.setup.phase = "running";
+    this._state.setup.message = "Burger game running. The server owns orders, timers, stations, validation, and money.";
+    this._state.timer = { status: "running", remainingSeconds: this._roundDurationSeconds, totalSeconds: this._roundDurationSeconds };
+    this._state.clock = { ...this._state.timer };
+    this._state.burgerLevel.status = "in-play";
+    this._state.orders = [];
+    this._state.activeOrders = [];
+    this._state.order = null;
+    this._state.submissions = [];
+    this._state.eventHistory = [];
+    this._historySequence = 0;
+    this._state.serving.lastEvent = null;
+    this._resetEconomy();
+    this._clearStations();
+    for (const player of this._state.players) this._clearPlayer(player);
+    this._orderSequence = 0;
+    this._nextOrderAt = null;
+    this._pendingTransfer = null;
+    this._seenEvents.clear();
+    this._record("round-started", `Round started for ${this._roundDurationSeconds} seconds`, now, { durationSeconds: this._roundDurationSeconds, playerCount: 3 });
+    this._issueOrder(now);
+    this._nextOrderAt = now + this._randomSeconds() * 1000;
+    this._publish(now);
+    return this.snapshot(now);
+  }
+
+  resetGame(now = this.now()) {
+    this._roundStartedAt = null;
+    this._roundDurationSeconds = this.roundSeconds;
+    for (const player of this._state.players) this._clearPlayer(player);
+    this._clearStations();
+    this._state.orders = [];
+    this._state.activeOrders = [];
+    this._state.order = null;
+    this._state.submissions = [];
+    this._state.serving.lastEvent = null;
+    this._resetEconomy();
+    this._state.timer = { status: "ready", remainingSeconds: this.roundSeconds, totalSeconds: this.roundSeconds };
+    this._state.clock = { ...this._state.timer };
+    this._state.setup.phase = this._state.floorPlan.accepted ? "burger-placement" : "idle";
+    this._state.setup.message = "Round reset. Send a host START record when the three fixed players are ready.";
+    this._state.burgerLevel.status = this._state.floorPlan.accepted ? "placement-ready" : "not-generated";
+    this._state.eventHistory = [];
+    this._historySequence = 0;
+    this._record("round-reset", "Round state reset", now);
+    this._nextOrderAt = null;
+    this._pendingTransfer = null;
+    this._seenEvents.clear();
+    this._publish(now);
+    return this.snapshot(now);
+  }
+
   command(type, payload = {}, now = this.now()) {
     switch (String(type || payload?.type || "")) {
       case "START_HOST":
@@ -275,139 +585,384 @@ export class ServerProjection {
       case "ACCEPT_LAYOUT":
         return this.approveFloorplan(true, now);
       case "START_GAME":
-        if (this._state.floorPlan.accepted !== true) throw new Error("approve the floorplan before starting the game");
-        this._roundStartedAt = now;
-        this._state.setup.phase = "running";
-        this._state.setup.message = "Burger game running. Orders, gold, tips, timer, and submissions are server projections.";
-        this._state.timer = { status: "running", remainingSeconds: this.roundSeconds, totalSeconds: this.roundSeconds };
-        this._state.clock = { ...this._state.timer };
-        this._orderSequence = 1;
-        this._state.order = makeOrder("order-1", BURGER_RECIPES[0], now, this._patienceSeconds());
-        this._state.orders = [clone(this._state.order)];
-        this._state.activeOrders = [clone(this._state.order)];
-        this._nextOrderAt = now + this._patienceSeconds() * 1000;
-        this._state.burgerLevel.status = "in-play";
-        this._state.submissions = [];
-        this._state.serving.lastEvent = null;
-        this._state.score = { value: 0, delivered: 0 };
-        for (const player of this._state.players) {
-          player.inventory = [];
-          player.heldItem = "EMPTY";
-          player.actionState = "idle";
-        }
-        this._touch(now);
-        return this.snapshot(now);
+        return this._startRound(now, { durationSeconds: payload.durationSeconds || this.roundSeconds, allowUnapproved: payload.allowUnapproved === true });
       case "END_GAME":
         this.endGame(now);
         return this.snapshot(now);
       case "RESET_GAME":
-        this._orderSequence = 1;
-        this._state = createInitialProjectionState(now);
-        this._state.timer.totalSeconds = this.roundSeconds;
-        this._state.timer.remainingSeconds = this.roundSeconds;
-        this._state.clock = { ...this._state.timer };
-        this._state.order = makeOrder("order-1", BURGER_RECIPES[0], now, this._patienceSeconds());
-        this._state.orders = [clone(this._state.order)];
-        this._state.activeOrders = [clone(this._state.order)];
-        this._roundStartedAt = null;
-        this._nextOrderAt = null;
-        this._seenEvents.clear();
-        this._touch(now);
-        return this.snapshot(now);
+        return this.resetGame(now);
       default:
         throw new Error(`unsupported command: ${type}`);
     }
   }
 
+  ingestHostControl(record, now = this.now()) {
+    if (record.control === "START") {
+      const state = this._startRound(now, { durationSeconds: record.durationSeconds || this.roundSeconds, allowUnapproved: true });
+      return { accepted: true, detail: "host started round", stateVersion: state.version };
+    }
+    if (record.control === "END") {
+      this.endGame(now);
+      return { accepted: true, detail: "host ended round", stateVersion: this._state.version };
+    }
+    if (record.control === "RESET") {
+      const state = this.resetGame(now);
+      return { accepted: true, detail: "host reset round", stateVersion: state.version };
+    }
+    return { accepted: false, detail: "unsupported host control" };
+  }
+
   endGame(now = this.now()) {
+    for (const order of this._activeOrders()) {
+      order.status = "cancelled";
+      order.remainingSeconds = 0;
+      order.patienceState = 0;
+      Object.assign(order.patience, { remainingSeconds: 0, filledSegments: 0, state: 0 });
+    }
+    this._syncActiveOrder();
     this._roundStartedAt = null;
     this._state.setup.phase = "ended";
-    this._state.setup.message = "Game ended. Reset to host another burger level.";
+    this._state.setup.message = "Game ended by the host. Round state was cleared.";
     this._state.timer.status = "ended";
-    this._state.clock.status = "ended";
-    for (const player of this._state.players) {
-      player.inventory = [];
-      player.heldItem = "EMPTY";
-      player.actionState = "idle";
-    }
-    this._touch(now);
+    this._state.timer.remainingSeconds = 0;
+    this._state.clock = { ...this._state.timer };
+    this._state.burgerLevel.status = "ended";
+    for (const player of this._state.players) this._clearPlayer(player);
+    this._clearStations();
+    this._record("round-ended", "Host ended the round", now);
+    this._publish(now);
+  }
+
+  _player(playerId) {
+    return this._state.players.find((candidate) => candidate.id === playerId || candidate.id === `p${playerId}`) || null;
   }
 
   _playerForIntent(intent) {
     if (intent.type === "H") return null;
     const mac = String(intent.senderMac || "").toUpperCase();
     const known = this._badges.get(mac);
-    if (known) return this._state.players.find((player) => player.id === known) || null;
+    if (known) return this._player(known);
     const assigned = this.assignNextBadge(mac);
-    return assigned ? this._state.players.find((player) => player.id === assigned) : null;
+    return assigned ? this._player(assigned) : null;
   }
 
-  submit(player, value, now) {
+  _setPlate(player, summary) {
+    if (summary === "NEW") {
+      const component = plateComponent(player.hand);
+      if (player.hand && !component) return { accepted: false, detail: "held item cannot be plated" };
+      player.hasPlate = true;
+      player.plate = component ? [component] : [];
+      player.hand = null;
+    } else {
+      const items = itemsFromPlateSummary(summary);
+      if (!items) return { accepted: false, detail: "invalid plate summary" };
+      player.hasPlate = true;
+      player.plate = items;
+      player.hand = null;
+    }
+    player.processing = null;
+    player.actionState = `holding plate ${plateSummary(player.plate)}`;
+    this._syncPlayer(player);
+    return { accepted: true, detail: `${player.id} plate is ${plateSummary(player.plate)}` };
+  }
+
+  _pickup(player, item) {
+    const normalized = String(item || "").toUpperCase();
+    if (player.processing) return { accepted: false, detail: "player is busy chopping" };
+    if (player.hasPlate) {
+      const component = plateComponent(normalized);
+      if (!component || !PLATE_ITEMS.has(normalized)) return { accepted: false, detail: "raw or non-platable item cannot be added to a plate" };
+      if (player.plate.includes(component)) return { accepted: false, detail: "plate cannot contain duplicate items" };
+      player.plate.push(component);
+      player.actionState = `added ${component.toLowerCase()} to plate`;
+      this._syncPlayer(player);
+      return { accepted: true, detail: `${component} added to ${player.id} plate` };
+    }
+    if (player.hand) return { accepted: false, detail: "player hand is not empty" };
+    player.hand = normalized;
+    player.actionState = `holding ${normalized.toLowerCase()}`;
+    this._syncPlayer(player);
+    return { accepted: true, detail: `${player.id} picked up ${normalized}` };
+  }
+
+  _chop(player, phase, item, now) {
+    const station = this._state.stations.find((value) => value.id === "cutting-board");
+    if (phase === "START") {
+      if (!RAW_TO_CHOPPED[player.hand]) return { accepted: false, detail: "raw meat, lettuce, or cheese is required to chop" };
+      if (this._state.players.some((candidate) => candidate !== player && candidate.processing?.type === "chop")) return { accepted: false, detail: "cutting board is busy" };
+      player.processing = { type: "chop", item: player.hand, startedAt: iso(now), deadlineAt: iso(now + CHOP_SECONDS * 1000) };
+      player.actionState = "chopping";
+      Object.assign(station, { status: "chopping", progress: 0, remainingSeconds: CHOP_SECONDS, item: player.hand });
+      return { accepted: true, detail: `${player.id} started chopping` };
+    }
+    if (phase === "FAIL") {
+      if (!player.processing || player.processing.type !== "chop") return { accepted: false, detail: "player is not chopping" };
+      player.processing = null;
+      player.actionState = `holding ${String(player.hand).toLowerCase()}`;
+      Object.assign(station, { status: "idle", progress: 0, remainingSeconds: 0, item: null });
+      return { accepted: true, detail: `${player.id} chop failed and progress was lost` };
+    }
+    if (phase === "DONE") {
+      const result = RAW_TO_CHOPPED[player.hand] || SHORT_ITEMS[item] || item;
+      if (!result || !["CHOPPED_MEAT", "LETTUCE", "CHEESE"].includes(result)) return { accepted: false, detail: "no choppable item is active" };
+      player.hand = result;
+      player.processing = null;
+      player.actionState = `holding ${result.toLowerCase()}`;
+      this._syncPlayer(player);
+      Object.assign(station, { status: "idle", progress: 0, remainingSeconds: 0, item: null });
+      return { accepted: true, detail: `${player.id} finished chopping ${result}` };
+    }
+    return { accepted: false, detail: "unknown chop phase" };
+  }
+
+  _stove(player, side, operation, now) {
+    const station = this._state.stations.find((value) => value.id === `stove-${String(side).toLowerCase()}`);
+    if (!station) return { accepted: false, detail: "unknown stove side" };
+    this._updateStoves(now);
+    if (operation === "CHECK" || operation === "STATUS") {
+      player.actionState = `checked ${station.label.toLowerCase()}: ${station.status}`;
+      return { accepted: true, detail: `${station.label} is ${station.status}` };
+    }
+    if (operation === "PLACE") {
+      if (station.status !== "idle" || station.item) return { accepted: false, detail: `${station.label} is not empty` };
+      if (player.hand !== "CHOPPED_MEAT" && player.hand !== "MEAT") return { accepted: false, detail: "chopped raw meat is required" };
+      player.hand = null;
+      player.actionState = `cooking on ${station.label.toLowerCase()}`;
+      this._syncPlayer(player);
+      Object.assign(station, {
+        status: "cooking", item: "CHOPPED_MEAT", progress: 0, remainingSeconds: COOK_SECONDS,
+        startedAt: iso(now), doneAt: iso(now + COOK_SECONDS * 1000),
+        warningAt: iso(now + (COOK_SECONDS + DONE_SECONDS) * 1000),
+        burntAt: iso(now + (COOK_SECONDS + DONE_SECONDS + WARNING_SECONDS) * 1000),
+      });
+      return { accepted: true, detail: `${player.id} placed meat on ${station.label}` };
+    }
+    if (operation === "TAKE") {
+      if (!["done", "warning", "burnt"].includes(station.status)) return { accepted: false, detail: `${station.label} food is not ready` };
+      const taken = station.status === "burnt" ? "BURNT_MEAT" : "COOKED_MEAT";
+      if (player.hasPlate) {
+        if (taken === "BURNT_MEAT") return { accepted: false, detail: "burnt meat cannot be plated" };
+        if (player.plate.includes("MEAT")) return { accepted: false, detail: "plate already contains meat" };
+        player.plate.push("MEAT");
+      } else if (player.hand) {
+        return { accepted: false, detail: "player hand is not empty" };
+      } else {
+        player.hand = taken;
+      }
+      player.actionState = `took ${taken.toLowerCase()} from ${station.label.toLowerCase()}`;
+      this._syncPlayer(player);
+      Object.assign(station, { status: "idle", progress: 0, remainingSeconds: 0, item: null, startedAt: null, doneAt: null, warningAt: null, burntAt: null });
+      return { accepted: true, detail: `${player.id} took ${taken} from ${station.label}` };
+    }
+    return { accepted: false, detail: "unknown stove operation" };
+  }
+
+  _transfer(first, second) {
+    if (!first || !second || first === second) return { accepted: false, detail: "transfer requires two different players" };
+    if (first.hasPlate && second.hasPlate) {
+      [first.plate, second.plate] = [second.plate, first.plate];
+    } else if (!first.hasPlate && !second.hasPlate) {
+      [first.hand, second.hand] = [second.hand, first.hand];
+    } else {
+      const platePlayer = first.hasPlate ? first : second;
+      const handPlayer = first.hasPlate ? second : first;
+      const component = plateComponent(handPlayer.hand);
+      if (component && PLATE_ITEMS.has(handPlayer.hand) && !platePlayer.plate.includes(component)) {
+        platePlayer.plate.push(component);
+        handPlayer.hand = null;
+      } else {
+        const oldPlate = [...platePlayer.plate];
+        const oldHand = handPlayer.hand;
+        platePlayer.hasPlate = false;
+        platePlayer.plate = [];
+        platePlayer.hand = oldHand;
+        handPlayer.hasPlate = true;
+        handPlayer.plate = oldPlate;
+        handPlayer.hand = null;
+      }
+    }
+    first.actionState = `transferred with ${second.label}`;
+    second.actionState = `transferred with ${first.label}`;
+    this._syncPlayer(first);
+    this._syncPlayer(second);
+    return { accepted: true, detail: `${first.id} and ${second.id} transferred held state` };
+  }
+
+  _applyPlayerAction(player, action, now) {
+    switch (action.action) {
+      case "PICKUP": return this._pickup(player, action.item);
+      case "PLATE": return this._setPlate(player, action.plate);
+      case "CHOP": return this._chop(player, action.phase, action.item, now);
+      case "STOVE": return this._stove(player, action.side, action.operation, now);
+      case "DROP":
+        this._clearPlayer(player);
+        player.actionState = "dropped held state";
+        return { accepted: true, detail: `${player.id} dropped held state` };
+      case "TRANSFER": return this._transfer(player, this._player(action.targetPlayerId));
+      case "TRANSFER_READY": {
+        if (this._pendingTransfer && this._pendingTransfer.playerId !== player.id && now - this._pendingTransfer.at <= 800) {
+          const other = this._player(this._pendingTransfer.playerId);
+          this._pendingTransfer = null;
+          return this._transfer(other, player);
+        }
+        this._pendingTransfer = { playerId: player.id, at: now };
+        player.actionState = "ready to transfer";
+        return { accepted: true, detail: `${player.id} is ready to transfer` };
+      }
+      case "READY":
+        player.submissionReadyUntil = iso(now + 500);
+        player.actionState = "ready to submit";
+        return { accepted: true, detail: `${player.id} ready for submission` };
+      case "AT_STATION":
+        player.actionState = `at ${String(action.station).toLowerCase()}`;
+        return { accepted: true, detail: `${player.id} at ${action.station}` };
+      default: return { accepted: false, detail: "unsupported player action" };
+    }
+  }
+
+  ingestPlayerAction(action, now = this.now()) {
+    this._tick(now);
+    const player = this._player(action.playerId);
+    if (!player) return { accepted: false, detail: "unknown fixed player" };
+    if (this._state.timer.status !== "running") {
+      this._record("ignored-action", `${player.id} action ignored while round is not running`, now, { playerId: player.id, action: action.action });
+      this._publish(now);
+      return { accepted: false, ignored: true, detail: "player action ignored before game start", stateVersion: this._state.version };
+    }
+    const result = this._applyPlayerAction(player, action, now);
+    this._record(result.accepted ? "player-action" : "rejected-action", result.detail, now, { playerId: player.id, action: action.action });
+    this._state.health.gateway = { ...this._state.health.gateway, status: "healthy", lastSeenAt: iso(now), detail: "Host badge / serial diagnostic online" };
+    this._publish(now);
+    return { ...result, stateVersion: this._state.version };
+  }
+
+  submit(player, value, now = this.now()) {
     if (this.authoritativeEngine?.submit) {
       const result = this.authoritativeEngine.submit({ playerId: player?.id || null, value, now });
       if (result?.state) this.applyAuthoritativeSnapshot(result.state, now);
       return result?.submission || result;
     }
+    this._tick(now);
     const raw = String(value || "").toUpperCase();
-    const active = this._activeOrders();
-    const current = active[0] || null;
     const claimed = raw.replace(/^SUBMIT[:=]/, "").replace(/^RECIPE[:=]/, "").split(/[|,;]/)[0];
+    const summaryItems = itemsFromPlateSummary(claimed);
+    const claimedRecipe = RECIPE_BY_ID.get(claimed) || null;
     const compatibilitySuccess = claimed === "SUCCESS" || claimed === "OK";
     const explicitFailure = claimed === "FAILURE" || claimed === "FAIL" || claimed === "WRONG" || claimed === "REJECT";
-    const claimedRecipe = compatibilitySuccess || explicitFailure || !claimed ? null : RECIPE_BY_ID.get(claimed);
-    const target = claimedRecipe ? active.find((order) => order.recipe === claimedRecipe.id) : current;
-    const success = this._state.timer.status === "running" && !explicitFailure && Boolean(target) && (compatibilitySuccess || (claimedRecipe && target.recipe === claimedRecipe.id));
-    const recipe = target ? RECIPE_BY_ID.get(target.recipe) : null;
+    let submittedItems = player?.hasPlate ? [...player.plate] : null;
+    if (!submittedItems || submittedItems.length === 0) submittedItems = summaryItems || (claimedRecipe ? [...claimedRecipe.components] : []);
+    const active = this._activeOrders();
+    const current = active[0] || null;
+    let target = null;
+    if (compatibilitySuccess) target = current;
+    else if (claimedRecipe) target = active.find((order) => order.recipe === claimedRecipe.id) || null;
+    else if (summaryItems) target = active.find((order) => sameComponents(order.components, submittedItems)) || null;
+    const success = this._state.timer.status === "running" && !explicitFailure && Boolean(target)
+      && (compatibilitySuccess || sameComponents(target.components, submittedItems));
+    const recipe = target ? RECIPE_BY_ID.get(target.recipe) : claimedRecipe;
+    const tier = target?.patience?.filledSegments || 0;
     const gold = success ? recipe.gold : 0;
-    const tip = success ? Math.max(1, Math.round(gold * 0.1 + ((target.remainingSeconds / target.totalSeconds) * 5))) : 0;
+    const tipRate = tier === 3 ? 0.2 : tier === 2 ? 0.1 : tier === 1 ? 0.05 : 0;
+    const tip = success ? Math.max(1, Math.round(gold * tipRate)) : 0;
+    const expiredMatch = !target && this._state.orders.find((order) => order.status === "expired" && sameComponents(order.components, submittedItems));
     const event = {
       id: `submission-${this._state.submissions.length + 1}`,
       playerId: player?.id || null,
       status: success ? "success" : "failure",
-      message: success ? "BURGER SERVED" : "WRONG BURGER",
+      message: success ? "BURGER SERVED" : expiredMatch ? "ORDER EXPIRED" : "WRONG BURGER",
       recipe: recipe?.id || claimed || null,
+      submittedPlate: plateSummary(submittedItems),
       expectedRecipe: current?.recipe || null,
       gold,
       tip,
+      penalty: success ? 0 : WRONG_ORDER_PENALTY,
       at: iso(now),
       raw: value,
-      validation: success ? "server recipe and active-order match" : "recipe did not match an active order",
+      validation: success ? "server plate and active-order match" : expiredMatch ? "matching order had already expired" : "plate did not match an active order",
     };
     this._state.submissions.push(event);
+    while (this._state.submissions.length > 32) this._state.submissions.shift();
     this._state.serving.lastEvent = event;
     if (success) {
       target.status = "completed";
       target.remainingSeconds = 0;
-      target.patience.remainingSeconds = 0;
-      target.patience.filledSegments = 0;
+      target.patienceState = 0;
+      Object.assign(target.patience, { remainingSeconds: 0, filledSegments: 0, state: 0 });
       this._state.gold.total += gold;
       this._state.gold.earned += gold;
       this._state.gold.lastChange = gold;
       this._state.tips.total += tip;
       this._state.tips.earned += tip;
       this._state.tips.lastChange = tip;
-      this._state.score.value += gold;
+      this._state.penalties.lastChange = 0;
       this._state.score.delivered += 1;
+      this._syncMoney(gold + tip);
+      this._record("submission-success", `${recipe.name} served for ${gold} gold and ${tip} tip`, now, { submissionId: event.id, playerId: player?.id || null, orderId: target.id });
       this._syncActiveOrder();
-      if (this._activeOrders().length === 0) this._issueOrder(now);
+      if (this._activeOrders().length === 0) {
+        this._issueOrder(now);
+        this._nextOrderAt = now + this._randomSeconds() * 1000;
+      }
     } else {
-      this._state.gold.lastChange = 0;
-      this._state.tips.lastChange = 0;
+      this._applyPenalty(WRONG_ORDER_PENALTY, event.message, now, expiredMatch || current);
+      this._record("submission-failure", event.message, now, { submissionId: event.id, playerId: player?.id || null, submittedPlate: event.submittedPlate });
     }
     if (player) {
-      player.inventory = [];
-      player.heldItem = "EMPTY";
+      player.hand = null;
+      player.hasPlate = false;
+      player.plate = [];
+      player.processing = null;
       player.actionState = success ? "order served" : "submission rejected";
+      this._syncPlayer(player);
     }
     return event;
+  }
+
+  ingestSubmission(record, now = this.now()) {
+    if (this._state.timer.status !== "running") {
+      this._record("ignored-submission", "Submission ignored while round is not running", now, { playerId: record.playerId });
+      this._publish(now);
+      return { accepted: false, ignored: true, detail: "submission ignored before game start", stateVersion: this._state.version };
+    }
+    const submission = this.submit(this._player(record.playerId), record.plate, now);
+    this._publish(now);
+    return { accepted: true, submission, stateVersion: this._state.version };
+  }
+
+  _legacyPlayerEvent(intent, now) {
+    const match = String(intent.value || "").match(/^P([1-3]):(.+)$/);
+    if (!match) return { accepted: false, detail: "invalid fixed-player event" };
+    const playerId = `p${match[1]}`;
+    const player = this._player(playerId);
+    if (player && intent.senderMac) this.registerBadge(intent.senderMac, playerId);
+    const action = match[2];
+    let translated = null;
+    let submission = null;
+    let item;
+    if ((item = action.match(/^PU:([BRMXQLKC])$/))) translated = { playerId, action: "PICKUP", item: SHORT_ITEMS[item[1]] };
+    else if (/^PL:(NEW|(?:B|-)(?:M|-)(?:L|-)(?:C|-))$/.test(action)) translated = { playerId, action: "PLATE", plate: action.slice(3) };
+    else if (action === "CH:S") translated = { playerId, action: "CHOP", phase: "START" };
+    else if (action === "CH:F") translated = { playerId, action: "CHOP", phase: "FAIL" };
+    else if ((item = action.match(/^CH:D:([MLC])$/))) translated = { playerId, action: "CHOP", phase: "DONE", item: item[1] };
+    else if ((item = action.match(/^ST:([LR]):([PTX])$/))) translated = { playerId, action: "STOVE", side: item[1] === "L" ? "LEFT" : "RIGHT", operation: item[2] === "P" ? "PLACE" : "TAKE" };
+    else if ((item = action.match(/^ST:([LR]):C:(EMPTY|COOKING|DONE|WARNING|BURNT)$/))) translated = { playerId, action: "STOVE", side: item[1] === "L" ? "LEFT" : "RIGHT", operation: "STATUS", reportedStatus: item[2] };
+    else if (/^DROP:(?:P(?:B|-)(?:M|-)(?:L|-)(?:C|-)|H[BRMXQLKC]|E----)$/.test(action)) translated = { playerId, action: "DROP" };
+    else if (/^X:(?:P(?:B|-)(?:M|-)(?:L|-)(?:C|-)|H[BRMXQLKC]|E----)$/.test(action)) translated = { playerId, action: "TRANSFER_READY" };
+    else if (action === "READY") translated = { playerId, action: "READY" };
+    else if ((item = action.match(/^SUB:((?:B|-)(?:M|-)(?:L|-)(?:C|-))$/))) submission = { playerId, plate: item[1] };
+    if (submission) return this.ingestSubmission(submission, now);
+    if (!translated) return { accepted: false, detail: "unsupported fixed-player event" };
+    return this.ingestPlayerAction(translated, now);
   }
 
   ingestBadgeEvent(intent, now = this.now()) {
     const sequenceKey = `${String(intent.senderMac || "").toUpperCase()}#${intent.sequence}`;
     if (this._seenEvents.has(sequenceKey)) return { accepted: false, duplicate: true, detail: "duplicate badge sequence ignored" };
-    const isHostControl = intent.type === "H" && (intent.value === "START" || intent.value === "END");
+    const value = String(intent.value || "");
+    const isHostControl = intent.type === "H" && /^(START|END|RESET)$/.test(value);
     if (!isHostControl && this._state.timer.status !== "running") {
       this._state.health.gateway = { ...this._state.health.gateway, status: "healthy", lastSeenAt: iso(now), detail: "Host badge / USB online" };
+      this._record("ignored-action", "Badge event ignored before game start", now, { badgeType: intent.type, value });
       this._touch(now);
       return { accepted: false, duplicate: false, ignored: true, detail: "badge event ignored before game start", stateVersion: this._state.version };
     }
@@ -416,45 +971,33 @@ export class ServerProjection {
       if (result?.state) this.applyAuthoritativeSnapshot(result.state, now);
       return result;
     }
-    const player = this._playerForIntent(intent);
-    const value = String(intent.value || "");
-    let detail = "badge event projected";
-    if (intent.type === "H" && value === "START") {
-      if (this._state.floorPlan.accepted) this.command("START_GAME", {}, now);
-      else this.command("START_HOST", {}, now);
-    } else if (intent.type === "H" && value === "END") {
-      this.endGame(now);
-    } else if (intent.type === "B" && /^SUBMIT[:=]/i.test(value)) {
-      this.submit(player, value, now);
-    } else if (intent.type === "B" && /^TIP[:=]/i.test(value)) {
-      const tip = numeric(value.split(/[:=]/)[1]);
-      this._state.tips.total += tip;
-      this._state.tips.earned += tip;
-      this._state.tips.lastChange = tip;
-    } else if (player && this._state.timer.status === "running") {
-      if (intent.type === "M" && value === "CHOP") {
-        player.actionState = "chopping";
-        detail = `${player.id} chopping`;
-      } else if (intent.type === "N") {
-        if (value.startsWith("STN:")) {
-          player.actionState = `at ${value.slice(4).toLowerCase()}`;
-          detail = `${player.id} at ${value.slice(4)}`;
-        } else {
-          const item = value.replace(/^ING:/, "").replace(/^ITEM:/, "").toUpperCase();
-          if (item) {
-            player.heldItem = item;
-            player.inventory = [item];
-            player.actionState = `holding ${item.toLowerCase()}`;
-            detail = `${player.id} picked up ${item}`;
-          }
-        }
-      }
+
+    let result;
+    if (intent.type === "H" && value === "START") result = this.ingestHostControl({ control: "START", durationSeconds: this.roundSeconds }, now);
+    else if (intent.type === "H" && value === "END") result = this.ingestHostControl({ control: "END" }, now);
+    else if (intent.type === "H" && value === "RESET") result = this.ingestHostControl({ control: "RESET" }, now);
+    else if (intent.type === "E") result = this._legacyPlayerEvent(intent, now);
+    else {
+      const player = this._playerForIntent(intent);
+      if (intent.type === "B" && /^SUBMIT[:=]/i.test(value)) result = this.ingestSubmission({ playerId: player?.id || "p1", plate: value.replace(/^SUBMIT[:=]/i, "") }, now);
+      else if (intent.type === "B" && /^TIP[:=]/i.test(value)) {
+        const tip = Math.max(0, numeric(value.split(/[:=]/)[1]));
+        this._state.tips.total += tip;
+        this._state.tips.earned += tip;
+        this._state.tips.lastChange = tip;
+        this._syncMoney(tip);
+        this._record("legacy-tip", `Legacy upstream tip applied: ${tip}`, now, { playerId: player?.id || null });
+        this._publish(now);
+        result = { accepted: true, detail: "legacy upstream tip projected", stateVersion: this._state.version };
+      } else if (player && intent.type === "M" && value === "CHOP") result = this.ingestPlayerAction({ playerId: player.id, action: "CHOP", phase: "START" }, now);
+      else if (player && intent.type === "N" && value.startsWith("STN:")) result = this.ingestPlayerAction({ playerId: player.id, action: "AT_STATION", station: value.slice(4) }, now);
+      else if (player && intent.type === "N") result = this.ingestPlayerAction({ playerId: player.id, action: "PICKUP", item: value.replace(/^ING:/, "").replace(/^ITEM:/, "").toUpperCase() }, now);
+      else result = { accepted: false, detail: "unsupported legacy badge intent" };
     }
+
     this._seenEvents.add(sequenceKey);
     while (this._seenEvents.size > 512) this._seenEvents.delete(this._seenEvents.values().next().value);
-    this._state.health.gateway = { ...this._state.health.gateway, status: "healthy", lastSeenAt: iso(now), detail: "Host badge / USB online" };
-    this._touch(now);
-    return { accepted: true, duplicate: false, detail, stateVersion: this._state.version };
+    return { duplicate: false, ...result };
   }
 
   ingestGatewayStatus(status, now = this.now()) {
@@ -466,7 +1009,17 @@ export class ServerProjection {
       droppedCount: status.droppedCount,
       detail: status.up ? "Host badge / USB online" : "Gateway reported down",
     };
+    this._record("gateway-status", status.up ? "Gateway is up" : "Gateway is down", now, { packetCount: status.packetCount, droppedCount: status.droppedCount });
     this._touch(now);
     return { accepted: true, detail: status.up ? "gateway healthy" : "gateway reported down", stateVersion: this._state.version };
   }
 }
+
+export const GAME_TIMINGS = Object.freeze({
+  chopSeconds: CHOP_SECONDS,
+  cookSeconds: COOK_SECONDS,
+  doneSeconds: DONE_SECONDS,
+  warningSeconds: WARNING_SECONDS,
+});
+export const MONEY_RULES = Object.freeze({ wrongOrderPenalty: WRONG_ORDER_PENALTY, expiredOrderPenalty: EXPIRED_ORDER_PENALTY });
+export { plateSummary, itemsFromPlateSummary, patienceTier };

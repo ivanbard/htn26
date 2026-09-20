@@ -131,6 +131,89 @@ export class PhotoStore {
 
 function commandType(body) { return typeof body === "string" ? body : body?.type || body?.action; }
 
+export function browserDocument() {
+  return `<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>HTN26 server simulator</title></head>
+<body>
+<h1>HTN26 server simulator</h1>
+<section aria-labelledby="orders-heading">
+  <h2 id="orders-heading">Orders / new orders</h2>
+  <p id="orders-empty">No active orders. Start a round.</p>
+  <ol id="orders"></ol>
+</section>
+<hr>
+<main>
+  <section aria-labelledby="round-heading">
+    <h2 id="round-heading">Round and timer</h2>
+    <p id="round">Loading authoritative state...</p>
+    <p id="status"></p>
+  </section>
+  <section aria-labelledby="serial-heading">
+    <h2 id="serial-heading">Development serial injection</h2>
+    <form id="serial-form">
+      <label for="serial-line">Canonical serial line</label>
+      <input id="serial-line" name="line" size="64" value="HTN26|1|HOST|START|120|3">
+      <button type="submit">Send</button>
+    </form>
+    <button type="button" data-line="HTN26|1|HOST|START|120|3">Start round</button>
+    <button type="button" data-line="HTN26|1|HOST|END">End round</button>
+    <button type="button" data-line="HTN26|1|HOST|RESET">Reset round</button>
+    <pre id="serial-result" aria-live="polite"></pre>
+  </section>
+  <section aria-labelledby="players-heading"><h2 id="players-heading">Players and actions</h2><ul id="players"></ul></section>
+  <section aria-labelledby="stations-heading"><h2 id="stations-heading">Stations and cooking</h2><ul id="stations"></ul></section>
+  <section aria-labelledby="submissions-heading"><h2 id="submissions-heading">Submissions</h2><ol id="submissions"></ol></section>
+  <section aria-labelledby="history-heading"><h2 id="history-heading">Recent event history</h2><ol id="history"></ol></section>
+</main>
+<hr>
+<section aria-labelledby="money-heading">
+  <h2 id="money-heading">Money</h2>
+  <p id="money">Gold: 0 | Tips: 0 | Penalties: 0 | Net money: 0</p>
+</section>
+<p>This page renders server snapshots only. It does not calculate timers, patience, station state, validation, or money.</p>
+<script>
+const element = id => document.getElementById(id);
+const list = (id, rows) => {
+  const target = element(id);
+  target.replaceChildren(...rows.map(text => { const item = document.createElement('li'); item.textContent = text; return item; }));
+};
+const render = state => {
+  const active = state.activeOrders || [];
+  element('orders-empty').hidden = active.length > 0;
+  list('orders', active.map(order => order.recipeName + ' [' + order.components.join(', ') + '] - ' + order.remainingSeconds + 's - patience ' + order.patience.filledSegments + '/3'));
+  element('round').textContent = 'Round: ' + state.timer.status + ' | ' + state.timer.remainingSeconds + '/' + state.timer.totalSeconds + ' seconds';
+  element('status').textContent = state.setup.message;
+  list('players', state.players.map(player => player.label + ': held=' + player.heldItem + ', plate=' + (player.hasPlate ? (player.plate.join(', ') || 'empty') : 'none') + ', action=' + player.actionState));
+  list('stations', state.stations.map(station => station.label + ': ' + station.status + ', item=' + (station.item || 'empty') + ', progress=' + Math.round(station.progress * 100) + '%, remaining=' + station.remainingSeconds + 's'));
+  list('submissions', (state.submissions || []).slice(-10).reverse().map(value => value.status + ': ' + value.message + ' (gold ' + value.gold + ', tip ' + value.tip + ', penalty ' + value.penalty + ')'));
+  list('history', (state.eventHistory || []).slice(-20).reverse().map(value => value.at + ' - ' + value.message));
+  element('money').textContent = 'Gold: ' + state.money.gold + ' | Tips: ' + state.money.tips + ' | Penalties: ' + state.money.penalties + ' | Net money: ' + state.money.net;
+};
+const serial = line => fetch('/api/serial', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ line }) }).then(async response => {
+  const body = await response.json();
+  if (!response.ok) throw new Error(body.error || ('HTTP ' + response.status));
+  return body;
+});
+window.htn26Serial = serial;
+element('serial-form').addEventListener('submit', async event => {
+  event.preventDefault();
+  try { const result = await serial(element('serial-line').value); element('serial-result').textContent = JSON.stringify(result.result, null, 2); render(result.state); }
+  catch (error) { element('serial-result').textContent = error.message; }
+});
+for (const button of document.querySelectorAll('button[data-line]')) button.addEventListener('click', () => {
+  element('serial-line').value = button.dataset.line;
+  element('serial-form').requestSubmit();
+});
+fetch('/api/state').then(response => response.json()).then(render).catch(error => { element('status').textContent = error.message; });
+const events = new EventSource('/api/events');
+events.addEventListener('state', event => render(JSON.parse(event.data)));
+events.onerror = () => { element('status').textContent += ' (live event stream reconnecting)'; };
+</script>
+</body>
+</html>`;
+}
+
 export function createHttpServer({ projection, photoStore, bindOrigin = process.env.HTN26_CORS_ORIGIN || "*" } = {}) {
   if (!projection) throw new Error("projection is required");
   if (!photoStore) throw new Error("photoStore is required");
@@ -160,20 +243,27 @@ export function createHttpServer({ projection, photoStore, bindOrigin = process.
     const url = new URL(req.url || "/", "http://localhost");
     const headers = corsHeaders(bindOrigin);
     if (req.method === "OPTIONS") { res.writeHead(204, headers); res.end(); return; }
+    if (req.method === "GET" && (url.pathname === "/" || url.pathname === "/index.html")) {
+      send(res, 200, browserDocument(), { ...headers, "content-type": "text/html; charset=utf-8" });
+      return;
+    }
     if (!url.pathname.startsWith("/api/")) {
-      send(res, 404, publicError("HTN26 server API paths start with /api/"), headers);
+      send(res, 404, publicError("HTN26 server paths are / and /api/*"), headers);
       return;
     }
     try {
       if (req.method === "GET" && url.pathname === "/api/state") { send(res, 200, projection.snapshot(), headers); return; }
       if (req.method === "GET" && url.pathname === "/api/floorplan") { send(res, 200, projection.snapshot().floorPlan, headers); return; }
       if (req.method === "GET" && url.pathname === "/api/photos") { send(res, 200, { photos: photoStore.list(), count: photoStore.photos.length, reviewReady: photoStore.photos.length >= 3 }, headers); return; }
-      if (req.method === "GET" && url.pathname === "/api/orders") { const state = projection.snapshot(); send(res, 200, { order: state.order, orders: state.orders }, headers); return; }
+      if (req.method === "GET" && url.pathname === "/api/orders") { const state = projection.snapshot(); send(res, 200, { order: state.order, activeOrders: state.activeOrders, orders: state.orders }, headers); return; }
       if (req.method === "GET" && url.pathname === "/api/gold") { send(res, 200, projection.snapshot().gold, headers); return; }
       if (req.method === "GET" && url.pathname === "/api/tips") { send(res, 200, projection.snapshot().tips, headers); return; }
+      if (req.method === "GET" && url.pathname === "/api/money") { send(res, 200, projection.snapshot().money, headers); return; }
       if (req.method === "GET" && url.pathname === "/api/timer") { const state = projection.snapshot(); send(res, 200, state.timer, headers); return; }
       if (req.method === "GET" && url.pathname === "/api/players") { send(res, 200, { players: projection.snapshot().players }, headers); return; }
+      if (req.method === "GET" && url.pathname === "/api/stations") { send(res, 200, { stations: projection.snapshot().stations }, headers); return; }
       if (req.method === "GET" && url.pathname === "/api/submissions") { send(res, 200, { submissions: projection.snapshot().submissions }, headers); return; }
+      if (req.method === "GET" && url.pathname === "/api/history") { send(res, 200, { events: projection.snapshot().eventHistory }, headers); return; }
       if (req.method === "GET" && url.pathname === "/api/health") { send(res, 200, { ok: true, state: projection.snapshot().health }, headers); return; }
       if (req.method === "GET" && url.pathname === "/api/events") {
         res.writeHead(200, { ...headers, "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-cache", connection: "keep-alive" });

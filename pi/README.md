@@ -42,11 +42,12 @@ Owns:
 
 `pi/server/`
 
-The server slice is the locally runnable HTTP/SSE and USB-serial boundary for
-the QNX deployment. It owns protocol adaptation, browser projections, photo
-upload/review plumbing, and deterministic workstation fixtures; it does not
-replace the master engine as the authoritative game-state owner. Its routes,
-serial setup, provider boundary, and QNX validation limits are documented in
+The server slice is the laptop-hosted HTTP/SSE and USB-serial boundary for the
+current launch. It owns protocol adaptation, browser projections, photo
+upload/review plumbing, and the functional local game simulator; it does not
+replace the portable master engine as the future authoritative-engine seam.
+QNX is only a possible future deployment target for this server. Its routes,
+serial setup, provider boundary, and validation limits are documented in
 [`server/README.md`](server/README.md).
 
 ### Worker Pi

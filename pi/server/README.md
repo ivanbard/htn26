@@ -1,186 +1,292 @@
-# Pi server slice (QNX-oriented)
+# HTN26 headless server simulator
 
-This directory contains the first locally runnable HTTP/serial boundary for the
-Raspberry Pi host. It is intentionally a small Node.js 20+ process so the
-protocol and web behavior can be exercised on a workstation before a QNX image
-is available. The existing `pi/master` engine remains the authoritative game
-engine; this process is a web/projection adapter and must consume canonical
-master results when that adapter is connected.
+`pi/server` is the laptop-hosted v1 simulator and HTTP/serial boundary. For the
+current launch it runs on the captain's laptop, not QNX. It provides a complete
+burger round while preserving an adapter seam for a possible future QNX master.
+Browser code only renders snapshots; all clocks, order generation, patience,
+station transitions, validation, and money changes happen in the server
+projection (or in a connected authoritative engine).
 
-## Run locally
+## Run on the captain's laptop (current path)
+
+Install Node.js 20 or newer on the laptop. No package installation is needed.
 
 ```sh
 cd pi/server
 node server.mjs --host 127.0.0.1 --port 8787
-# or make it reachable on the LAN:
+```
+
+Open <http://127.0.0.1:8787/>. The server serves a deliberately plain HTML page
+with no CSS or frontend framework. Active/new orders are first, round and timer
+status follow, player/station/submission/history state is inspectable, and gold,
+tips, penalties, and net money are at the bottom. The page consumes
+`GET /api/state` and `GET /api/events`; it never runs game rules or decrements a
+clock itself.
+
+The page includes a serial-line form and start/end/reset buttons. The startup
+log also prints copy-paste browser-console examples using the canonical
+`HTN26|1|...` protocol, followed by examples for querying timer, orders,
+players, submissions, and money.
+
+To listen on a trusted local network:
+
+```sh
 node server.mjs --host 0.0.0.0 --port 8787
 ```
 
-Useful environment variables:
+Configuration:
 
-- `HTN26_BIND_HOST`, `HTN26_PORT`: bind address and port (CLI flags win).
+- `HTN26_BIND_HOST`, `HTN26_PORT`: bind address and port; CLI flags win.
 - `HTN26_DATA_DIR`: persistent photo/metadata directory.
-- `HTN26_SERIAL_DEVICE`: USB serial device, for example a QNX `/dev/ser*`
-  path. `--serial DEVICE` is equivalent.
-- `HTN26_ROUND_SECONDS`: round length, default 240.
+- `HTN26_SERIAL_DEVICE`: laptop USB serial device, such as Linux
+  `/dev/ttyACM0`; `--serial DEVICE` is equivalent.
+- `HTN26_ROUND_SECONDS`: default round duration, normally 240.
 - `HTN26_ORDER_INTERVAL_MIN_SECONDS` and
-  `HTN26_ORDER_INTERVAL_MAX_SECONDS`: randomized order-spawn interval,
+  `HTN26_ORDER_INTERVAL_MAX_SECONDS`: randomized natural order-spawn interval,
   default 8-35 seconds.
-- `HTN26_MAX_ACTIVE_ORDERS`: active order-card limit, default 3.
-- `OPENAI_API_KEY`: optional server-only image provider credential. It is
-  never included in an API response or browser bundle.
+- `HTN26_ORDER_PATIENCE_SECONDS`: optional fixed order lifetime. If omitted,
+  each order gets a lifetime from the same configured interval range.
+- `HTN26_MAX_ACTIVE_ORDERS`: active-order limit, default 3.
+- `OPENAI_API_KEY`: optional server-only floorplan provider credential; it is
+  never returned to the browser.
 
-The default floorplan provider is a deterministic local fixture for an
-approximately 10 m x 10 m room with exactly four stations: pantry, fridge,
-cutting board, and stove. The upload/review/provider seam is present for the
-next camera/AI slice. When an OpenAI credential is configured, the replaceable
-provider can send uploaded image bytes server-side and falls back visibly to
-the same local fixture on missing/failed AI responses. No cloud service is
-needed to run the first slice.
+## Canonical serial protocol v1
 
-## Physical host-badge serial path
+Every canonical record is printable, pipe-delimited, newline-terminated on a
+physical stream, and starts with `HTN26|1|`. The development endpoint accepts
+one record as `POST /api/serial` with `{ "line": "..." }`. Prefix logging noise
+is tolerated because the parser searches for `HTN26|` in each line.
 
-The expected logical gateway records are the existing badge contract:
+### Host lifecycle
+
+```text
+HTN26|1|HOST|START
+HTN26|1|HOST|START|120|3
+HTN26|1|HOST|END
+HTN26|1|HOST|RESET
+```
+
+`START` clears prior round inventory, plates, stations, orders, submissions,
+economy, and history, then starts a clean round for the three fixed players.
+The duration/count form requires 1-3600 seconds and exactly three players. The
+short form uses `HTN26_ROUND_SECONDS`. For local serial simulation, host START
+accepts the deterministic four-station fixture if a floorplan has not already
+been approved. The HTTP setup command `START_GAME` still requires normal
+floorplan approval.
+
+`END` marks active orders cancelled, sets the timer to ended/zero, and clears
+player and station round state. Natural timeout performs the same cleanup.
+`RESET` returns to ready state with no active order and zeroed money while
+retaining the selected floorplan and badge assignments.
+
+### Gateway status
+
+```text
+HTN26|1|GATEWAY|UP|12|0
+HTN26|1|GATEWAY|DOWN|12|2
+```
+
+The final fields are non-negative forwarded-packet and dropped-packet counts.
+They update health only and do not mutate gameplay.
+
+### Player actions
+
+Player numbers are always `1`, `2`, or `3`.
+
+```text
+HTN26|1|PLAYER|1|PICKUP|BUN
+HTN26|1|PLAYER|1|PICKUP|RAW_MEAT
+HTN26|1|PLAYER|1|PICKUP|RAW_LETTUCE
+HTN26|1|PLAYER|1|PICKUP|RAW_CHEESE
+HTN26|1|PLAYER|1|PLATE|NEW
+HTN26|1|PLAYER|1|PLATE|BM--
+HTN26|1|PLAYER|1|CHOP|START
+HTN26|1|PLAYER|1|CHOP|DONE|CHOPPED_MEAT
+HTN26|1|PLAYER|1|CHOP|FAIL
+HTN26|1|PLAYER|1|STOVE|LEFT|PLACE
+HTN26|1|PLAYER|1|STOVE|LEFT|TAKE
+HTN26|1|PLAYER|1|STOVE|RIGHT|CHECK
+HTN26|1|PLAYER|1|STOVE|RIGHT|STATUS|WARNING
+HTN26|1|PLAYER|1|DROP
+HTN26|1|PLAYER|1|TRANSFER|2
+HTN26|1|PLAYER|1|READY
+```
+
+Accepted item names are `BUN`, `RAW_MEAT`, `CHOPPED_MEAT`, `COOKED_MEAT`,
+`RAW_LETTUCE`, `LETTUCE`, `RAW_CHEESE`, `CHEESE`, and `BURNT_MEAT`.
+`STATUS` accepts `EMPTY`, `COOKING`, `DONE`, `WARNING`, or `BURNT`, but it is a
+reported diagnostic only: it cannot overwrite the server's stove timer.
+`CHECK` likewise reads the authoritative station phase.
+
+A plate summary always has four fixed `BMLC` columns: bun, cooked meat, sliced
+lettuce, and sliced cheese. A dash means absent, so a plain burger is `BM--`
+and a fully topped burger is `BMLC`. `PLATE|NEW` takes an empty plate or moves a
+currently held platable item onto one. Duplicate and raw plate items are
+rejected. `TRANSFER` applies the v1 merge/swap rules to the two authoritative
+player inventories. `READY` remains visible for the 0.5-second shake window.
+
+Player actions received while no round is running are recorded as ignored and
+do not mutate inventory.
+
+### Submission
+
+```text
+HTN26|1|SUBMIT|1|BM--
+HTN26|1|SUBMIT|2|CHEESEBURGER
+```
+
+The last field is normally the submitted `BMLC` plate summary; recipe IDs are
+also accepted for diagnostics. The server matches plate components against an
+active order and consumes the submitting player's plate on both success and
+failure. A successful early order awards recipe gold and a positive tip. A
+wrong or already expired order applies a penalty. The browser cannot provide a
+score or validation result.
+
+## Legacy badge compatibility
+
+The canonical grammar above is preferred for new host integrations and browser
+console diagnostics. The parser continues to accept all current physical-badge
+frames:
 
 ```text
 HTN26|RX|AA:BB:CC:DD:EE:FF|-48|OC1|42|H|START
 HTN26|RX|AA:BB:CC:DD:EE:FF|-48|OC1|43|B|SUBMIT:CHEESEBURGER
 HTN26|RX|AA:BB:CC:DD:EE:FF|-48|OC1|000044|E|P2:PU:R
 HTN26|GW|UP|12|0
+HTN26|GAME|START_GAME|120|3
+HTN26|GAME|GAME_END|3
 ```
 
-The parser searches for `HTN26|` anywhere in a line, accepts human-readable
-prefix noise, validates MAC/RSSI/protocol/sequence/type/payload size, accepts
-the fixed-player `E|P<player>:<action>` transport without rewriting it, and
-handles USB chunks that split a record across reads. The stream adapter is
-shared by fixtures, `/api/serial`, and the physical device. Duplicate
-`MAC + sequence` events are ignored by the projection.
+`RX` validation preserves the 44-byte `OC1` payload bound, MAC/RSSI checks,
+32-bit sequence checks, and `(MAC, sequence)` duplicate suppression. The full
+fixed-player `E|P<player>:<action>` vocabulary is translated:
 
-On QNX, configure the USB serial device using the board's serial driver and
-permissions, then run:
+- `PU:B|R|Q|K` and the cooked/chopped item codes update the hand.
+- `PL:NEW` and `PL:<BMLC>` update the plate.
+- `CH:S`, `CH:F`, and `CH:D:M|L|C` update chopping.
+- `ST:L|R:P|T|X` and `ST:L|R:C:<phase>` update/check the two stoves without
+  letting a reported phase override server time.
+- `DROP:<snapshot>`, paired `X:<snapshot>`, `READY`, and `SUB:<BMLC>` map to
+  drop, transfer, shake readiness, and submission.
+
+The encoded player number in an `E` event wins over radio arrival order. Legacy
+`N`, `M`, `B`, and `H` fixture intents remain accepted. `GW` status and `GAME`
+lifecycle records map to the same internal operations as canonical records.
+USB chunks can split records at any byte boundary.
+
+The host and player badge profiles themselves are owned by
+[`../../badge/master/README.md`](../../badge/master/README.md),
+[`../../badge/slave/README.md`](../../badge/slave/README.md), and the
+whole-fleet native safety gate in
+[`../../badge/native/README.md`](../../badge/native/README.md). Do not mix Lua
+and native radio profiles.
+
+## Authoritative simulator rules
+
+- A round defaults to 120 seconds and publishes integer countdown snapshots.
+  End/timeout clears held items, plates, chopping, and both stoves.
+- Burger orders appear immediately at start and naturally at randomized
+  intervals up to the active-order limit. Recipes cycle through `PLAIN_MEAT`,
+  `CHEESEBURGER`, `LETTUCE_MEAT`, and `CHEESE_LETTUCE_MEAT`.
+- Patience is authoritative `3`, `2`, `1`, then `0` at expiration, using thirds
+  of the order lifetime. Expiration marks the order and subtracts 20 money.
+- A wrong submission subtracts 25 money. Gold is 100/120/120/150 by recipe.
+  Tips are 20%, 10%, or 5% of recipe gold in patience tier 3/2/1, with a
+  minimum positive tip for a successful active order.
+- `money.net = gold + tips - penalties`; `score.value` mirrors net money.
+- Chopping takes 3 seconds. Releasing/failing before completion loses progress
+  while retaining the raw item.
+- Each logical stove is independent: 15 seconds cooking, 2 seconds done,
+  3 seconds warning, then burnt. Only chopped meat can be placed. Cooked meat
+  can be taken during done/warning; burnt meat must be taken and dropped.
+- Event history records round lifecycle, orders, actions/rejections, station
+  phases, submissions, gateway state, and money penalties. Histories and other
+  public arrays are bounded.
+
+## HTTP, JSON, and SSE
+
+The complete authoritative snapshot is available at `GET /api/state` and as
+`state` events from `GET /api/events`. Focused projections are:
+
+- `GET /api/timer`
+- `GET /api/orders` (`order`, `activeOrders`, and historical `orders`)
+- `GET /api/players`
+- `GET /api/stations`
+- `GET /api/submissions`
+- `GET /api/history`
+- `GET /api/gold`, `GET /api/tips`, and `GET /api/money`
+- `GET /api/health`
+
+Commands use `{ "type": "START_HOST|SCAN_ROOM|APPROVE_LAYOUT|START_GAME|END_GAME|RESET_GAME" }`
+at `POST /api/command`. Badge assignment uses
+`POST /api/players/assign`. `POST /api/serial` is a local development
+diagnostic and passes its line through the exact same parser/dispatcher as the
+physical stream.
+
+A future UI should render `version`, `activeOrders`, `patience.filledSegments`,
+`timer`, players, stations, submissions, and money exactly as supplied. It must
+not run a parallel timer, generate an order, infer a cooking phase, validate a
+plate, or calculate score.
+
+## Setup photos and provider seam
+
+- `POST /api/photos`: raw still bytes (`image/jpeg`, `image/png`, or fixture
+  `application/octet-stream`) or multipart fields named `photo`/`photos`; up to
+  four photos are retained and three makes review-ready.
+- `POST /api/floorplan/review`: run the provider and return the reviewable
+  four-station plan.
+- `POST /api/floorplan/approve` with `{ "approved": true }`: approve it.
+- `GET /api/photos` and `GET /api/floorplan`: inspect setup state.
+
+The default provider is a deterministic local roughly 10 m by 10 m fixture with
+pantry, fridge, cutting board, and stove. Optional OpenAI image review is
+server-side and visibly falls back to the fixture. The simulator needs no cloud
+service.
+
+## Laptop serial path and future deployment seam
+
+The current physical integration path connects the host badge to the captain's
+laptop. Configure that laptop's serial device path after its USB serial settings
+have been established, for example on Linux:
 
 ```sh
-HTN26_SERIAL_DEVICE=/dev/ser1 HTN26_BIND_HOST=0.0.0.0 node pi/server/server.mjs
+HTN26_SERIAL_DEVICE=/dev/ttyACM0 node pi/server/server.mjs --host 127.0.0.1 --port 8787
 ```
 
-The exact `/dev/ser*` name, baud configuration, USB enumeration, and device
-permissions are board-image-specific and are not asserted by host tests. The
-startup log prints the selected device. If events do not appear, first check
-that the device exists and is readable, check the QNX serial-driver/baud
-configuration, then post a known fixture line to the local diagnostic route:
+Device names and serial configuration are laptop/OS-specific. The adapter opens
+the configured device as a byte stream and retries after disconnect. Diagnose
+parsing independently with:
 
 ```sh
 curl -sS -X POST http://127.0.0.1:8787/api/serial \
   -H 'content-type: application/json' \
-  -d '{"line":"noise HTN26|GW|UP|1|0"}'
+  -d '{"line":"HTN26|1|GATEWAY|UP|1|0"}'
 curl -sS http://127.0.0.1:8787/api/health
 ```
 
-`/api/serial` is a development diagnostic and uses the same parser boundary;
-production input should use `HTN26_SERIAL_DEVICE`.
+QNX is only a possible future deployment target for this server. If a future
+QNX master adapter is connected, pass it to `createRuntime` as
+`authoritativeEngine`; its canonical results/snapshots replace local fixture
+submission and badge-event decisions. The current launch and validation path
+does not require or claim QNX.
 
-## HTTP protocol
-
-All responses are JSON except `/api/events`, which is server-sent events.
-The existing UI HTTP transport can consume `GET /api/state`, `POST
-/api/command`, and `GET /api/events`.
-
-Setup and photos:
-
-- `POST /api/photos`: raw still bytes (`image/jpeg`, `image/png`, or a fixture
-  `application/octet-stream`) or a multipart field named `photo`/`photos`.
-  Up to four photos are retained; three or four makes review-ready.
-- `POST /api/floorplan/review`: runs the provider boundary and returns the
-  reviewable four-station plan. For the static local fixture, the uploaded
-  bytes are metadata only.
-- `POST /api/floorplan/approve` with `{ "approved": true }`: approves the
-  plan and enables `START_GAME`.
-- `GET /api/photos`, `GET /api/floorplan`: inspect setup state.
-
-Commands use `{ "type": "START_HOST|SCAN_ROOM|APPROVE_LAYOUT|START_GAME|END_GAME|RESET_GAME" }`.
-`SCAN_ROOM` requires uploaded photos and runs the review provider, so the
-existing UI flow can use its command seam. `POST /api/floorplan/review` is the
-explicit equivalent. `APPROVE_LAYOUT` is also retained as a UI protocol alias.
-
-Projection reads:
-
-- `GET /api/state`: setup, floorplan, players, station projection, active and
-  historical order cards, timer, gold, tips, submissions, and health.
-- `GET /api/orders`: `{order, orders}`. `orders` contains cards with recipe,
-  `issuedAt`, `deadlineAt`, `remainingSeconds`, and a three-segment
-  `patience` meter. Multiple cards may be active; at least one is retained
-  while a round runs.
-- `GET /api/gold`, `/api/tips`, `/api/timer`, `/api/players`,
-  `/api/submissions`: small browser-friendly projections.
-- `GET /api/events`: SSE snapshots; clients should use the `version` field.
-
-When the QNX master adapter is connected, pass it to `createRuntime` as
-`authoritativeEngine`. Its `ingestBadgeEvent` and `submit` methods return the
-canonical result and optional state snapshot; the HTTP projection mirrors that
-snapshot. The local projection rules are retained as the workstation fixture
-path until the QNX adapter is available.
-
-Exactly four recipes are generated: `PLAIN_MEAT`, `CHEESEBURGER`,
-`LETTUCE_MEAT`, and `CHEESE_LETTUCE_MEAT`. Every recipe contains meat; cheese
-and lettuce are optional. A submission event should carry
-`B|SUBMIT:<RECIPE_ID>` (the `SUBMIT:SUCCESS` value is retained only as a
-compatibility fixture for a canonical upstream result). The server matches the
-recipe against an active order, derives gold from the recipe, derives a tip
-from remaining patience, consumes the submitting player's projected plate,
-and records success/failure. Browser code cannot award gold or tips.
-
-## Cloudflare Tunnel / LAN
-
-For a temporary tunnel, keep the server local and let `cloudflared` connect to
-it:
+## Validation
 
 ```sh
-node pi/server/server.mjs --host 127.0.0.1 --port 8787
-cloudflared tunnel --url http://127.0.0.1:8787
-```
-
-For a named tunnel, configure the tunnel ingress to
-`http://127.0.0.1:8787` and run `cloudflared tunnel run NAME`; authenticate
-`cloudflared` through its own login/credential flow. Do not put an OpenAI key,
-tunnel token, or other secret in browser JavaScript, the UI query string, or
-this repository. A tunnel endpoint is not automatically an authenticated
-product endpoint; use Cloudflare Access or an equivalent private policy before
-sharing it beyond the trusted demo network. Binding `0.0.0.0` is only needed
-for direct LAN clients and does not embed a secret.
-
-## Tests and QNX boundary
-
-From this directory:
-
-```sh
+cd pi/server
 node --test test/*.test.mjs
 ```
 
-The tests use a deterministic serial fixture and a temporary data directory to
-cover noisy/chunked serial parsing, duplicate suppression, photo upload and
-review/approval, order cards, recipe validation, gold/tip calculation, SSE,
-and the browser projection routes. They do **not** prove QNX serial-driver
-enumeration, baud settings, Node availability in a target image, phone-camera
-capture, physical badges, or OpenAI connectivity. QNX integration still needs
-on-target validation. The QNX-specific replacement point is
-`src/serial-device.mjs`; it opens the configured device and feeds bytes into
-the platform-independent parser.
+Tests cover canonical and legacy protocol parsing, chunked/noisy serial input,
+deduplication, lifecycle timing and cleanup, natural orders, all four patience
+states, expiration/wrong-order penalties, early gold/tips, chopping/cooking,
+player plates, browser HTML, SSE/JSON projections, and diagnostic serial
+injection. They are laptop-hosted simulator tests only. They do not prove
+physical badge/NFC/radio/USB behavior, phone-camera capture, OpenAI
+connectivity, or any possible future QNX deployment.
 
-## UI worker contract assumptions
-
-The UI worker can keep its current transport seam and should:
-
-1. Treat `GET /api/state` as authoritative and never decrement `timer` or
-   order patience locally.
-2. Render `activeOrders`/`orders` as cards; `order` is only the first active
-   card compatibility alias. Use `patience.filledSegments` and
-   `remainingSeconds` from the server.
-3. Render `gold.total`, `tips.total`, `players`, and `submissions` exactly as
-   supplied. A submission's `validation` and `status` are authoritative.
-4. Use `POST /api/floorplan/approve` or the existing `APPROVE_LAYOUT` command;
-   the proposed plan has metre coordinates and four station IDs.
-5. Keep the existing fallback/mock transport for offline UI tests. The server
-   currently exposes fixed player cards `p1`, `p2`, and `p3`; badge assignment
-   may be added through `POST /api/players/assign`.
-
-The server does not claim live camera player positions in this first slice.
+For a temporary Cloudflare tunnel, keep the server bound locally and point
+`cloudflared tunnel --url http://127.0.0.1:8787` at it. A tunnel is not an
+authentication boundary; use a private access policy before sharing it outside
+the trusted demo network, and never put provider or tunnel secrets in browser
+JavaScript or query strings.

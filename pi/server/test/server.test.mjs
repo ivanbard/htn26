@@ -3,10 +3,11 @@ import assert from "node:assert/strict";
 import { readFile, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { createSerialStreamAdapter, parseGatewayRxLine } from "../src/protocol.mjs";
+import { createSerialStreamAdapter, parseCanonicalLine, parseGatewayRxLine, parseGatewaySerialLine } from "../src/protocol.mjs";
+import { browserDocument } from "../src/http.mjs";
 import { LocalFloorplanProvider } from "../src/provider.mjs";
-import { BURGER_RECIPES, ServerProjection } from "../src/projection.mjs";
-import { createRuntime } from "../server.mjs";
+import { BURGER_RECIPES, GAME_TIMINGS, MONEY_RULES, ServerProjection } from "../src/projection.mjs";
+import { createRuntime, startupGuide } from "../server.mjs";
 import { openSerialDevice } from "../src/serial-device.mjs";
 
 const MAC = "AA:BB:CC:DD:EE:01";
@@ -62,6 +63,39 @@ test("fixture parser accepts noisy and chunk-framed gateway records", async () =
   assert.equal(parseGatewayRxLine("debug HTN26|RX|bad|-1|OC1|1|H|START").ok, false);
 });
 
+test("canonical protocol covers host, gateway, player actions, and submissions while legacy frames remain valid", () => {
+  const records = [
+    parseCanonicalLine("log HTN26|1|HOST|START|120|3"),
+    parseCanonicalLine("HTN26|1|HOST|END"),
+    parseCanonicalLine("HTN26|1|HOST|RESET"),
+    parseCanonicalLine("HTN26|1|GATEWAY|UP|12|1"),
+    parseCanonicalLine("HTN26|1|PLAYER|1|PICKUP|RAW_MEAT"),
+    parseCanonicalLine("HTN26|1|PLAYER|1|PLATE|BM--"),
+    parseCanonicalLine("HTN26|1|PLAYER|1|CHOP|START"),
+    parseCanonicalLine("HTN26|1|PLAYER|1|CHOP|DONE|CHOPPED_MEAT"),
+    parseCanonicalLine("HTN26|1|PLAYER|1|CHOP|FAIL"),
+    parseCanonicalLine("HTN26|1|PLAYER|1|STOVE|LEFT|PLACE"),
+    parseCanonicalLine("HTN26|1|PLAYER|1|STOVE|RIGHT|TAKE"),
+    parseCanonicalLine("HTN26|1|PLAYER|1|STOVE|LEFT|STATUS|WARNING"),
+    parseCanonicalLine("HTN26|1|PLAYER|1|DROP"),
+    parseCanonicalLine("HTN26|1|PLAYER|1|TRANSFER|2"),
+    parseCanonicalLine("HTN26|1|PLAYER|1|READY"),
+    parseCanonicalLine("HTN26|1|SUBMIT|1|BM--"),
+  ];
+  assert.ok(records.every((record) => record.ok), records.map((record) => record.error).join(", "));
+  assert.equal(records[0].kind, "host-control");
+  assert.equal(records[3].kind, "gateway-status");
+  assert.equal(records[4].kind, "player-action");
+  assert.equal(records.at(-1).kind, "submission");
+  assert.equal(parseCanonicalLine("HTN26|2|HOST|START").ok, false);
+  assert.equal(parseCanonicalLine("HTN26|1|PLAYER|4|DROP").ok, false);
+
+  assert.equal(parseGatewaySerialLine("noise HTN26|GW|DOWN|4|2").kind, "gateway-status");
+  assert.equal(parseGatewaySerialLine("noise HTN26|GAME|START_GAME|120|3").kind, "host-control");
+  assert.equal(parseGatewaySerialLine("noise HTN26|GAME|GAME_END|3").control, "END");
+  assert.equal(parseGatewaySerialLine(`noise HTN26|RX|${MAC}|-44|OC1|7|E|P2:PU:R`).kind, "badge-event");
+});
+
 test("configurable serial-device adapter opens a fixture stream", async () => {
   const directory = await mkdtemp(path.join(tmpdir(), "htn26-serial-"));
   const devicePath = path.join(directory, "usb-serial.fixture");
@@ -98,7 +132,105 @@ test("projection keeps four recipes, validates submissions, and computes gold/ti
   assert.equal(state.gold.total, 100);
   assert.ok(state.tips.total > 0);
   assert.ok(state.activeOrders.length >= 1);
-  assert.ok(state.activeOrders[0].patience.segments === 3);
+  assert.equal(state.activeOrders[0].patience.segments, 3);
+});
+
+test("round timer ends cleanly and resets held, order, and station state", () => {
+  let now = 10_000;
+  const projection = new ServerProjection({ now: () => now, roundSeconds: 3, orderIntervalSeconds: 20, orderPatienceSeconds: 20, random: () => 0 });
+  projection.ingestHostControl({ control: "START", durationSeconds: 3 }, now);
+  projection.ingestPlayerAction({ playerId: "p1", action: "PICKUP", item: "BUN" }, now);
+  assert.equal(projection.snapshot(now).timer.remainingSeconds, 3);
+  now += 2_000;
+  assert.equal(projection.snapshot(now).timer.remainingSeconds, 1);
+  now += 1_000;
+  const ended = projection.snapshot(now);
+  assert.equal(ended.timer.status, "ended");
+  assert.equal(ended.timer.remainingSeconds, 0);
+  assert.equal(ended.activeOrders.length, 0);
+  assert.equal(ended.orders[0].status, "cancelled");
+  assert.equal(ended.players[0].heldItem, "EMPTY");
+  assert.ok(ended.stations.every((station) => station.status === "idle"));
+});
+
+test("orders spawn naturally, traverse patience 3/2/1/0, and expiration makes net money negative", () => {
+  let now = 20_000;
+  const projection = new ServerProjection({
+    now: () => now,
+    roundSeconds: 60,
+    orderIntervalSeconds: 4,
+    orderPatienceSeconds: 12,
+    maxActiveOrders: 3,
+    random: () => 0,
+  });
+  projection.ingestHostControl({ control: "START", durationSeconds: 60 }, now);
+  assert.equal(projection.snapshot(now).orders[0].patienceState, 3);
+  now += 4_000;
+  let state = projection.snapshot(now);
+  assert.equal(state.orders[0].patienceState, 2);
+  assert.equal(state.orders.length, 2, "a second order should appear without a command");
+  now += 4_000;
+  state = projection.snapshot(now);
+  assert.equal(state.orders[0].patienceState, 1);
+  now += 4_000;
+  state = projection.snapshot(now);
+  assert.equal(state.orders[0].status, "expired");
+  assert.equal(state.orders[0].patienceState, 0);
+  assert.equal(state.orders[0].penalty, MONEY_RULES.expiredOrderPenalty);
+  assert.equal(state.money.net, -MONEY_RULES.expiredOrderPenalty);
+  assert.ok(state.eventHistory.some((event) => event.type === "order-expired"));
+});
+
+test("wrong submission loses money while an early correct plate earns gold and a positive tip", () => {
+  const now = 30_000;
+  const projection = new ServerProjection({ now: () => now, orderIntervalSeconds: 30, orderPatienceSeconds: 30, random: () => 0 });
+  projection.ingestHostControl({ control: "START", durationSeconds: 120 }, now);
+  projection.ingestSubmission({ playerId: "p1", plate: "BMLC" }, now);
+  let state = projection.snapshot(now);
+  assert.equal(state.submissions[0].status, "failure");
+  assert.equal(state.money.net, -MONEY_RULES.wrongOrderPenalty);
+
+  projection.ingestPlayerAction({ playerId: "p1", action: "PLATE", plate: "BM--" }, now);
+  projection.ingestSubmission({ playerId: "p1", plate: "BM--" }, now);
+  state = projection.snapshot(now);
+  assert.equal(state.submissions[1].status, "success");
+  assert.equal(state.gold.total, 100);
+  assert.ok(state.tips.total > 0);
+  assert.ok(state.money.net > 0);
+  assert.equal(state.players[0].heldItem, "EMPTY", "submission consumes the plate");
+});
+
+test("server owns chopping, two-stove cooking phases, and player plate inventory", () => {
+  let now = 40_000;
+  const projection = new ServerProjection({ now: () => now, orderIntervalSeconds: 30, orderPatienceSeconds: 30, random: () => 0 });
+  projection.ingestHostControl({ control: "START", durationSeconds: 120 }, now);
+  projection.ingestPlayerAction({ playerId: "p1", action: "PICKUP", item: "RAW_MEAT" }, now);
+  projection.ingestPlayerAction({ playerId: "p1", action: "CHOP", phase: "START" }, now);
+  now += GAME_TIMINGS.chopSeconds * 1_000;
+  assert.equal(projection.snapshot(now).players[0].heldItem, "CHOPPED_MEAT");
+  projection.ingestPlayerAction({ playerId: "p1", action: "STOVE", side: "LEFT", operation: "PLACE" }, now);
+  now += GAME_TIMINGS.cookSeconds * 1_000;
+  assert.equal(projection.snapshot(now).stations.find((station) => station.id === "stove-left").status, "done");
+  now += GAME_TIMINGS.doneSeconds * 1_000;
+  assert.equal(projection.snapshot(now).stations.find((station) => station.id === "stove-left").status, "warning");
+  now += GAME_TIMINGS.warningSeconds * 1_000;
+  assert.equal(projection.snapshot(now).stations.find((station) => station.id === "stove-left").status, "burnt");
+
+  projection.ingestPlayerAction({ playerId: "p2", action: "PICKUP", item: "BUN" }, now);
+  projection.ingestPlayerAction({ playerId: "p2", action: "PLATE", plate: "NEW" }, now);
+  const player = projection.snapshot(now).players[1];
+  assert.equal(player.hasPlate, true);
+  assert.deepEqual(player.inventory, ["BUN"]);
+});
+
+test("legacy fixed-player actions update the encoded player rather than arrival order", () => {
+  const now = 50_000;
+  const projection = new ServerProjection({ now: () => now, random: () => 0 });
+  projection.ingestHostControl({ control: "START", durationSeconds: 120 }, now);
+  const result = projection.ingestBadgeEvent({ senderMac: MAC, sequence: 42, type: "E", value: "P2:PU:R" }, now);
+  assert.equal(result.accepted, true);
+  assert.equal(projection.snapshot(now).players[1].heldItem, "RAW_MEAT");
+  assert.equal(projection.snapshot(now).players[0].heldItem, "EMPTY");
 });
 
 test("HTTP upload, review, approval, serial projection, and browser reads work", async () => {
@@ -127,5 +259,36 @@ test("HTTP upload, review, approval, serial projection, and browser reads work",
     assert.equal(timer.status, "running");
     assert.equal(players.players.length, 3);
     assert.deepEqual(submissions.submissions, []);
+  });
+});
+
+test("plain browser view and diagnostic endpoint use the same canonical state", async () => {
+  const html = browserDocument();
+  assert.match(html, /Orders \/ new orders/);
+  assert.match(html, /Round and timer/);
+  assert.match(html, /Players and actions/);
+  assert.match(html, /Net money/);
+  assert.match(html, /HTN26\|1\|HOST\|START\|120\|3/);
+  assert.doesNotMatch(html, /<style\b|stylesheet/i);
+
+  const guide = startupGuide("http://127.0.0.1:8787");
+  for (const route of ["/api/timer", "/api/orders", "/api/players", "/api/submissions", "/api/money"]) assert.match(guide, new RegExp(route));
+  assert.match(guide, /HTN26\|1\|SUBMIT\|1\|BM--/);
+
+  await withRuntime(async (base) => {
+    const page = await fetch(`${base}/`).then((response) => response.text());
+    assert.equal(page, html);
+    let injected = await post(base, "/api/serial", { line: "HTN26|1|HOST|START|120|3" });
+    assert.equal(injected.data.result.ok, true);
+    assert.equal(injected.data.state.timer.status, "running");
+    injected = await post(base, "/api/serial", { line: "HTN26|1|PLAYER|1|PLATE|BM--" });
+    assert.deepEqual(injected.data.state.players[0].plate, ["BUN", "MEAT"]);
+    injected = await post(base, "/api/serial", { line: "HTN26|1|SUBMIT|1|BM--" });
+    assert.equal(injected.data.state.submissions[0].status, "success");
+    const money = await fetch(`${base}/api/money`).then((response) => response.json());
+    assert.equal(money.gold, 100);
+    assert.ok(money.tips > 0);
+    const state = await fetch(`${base}/api/state`).then((response) => response.json());
+    assert.deepEqual(state.money, money);
   });
 });
