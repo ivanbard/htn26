@@ -118,7 +118,8 @@ test("renders the UnderCooked onboarding start screen before host setup", async 
 
   assert.match(onboarding, /data-onboarding="welcome"/);
   assert.match(onboarding, /UnderCooked/);
-  assert.match(onboarding, /order-burger\.png/);
+  assert.match(onboarding, /undercooked-logo\.png/);
+  assert.doesNotMatch(onboarding, /order-burger\.png/);
   assert.match(fs.readFileSync(new URL("../styles.css", import.meta.url), "utf8"), /\.onboarding-screen[\s\S]*game-room-background\.png/);
   assert.match(onboarding, /data-command="START_HOST"/);
   assert.doesNotMatch(onboarding, /Sign In To Save Progress/i);
