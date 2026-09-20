@@ -256,6 +256,53 @@ test("server owns chopping, two-stove cooking phases, and player plate inventory
   assert.deepEqual(player.inventory, ["BUN"]);
 });
 
+test("stoves and transfers preserve authoritative processing and native bump rules", () => {
+  let now = 43_000;
+  const projection = new ServerProjection({ now: () => now, orderPatienceSeconds: 30, random: () => 0 });
+  projection.ingestHostControl({ control: "START", durationSeconds: 120 }, now);
+
+  projection.ingestBadgeEvent({ senderMac: MAC, sequence: 1, type: "N", value: "ING:MEAT" }, now);
+  let result = projection.ingestPlayerAction({ playerId: "p1", action: "STOVE", side: "LEFT", operation: "PLACE" }, now);
+  assert.equal(result.accepted, false);
+  let state = projection.snapshot(now);
+  assert.equal(state.players[0].heldItem, "MEAT");
+  assert.equal(state.stations.find((station) => station.id === "stove-left").status, "idle");
+
+  projection.ingestPlayerAction({ playerId: "p1", action: "DROP" }, now);
+  projection.ingestPlayerAction({ playerId: "p1", action: "PLATE", plate: "B---" }, now);
+  result = projection.ingestPlayerAction({ playerId: "p1", action: "TRANSFER", targetPlayerId: "p2" }, now);
+  assert.equal(result.accepted, true);
+  assert.match(result.detail, /no transferable held item/);
+  state = projection.snapshot(now);
+  assert.equal(state.players[0].hasPlate, true);
+  assert.deepEqual(state.players[0].plate, ["BUN"]);
+  assert.equal(state.players[1].heldItem, "EMPTY");
+  assert.deepEqual(state.players.slice(0, 2).map((player) => player.currentStation), ["center", "center"]);
+
+  projection.ingestPlayerAction({ playerId: "p1", action: "DROP" }, now);
+  projection.ingestPlayerAction({ playerId: "p1", action: "PICKUP", item: "RAW_MEAT" }, now);
+  projection.ingestPlayerAction({ playerId: "p2", action: "PICKUP", item: "RAW_CHEESE" }, now);
+  projection.ingestPlayerAction({ playerId: "p1", action: "CHOP", phase: "START" }, now);
+  result = projection.ingestPlayerAction({ playerId: "p2", action: "TRANSFER", targetPlayerId: "p1" }, now);
+  assert.equal(result.accepted, false);
+  assert.match(result.detail, /while either player is chopping/);
+  result = projection.ingestPlayerAction({ playerId: "p1", action: "PLATE", plate: "B---" }, now);
+  assert.equal(result.accepted, false);
+  assert.match(result.detail, /busy chopping/);
+  result = projection.ingestPlayerAction({ playerId: "p1", action: "CHOP", phase: "START" }, now);
+  assert.equal(result.accepted, false);
+  assert.match(result.detail, /busy chopping/);
+  state = projection.snapshot(now);
+  assert.equal(state.players[0].heldItem, "RAW_MEAT");
+  assert.equal(state.players[0].processing.type, "chop");
+  assert.equal(state.players[1].heldItem, "RAW_CHEESE");
+
+  now += GAME_TIMINGS.chopSeconds * 1_000;
+  state = projection.snapshot(now);
+  assert.equal(state.players[0].heldItem, "CHOPPED_MEAT");
+  assert.equal(state.players[1].heldItem, "RAW_CHEESE");
+});
+
 test("action-inferred station occupancy allows groups and returns players to center after the hold delay", () => {
   let now = 45_000;
   const projection = new ServerProjection({ now: () => now, locationHoldSeconds: 2, orderPatienceSeconds: 30, random: () => 0 });

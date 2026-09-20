@@ -822,7 +822,7 @@ export class ServerProjection {
     }
     if (operation === "PLACE") {
       if (station.status !== "idle" || station.item) return { accepted: false, detail: `${station.label} is not empty` };
-      if (player.hand !== "CHOPPED_MEAT" && player.hand !== "MEAT") return { accepted: false, detail: "chopped raw meat is required" };
+      if (player.hand !== "CHOPPED_MEAT") return { accepted: false, detail: "chopped raw meat is required" };
       player.hand = null;
       player.actionState = `cooking on ${station.label.toLowerCase()}`;
       this._syncPlayer(player);
@@ -856,6 +856,7 @@ export class ServerProjection {
 
   _transfer(first, second, now = this.now()) {
     if (!first || !second || first === second) return { accepted: false, detail: "transfer requires two different players" };
+    if (first.processing || second.processing) return { accepted: false, detail: "transfer is unavailable while either player is chopping" };
     if (first.hasPlate && second.hasPlate) {
       [first.plate, second.plate] = [second.plate, first.plate];
     } else if (!first.hasPlate && !second.hasPlate) {
@@ -863,6 +864,15 @@ export class ServerProjection {
     } else {
       const platePlayer = first.hasPlate ? first : second;
       const handPlayer = first.hasPlate ? second : first;
+      if (!handPlayer.hand) {
+        first.actionState = `bumped with ${second.label}; no transfer`;
+        second.actionState = `bumped with ${first.label}; no transfer`;
+        this._setPlayerLocation(first, "center", now, null);
+        this._setPlayerLocation(second, "center", now, null);
+        this._syncPlayer(first);
+        this._syncPlayer(second);
+        return { accepted: true, detail: `${first.id} and ${second.id} bumped with no transferable held item` };
+      }
       const component = plateComponent(handPlayer.hand);
       if (component && PLATE_ITEMS.has(handPlayer.hand) && !platePlayer.plate.includes(component)) {
         platePlayer.plate.push(component);
@@ -888,6 +898,8 @@ export class ServerProjection {
   }
 
   _applyPlayerAction(player, action, now) {
+    const finishingChop = action.action === "CHOP" && (action.phase === "DONE" || action.phase === "FAIL");
+    if (player.processing && !finishingChop) return { accepted: false, detail: "player is busy chopping" };
     switch (action.action) {
       case "PICKUP": return this._pickup(player, action.item, now);
       case "PLATE": return this._setPlate(player, action.plate, now);

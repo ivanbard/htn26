@@ -137,9 +137,12 @@ lettuce, and sliced cheese. A dash means absent, so a plain burger is `BM--`
 and a fully topped burger is `BMLC`. `PLATE|NEW` takes an empty plate or moves a
 currently held platable item onto one. Duplicate and raw plate items are
 rejected. `TRANSFER` applies the v1 merge/swap rules to the two authoritative
-player inventories. A transfer or paired native bump moves both inferred player
-locations immediately to center/default. `READY` remains visible for the
-0.5-second shake window.
+player inventories. A player holding a plate and an empty-handed peer retain
+their inventories on a bump. Every transfer or paired native bump moves both
+inferred player locations immediately to center/default. While a player is
+chopping, only chop completion or failure can mutate that player; plate and
+transfer actions are rejected. `READY` remains visible for the 0.5-second shake
+window.
 
 Player actions received while no round is running are recorded as ignored and
 do not mutate inventory. `LEAVE` starts the same documented return delay for

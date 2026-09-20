@@ -153,6 +153,9 @@ When both badges have plates, their plate items are swapped.
 
 When neither badge has a plate, their held items are swapped.
 
+A player holding a plate and an empty-handed player both keep their inventories
+when they touch.
+
 A badge-to-badge transfer returns both players to the simulator's inferred
 center/default location immediately.
 
