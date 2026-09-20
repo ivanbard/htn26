@@ -3,7 +3,8 @@
 `pi/server` is the laptop-hosted v1 simulator and HTTP/serial boundary. For the
 current launch it runs on the captain's laptop, not QNX. It provides a complete
 burger round while preserving an adapter seam for a possible future QNX master.
-Browser code only renders snapshots; all clocks, order generation, patience,
+An optional QNX difficulty sidecar may return a bounded advisory label, but it
+is never a game authority. Browser code only renders snapshots; all clocks, order generation, patience,
 station transitions, validation, and money changes happen in the server
 projection (or in a connected authoritative engine).
 
@@ -51,6 +52,10 @@ Configuration:
 - `HTN26_MAX_ACTIVE_ORDERS`: active-order limit, default 3.
 - `HTN26_PLAYER_LOCATION_HOLD_SECONDS`: how long an inferred station visit
   remains visible after an instant/finished action, default 2 seconds.
+- `HTN26_DIFFICULTY_SIDECAR_URL`: optional QNX sidecar base URL. When absent,
+  the existing deterministic laptop order policy is unchanged.
+- `HTN26_DIFFICULTY_SIDECAR_TIMEOUT_MS`: bounded request timeout, default 200
+  ms. Requests are asynchronous and never delay the game transition.
 - `OPENAI_API_KEY`: optional server-only floorplan provider credential; it is
   never returned to the browser.
 
@@ -356,11 +361,31 @@ curl -sS -X POST http://127.0.0.1:8787/api/serial \
 curl -sS http://127.0.0.1:8787/api/health
 ```
 
-QNX is only a possible future deployment target for this server. If a future
-QNX master adapter is connected, pass it to `createRuntime` as
+QNX is only a possible future deployment target for this authoritative server.
+The separate, optional QNX difficulty service does not change that boundary.
+If a future QNX master adapter is connected, pass it to `createRuntime` as
 `authoritativeEngine`; its canonical results/snapshots replace local fixture
 submission and badge-event decisions. The current launch and validation path
 does not require or claim QNX.
+
+## Optional QNX difficulty sidecar
+
+The versioned contract, OpenCV model, QNX runtime assumptions, health endpoint,
+and deployment example are owned by
+[`../difficulty/README.md`](../difficulty/README.md). The laptop adapter uses
+`fetch` with an abort timeout; it never invokes a child process or waits for
+inference while creating an order. It validates the exact response and accepts
+only `easy`, `normal`, or `hectic`. Laptop code then selects a recipe from
+`BURGER_RECIPES`.
+
+The request is made after an order is created so a timely response can guide a
+later order. A label remains eligible for at most one configured maximum order
+interval from its feature snapshot; if an active-order cap delays creation past
+that boundary, the label is stale. An absent service, network error, timeout,
+stale response, invalid label, or extra response field is discarded and the
+original order sequence is used. The sidecar cannot set recipes, active-order
+limits, patience/deadlines, score, gold, inventory, submissions, timers,
+floorplans, or badge state. It is separate from the setup-photo/OpenAI provider.
 
 ## Validation
 
@@ -369,8 +394,9 @@ cd pi/server
 node --test test/*.test.mjs
 ```
 
-Tests cover canonical and legacy protocol parsing, chunked/noisy serial input,
-deduplication, native physical-host `GAME` authority and fixed-player `E`
+Tests cover the sidecar's strict label-only response validation, asynchronous
+non-blocking query and fallback behavior, canonical and legacy protocol parsing,
+chunked/noisy serial input, deduplication, native physical-host `GAME` authority and fixed-player `E`
 processing, lifecycle timing and cleanup, natural orders, all four patience
 states, expiration/wrong-order penalties, immediate consumption and retained
 snapshots for one or more submitters, arrival-order-independent three-player

@@ -13,7 +13,7 @@ For badge deployment after the observed Lua/NimBLE memory failures, follow the
 whole-fleet native/rollback and factory-only safety gate in
 [`badge/native/README.md`](badge/native/README.md); never mix native and Lua radio profiles.
 
-Use the nearest component README as the implementation contract for [`badge/`](badge/README.md), [`pi/`](pi/README.md), and [`ui/`](ui/README.md).
+Use the nearest component README as the implementation contract for [`badge/`](badge/README.md), [`pi/`](pi/README.md), and [`ui/`](ui/README.md). The optional QNX difficulty sidecar is owned by [`pi/difficulty/README.md`](pi/difficulty/README.md); it is label-only and never authoritative.
 
 Keep product intent in the root README and implementation-specific packet, API, state, and transport details in their existing component owners.
 
