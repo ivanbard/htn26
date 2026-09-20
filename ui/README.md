@@ -28,10 +28,9 @@ page. Selecting 4-5 same-room images immediately sends one request to
 Try the prototype host flow:
 
 1. `Start` host mode.
-2. `Scan Room` to show the proposed floor plan.
-3. `Approve Layout` (the existing `Accept Layout` protocol alias) to accept the plan and generate burger-level placement instructions.
-4. Place the cheese, lettuce, meat, and bun sources, the chopping boards, stoves, and assembly counter as shown.
-5. `Start Game` for a four-minute round.
+2. Continue with the normal layout (the mock has no remote photo upload to wait for).
+3. Follow the floor-focused tour to place the cheese, lettuce, meat, and bun sources, the chopping boards, stoves, and assembly counter as shown.
+4. `Start Game` for a four-minute round.
 
 The mock also supports delivery fixtures for tests (`DELIVERY_SUCCESS` and `DELIVERY_FAILURE`). The UI renders the serving result and score supplied by the transport; it does not create a delivery result itself.
 
@@ -43,8 +42,7 @@ fixture flow; it is not the current laptop simulator's run path:
 ```text
 host Start
   -> camera room scan
-  -> proposed floor plan
-  -> host approves floor plan
+  -> personalized floor layout, or normal layout fallback
   -> burger level placement instructions
   -> four-minute burger round
   -> topping-variation orders and live player positions
@@ -65,7 +63,7 @@ A burger uses buns, meat, cheese, and lettuce. Cheese, lettuce, and meat can be 
 }
 ```
 
-- `src/mock-transport.js` is the required offline development transport. It owns a fixture state and applies host commands as a stand-in for an authoritative server. While a round runs it also ticks every second (`advanceMockState`, mirroring `pi/server/src/projection.mjs`): the four-minute (240 s) round clock, order patience, chop progress, and the stove cooking -> done -> warning -> burnt timeline. This is the only place timers advance; the renderer only displays the snapshot values.
+- `src/mock-transport.js` is the required offline development transport. It owns a fixture state and applies host commands as a stand-in for an authoritative server. While a round runs it also ticks every second (`advanceMockState`, mirroring `pi/server/src/projection.mjs`): the four-minute (240 s) round clock, order patience, order spawning (one order at round start, then a random 8-35 s gap, at most three open, never zero; the mock's own patience is 60 s plus 15 s per topping), chop progress, and the stove cooking -> done -> warning -> burnt timeline. This is the only place timers advance; the renderer only displays the snapshot values.
 - Station progress bars appear only on stoves and chopping boards that hold an item or are cooking/chopping/done/burnt. Runtime stations are paired with plan stations by id first, then by kind, because the Pi's plan has one `stove` while its runtime stations are `stove-left`/`stove-right`.
 - `src/transport.js` includes a local HTTP/SSE transport for integration with an authoritative server. It expects `GET /api/state`, `POST /api/command`, and `GET /api/events`; those endpoints remain outside this UI task.
 - Use `http://127.0.0.1:4173/?transport=http` to select the HTTP seam. It uses same-origin `/api` routes so the Vite proxy also works for LAN clients; an explicit `api`/`apiBase` query value can override it. A supplied `window.__HTN26_TRANSPORT__` takes precedence for integration tests.
@@ -78,7 +76,7 @@ A burger uses buns, meat, cheese, and lettuce. Cheese, lettuce, and meat can be 
 The renderer uses three display modes so setup controls do not compete with the live game display:
 
 - `setup`: host controls, the room mirror, and physical burger-level placement instructions.
-- `gameplay`: one framed room board with up to four active orders across the top, the score at bottom-left, the round clock at bottom-right, live tracked players, and compact activity notifications. Operator health chrome is intentionally excluded from the player-facing HUD.
+- `gameplay`: one framed room board with up to four active orders across the top, the score at bottom-left, the round clock at bottom-right, live tracked players, and one compact announcement pill centred between the score and the clock (styled like them, sentence case, always naming the WatCoins gained or lost, with a served burger's tip as a smaller second figure: "Burger served +100 WatCoins +20 tip", "Wrong burger -25 WatCoins", "Order expired -20 WatCoins"). Its zone is exactly the gap between the score and the clock and it scales with the board, so it cannot overlap them; the tip drops out first on a very small board. Operator health chrome is intentionally excluded from the player-facing HUD.
 - `results`: the completed round, score, serving result, and final room mirror.
 
 The frontend snapshot boundary is defined in `src/contracts.js` (version 2). Optional `orders` may retain completed history but must contain no more than four active objects, all with unique, non-empty IDs; snapshots without it continue to render the required legacy `order`. `floorPlan.coordinateSpace` must be `normalized-percent`; its `width` and `height` are positive finite values, and wall/station `x`, `y`, `width`, and `height` values are normalized to the 0–100 range. Present player positions use the same 0–100 coordinate space; a missing position is allowed so the UI can explicitly show tracking lost. A future camera-enabled adapter would be responsible for projecting room-camera coordinates into this display space before sending a snapshot. Invalid snapshots render an error state instead of partially rendering authoritative data.

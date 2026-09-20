@@ -1,4 +1,5 @@
 import { createMockTransport } from "./mock-transport.js";
+import { createActionTracker } from "./action-tracker.js";
 import { normalizeServerSnapshot } from "./server-snapshot.js";
 
 /**
@@ -10,8 +11,16 @@ function apiUrl(baseUrl, path) {
   return `${String(baseUrl || "").replace(/\/+$/, "")}${path}`;
 }
 
-export function createHttpTransport({ baseUrl = "", fetchImpl = globalThis.fetch, eventSourceFactory = globalThis.EventSource, normalizeSnapshot = normalizeServerSnapshot } = {}) {
+export function createHttpTransport({ baseUrl = "", fetchImpl = globalThis.fetch, eventSourceFactory = globalThis.EventSource, normalizeSnapshot: normalizeBase = normalizeServerSnapshot } = {}) {
   if (typeof fetchImpl !== "function") throw new Error("The local HTTP transport requires fetch");
+
+  // Every snapshot from the server goes through the same adapter, then the
+  // action tracker adds what the server does not send (see action-tracker.js).
+  const tracker = createActionTracker();
+  const normalizeSnapshot = (raw) => {
+    const snapshot = normalizeBase(raw);
+    return snapshot && Array.isArray(snapshot.players) ? { ...snapshot, players: tracker.annotate(snapshot.players) } : snapshot;
+  };
 
   let source;
   let poll;
@@ -57,6 +66,37 @@ export function createHttpTransport({ baseUrl = "", fetchImpl = globalThis.fetch
       const response = await fetchImpl(apiUrl(baseUrl, "/api/photos"), { method: "POST", body, headers: { accept: "application/json" } });
       if (!response.ok) throw new Error(`Master Pi photo upload failed (${response.status})`);
       return response.json();
+    },
+    async generateRoomLayout() {
+      const generated = await fetchImpl(apiUrl(baseUrl, "/api/layout/generate"), {
+        method: "POST",
+        headers: { accept: "application/json" },
+      });
+      if (!generated.ok) throw new Error(`Room layout generation failed (${generated.status})`);
+      await generated.json();
+      const approved = await fetchImpl(apiUrl(baseUrl, "/api/floorplan/approve"), {
+        method: "POST",
+        headers: { "content-type": "application/json", accept: "application/json" },
+        body: JSON.stringify({ approved: true }),
+      });
+      if (!approved.ok) throw new Error(`Room layout activation failed (${approved.status})`);
+      return normalizeSnapshot(await approved.json());
+    },
+    async useDefaultLayout() {
+      const proposed = await fetchImpl(apiUrl(baseUrl, "/api/floorplan/review"), {
+        method: "POST",
+        headers: { "content-type": "application/json", accept: "application/json" },
+        body: JSON.stringify({ allowEmpty: true }),
+      });
+      if (!proposed.ok) throw new Error(`Default room layout failed (${proposed.status})`);
+      await proposed.json();
+      const approved = await fetchImpl(apiUrl(baseUrl, "/api/floorplan/approve"), {
+        method: "POST",
+        headers: { "content-type": "application/json", accept: "application/json" },
+        body: JSON.stringify({ approved: true }),
+      });
+      if (!approved.ok) throw new Error(`Default room layout activation failed (${approved.status})`);
+      return normalizeSnapshot(await approved.json());
     },
   };
 }

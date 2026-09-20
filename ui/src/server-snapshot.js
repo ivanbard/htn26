@@ -51,6 +51,26 @@ function normalizePoint(point, dimensions, normalized) {
   };
 }
 
+function inferredStationPosition(stationId, floorPlan) {
+  const requested = String(stationId || "center").toLowerCase();
+  const stations = Array.isArray(floorPlan?.stations) ? floorPlan.stations : [];
+  const exactId = requested.startsWith("stove-") ? "stove" : requested;
+  const exact = stations.find((candidate) => String(candidate?.id || "").toLowerCase() === exactId);
+  const indexed = (kind, index = 0) => stations.filter((candidate) => candidate?.kind === kind)[index] || null;
+  const station = exact
+    || (requested === "pantry" ? stations.find((candidate) => /pantry|bun|lettuce/i.test(`${candidate?.id} ${candidate?.label} ${candidate?.nfcTag}`)) : null)
+    || (requested === "fridge" ? stations.find((candidate) => /fridge|meat|cheese/i.test(`${candidate?.id} ${candidate?.label} ${candidate?.nfcTag}`)) : null)
+    || (requested === "cutting-board" ? indexed("chop") : null)
+    || (requested === "stove-left" ? (stations.find((candidate) => /stove1|left/i.test(`${candidate?.id} ${candidate?.label}`)) || indexed("stove")) : null)
+    || (requested === "stove-right" ? (stations.find((candidate) => /stove2|right/i.test(`${candidate?.id} ${candidate?.label}`)) || indexed("stove", 1)) : null)
+    || (requested === "serving" ? stations.find((candidate) => ["assembly", "delivery", "serving"].includes(candidate?.kind) || /assembly|serv/i.test(`${candidate?.id} ${candidate?.label}`)) : null);
+  if (!station) return requested === "center" ? { x: 50, y: 50 } : null;
+  return {
+    x: Number(station.x) + (Number(station.width) / 2),
+    y: Number(station.y) + (Number(station.height) / 2),
+  };
+}
+
 function assetKeyForStation(station) {
   const identity = `${station?.id || ""} ${station?.nfcTag || ""} ${station?.kind || ""}`.toLowerCase();
   if (identity.includes("stove") || station?.kind === "pot") return "STOVE";
@@ -101,6 +121,27 @@ function normalizeStation(station, index, dimensions, normalized) {
   };
 }
 
+/**
+ * The server's floor plan has one physical `stove` NFC zone but two logical
+ * stoves (LEFT/RIGHT) that the badges select between. Draw both so the second
+ * stove's contents and cooking progress are visible: split the single tile into
+ * two adjacent tiles whose ids match the runtime `stove-left`/`stove-right`
+ * stations. Placement instructions are intentionally left as the one physical
+ * NFC zone. A plan that already has several stoves is returned untouched.
+ */
+function splitSingleStove(stations) {
+  const stoves = stations.filter((station) => station.kind === "stove");
+  if (stoves.length !== 1 || /left|right/i.test(stoves[0].id)) return stations;
+  const [stove] = stoves;
+  const tile = stove.display || normalizedDisplayRect(stove);
+  const centerX = tile.x + tile.width / 2;
+  const leftX = clamp(centerX - tile.width, 0, Math.max(0, 100 - tile.width * 2));
+  const half = (id, label, side, x) => ({ ...stove, id, label, side, display: { ...tile, x } });
+  return stations.flatMap((station) => station === stove
+    ? [half("stove-left", "STOVE 1", "LEFT", leftX), half("stove-right", "STOVE 2", "RIGHT", leftX + tile.width)]
+    : [station]);
+}
+
 function normalizeFloorPlan(plan) {
   const dimensions = sourceDimensions(plan);
   const normalized = isNormalizedPlan(plan);
@@ -127,19 +168,25 @@ function normalizeFloorPlan(plan) {
     units: "percent",
     layoutFromImage: plan?.layoutFromImage === true,
     walls,
-    stations,
+    stations: splitSingleStove(stations),
     placementInstructions,
     room: { widthMeters: dimensions.width, heightMeters: dimensions.height },
   };
 }
 
-function normalizePlayer(player, dimensions, normalized) {
+function normalizePlayer(player, dimensions, normalized, floorPlan) {
   const color = String(player?.color || "green").toLowerCase();
-  const position = normalizePoint(player?.position, dimensions, normalized);
+  const explicitPosition = normalizePoint(player?.position, dimensions, normalized);
+  const stationId = player?.simulatedLocation?.stationId || player?.currentStation;
+  const inferredPosition = explicitPosition || inferredStationPosition(stationId, floorPlan);
   return {
     ...player,
     color: TEAM_ALIASES[color] || color,
-    position,
+    position: inferredPosition,
+    ...(inferredPosition && !explicitPosition ? {
+      location: player?.simulatedLocation?.label || stationId,
+      positionSource: player?.simulatedLocation?.source || "action-inference",
+    } : {}),
   };
 }
 
@@ -161,20 +208,29 @@ export function normalizeServerSnapshot(snapshot) {
   const sourcePlan = snapshot.floorPlan || {};
   const dimensions = sourceDimensions(sourcePlan);
   const normalized = isNormalizedPlan(sourcePlan);
+  const normalizedPlan = normalizeFloorPlan(sourcePlan);
   const orders = activeOrders(snapshot).slice(0, 4);
   const primaryOrder = orders.find((order) => order?.status === "active") || orders[0] || snapshot.order;
   return {
     ...snapshot,
     version: 2,
-    floorPlan: normalizeFloorPlan(sourcePlan),
+    floorPlan: normalizedPlan,
     players: (Array.isArray(snapshot.players) ? snapshot.players : [])
-      .map((player) => normalizePlayer(player, dimensions, normalized)),
+      .map((player) => normalizePlayer(player, dimensions, normalized, normalizedPlan)),
     orders,
+    // Completed/expired orders are dropped from `orders` (active only); keep the
+    // history so the results screen can summarize the round.
+    orderHistory: Array.isArray(snapshot.orders) ? snapshot.orders.slice(-64) : [],
     order: primaryOrder || snapshot.order || {},
     stations: Array.isArray(snapshot.stations) ? snapshot.stations.map((station) => ({ ...station })) : [],
   };
 }
 
 export function isPiServerSnapshot(snapshot) {
-  return Boolean(snapshot && ["pi-server", "pi-server-simulator"].includes(snapshot.source));
+  return Boolean(snapshot && [
+    "pi-server",
+    "pi-server-simulator",
+    "root-server",
+    "root-server-simulator",
+  ].includes(snapshot.source));
 }

@@ -3,6 +3,7 @@
 // cannot visibly cross a counter when its centre point is technically clear.
 export const PLAYER_RADIUS = 11;
 export const PLAYER_SEPARATION = 16;
+export const MAX_PLAYER_MOVE_MS = 1_150;
 
 const PATH_CLEARANCE = 0.35;
 const ROOM_MIN = 0;
@@ -79,10 +80,23 @@ function uniquePoints(points) {
 }
 
 export function movementBarriers(walls = []) {
-  return (Array.isArray(walls) ? walls : [])
+  const barriers = (Array.isArray(walls) ? walls : [])
     .filter((wall) => wall?.blocksMovement !== false)
     .map(normalizedBarrier)
     .filter(Boolean);
+  // Station display rectangles are often nested inside their counter's
+  // collision rectangle. Keeping both creates duplicate graph corners and
+  // makes a three-player plan needlessly expensive without adding clearance.
+  // Preserve overlapping/sibling barriers; only discard strict containment.
+  return barriers.filter((barrier, index) => !barriers.some((outer, outerIndex) => (
+    index !== outerIndex
+      && outer.x <= barrier.x
+      && outer.y <= barrier.y
+      && outer.x + outer.width >= barrier.x + barrier.width
+      && outer.y + outer.height >= barrier.y + barrier.height
+      && (outer.x < barrier.x || outer.y < barrier.y
+        || outer.width > barrier.width || outer.height > barrier.height)
+  )));
 }
 
 export function isWalkablePosition(point, walls = [], radius = PLAYER_RADIUS) {
@@ -305,12 +319,30 @@ function joinPaths(first, second) {
   return [...first, ...(tail.x === head.x && tail.y === head.y ? second.slice(1) : second)];
 }
 
-function candidatePaths(from, to, walls, radius) {
+function geometryKey(walls, radius) {
+  return `${radius}|${movementBarriers(walls).map((wall) => (
+    `${wall.x.toFixed(3)},${wall.y.toFixed(3)},${wall.width.toFixed(3)},${wall.height.toFixed(3)}`
+  )).join(";")}`;
+}
+
+function candidatePaths(from, to, walls, radius, cache = null) {
+  const cacheKey = cache
+    ? `${from.x.toFixed(3)},${from.y.toFixed(3)}>${to.x.toFixed(3)},${to.y.toFixed(3)}|${geometryKey(walls, radius)}`
+    : null;
+  if (cacheKey && cache.has(cacheKey)) return cache.get(cacheKey);
   const barriers = movementBarriers(walls);
   const candidates = [routePlayerPath(from, to, barriers, radius)];
   // The base graph returns the shortest safe route. These waypoint variants
   // are the alternate lanes used when another chef reserves that same route.
-  routeWaypoints(barriers, radius).forEach((waypoint) => {
+  // Only obstacles touched by the straight-line corridor can affect an
+  // alternate lane. Considering corners from unrelated counters multiplies
+  // the graph work without creating a useful route.
+  const corridorBarriers = barriers.filter((barrier) => segmentIntersectsRect(
+    from,
+    to,
+    expandedBarrier(barrier, radius + PATH_CLEARANCE),
+  ));
+  routeWaypoints(corridorBarriers, radius).forEach((waypoint) => {
     const first = routePlayerPath(from, waypoint, barriers, radius);
     const second = routePlayerPath(waypoint, to, barriers, radius);
     const joined = joinPaths(first, second);
@@ -339,13 +371,16 @@ function candidatePaths(from, to, walls, radius) {
   }
   const unique = new Map();
   candidates.forEach((path) => unique.set(pathKey(path), path));
-  return [...unique.values()]
+  const result = [...unique.values()]
     // A one-point route is the blocked-geometry sentinel from
     // routePlayerPath, not a usable candidate. Keep it out of reservation
     // ranking whenever a real route exists; otherwise the caller returns the
     // sentinel explicitly and marks the target as unreached.
-    .filter((path) => path.length > 1 && path.every((point) => isWalkablePosition(point, barriers, radius)))
+    .filter((path) => path.length > 1 && path.every((point) => isWalkablePosition(point, barriers, radius))
+      && pathIsWalkable(path, barriers, radius))
     .sort((left, right) => pathLength(left) - pathLength(right));
+  if (cacheKey) cache.set(cacheKey, result);
+  return result;
 }
 
 function sampleCountForPaths(left, right) {
@@ -412,7 +447,30 @@ function pathIsWalkable(path, walls, radius) {
 }
 
 function travelDuration(path) {
-  return Math.min(1_150, Math.max(460, pathLength(path) * 19));
+  return Math.min(MAX_PLAYER_MOVE_MS, Math.max(460, pathLength(path) * 19));
+}
+
+export function movementEase(progress) {
+  const value = clamp(progress, 0, 1);
+  // Cubic ease-in-out keeps the first and last frames gentle while ensuring
+  // every scan-to-scan movement settles in at most MAX_PLAYER_MOVE_MS.
+  const eased = value < 0.5
+    ? 4 * value * value * value
+    : 1 - (((-2 * value) + 2) ** 3) / 2;
+  return eased === 0 ? 0 : eased;
+}
+
+export function headingForPath(path = [], progress = 1, fallback = 0) {
+  if (!Array.isArray(path) || path.length < 2) return fallback;
+  const value = clamp(progress, 0, 1);
+  const before = pointAlongPath(path, Math.max(0, value - 0.002));
+  const after = pointAlongPath(path, Math.min(1, value + 0.002));
+  const dx = after.x - before.x;
+  const dy = after.y - before.y;
+  if (Math.hypot(dx, dy) < 0.001) return fallback;
+  // The art faces down by default. CSS positive rotation moves that forward
+  // vector counter-clockwise in screen coordinates, hence the negated dx.
+  return Math.atan2(-dx, dy) * (180 / Math.PI);
 }
 
 function reservationDelays(reservations) {
@@ -476,7 +534,7 @@ function chooseReservedPlan(candidates, reservations, separation, avoidPoints = 
  * players. It tries the shortest route first, then alternate wall-corner
  * lanes, and finally returns the least-conflicting route for queueing.
  */
-export function routePlayerPathWithReservations(from, to, walls = [], reservations = [], radius = PLAYER_RADIUS, separation = PLAYER_SEPARATION, avoidPoints = [], softAvoidPoints = avoidPoints) {
+export function routePlayerPathWithReservations(from, to, walls = [], reservations = [], radius = PLAYER_RADIUS, separation = PLAYER_SEPARATION, avoidPoints = [], softAvoidPoints = avoidPoints, cache = null) {
   // Turn other chefs' current/destination centres into small dynamic square
   // barriers. Their player-radius expansion produces the same separation
   // rule used by the temporal checker, so a route cannot cut through a chef's
@@ -494,9 +552,9 @@ export function routePlayerPathWithReservations(from, to, walls = [], reservatio
   // Dynamic avoidance squares can make a destination temporarily occupied.
   // Do not accept the route helper's projected substitute as if it were the
   // requested station; the static route can be delayed until that chef moves.
-  const dynamicCandidates = candidatePaths(from, to, planningWalls, radius)
+  const dynamicCandidates = candidatePaths(from, to, planningWalls, radius, cache)
     .filter((path) => pointDistance(path.at(-1), to) < 0.5);
-  [...dynamicCandidates, ...candidatePaths(from, to, walls, radius)]
+  [...dynamicCandidates, ...candidatePaths(from, to, walls, radius, cache)]
     .forEach((path) => candidateMap.set(pathKey(path), path));
   const candidates = [...candidateMap.values()];
   if (!candidates.length) return { path: [projectPointIntoWalkableRoom(from, walls, from, radius)], conflicts: reservations.length, strategy: "blocked-fallback" };
@@ -549,6 +607,7 @@ export function planPlayerPaths(players = [], walls = [], {
   const targets = new Map(targetPlayers.map((player) => [player.id, player.position]));
   const requestedTargets = new Map(source.map((player) => [player.id, player.targetPosition || player.position]));
   const starts = new Map(safeSources.map((player) => [player.id, player.position]));
+  const candidateCache = new Map();
 
   const buildPlan = (orderedPlayers) => {
     const reservations = [];
@@ -571,6 +630,7 @@ export function planPlayerPaths(players = [], walls = [], {
         separation,
         reservedDestinationPoints,
         [...otherStartPoints, ...reservedDestinationPoints],
+        candidateCache,
       );
       const plan = {
         path: result.path,
@@ -602,11 +662,50 @@ export function planPlayerPaths(players = [], walls = [], {
       bestPlan = candidate;
     }
   });
+  // If simultaneous paths are impossible for this scan, let one chef make
+  // progress while the other two wait in their already-separated positions.
+  // This is safer and less glitchy than freezing the whole kitchen, and the
+  // next authoritative scan will re-plan from the moved chef's new position.
+  for (const player of safeSources) {
+    const start = starts.get(player.id);
+    const target = targets.get(player.id) || start;
+    const otherStarts = [...starts.entries()]
+      .filter(([id]) => id !== player.id)
+      .map(([, point]) => point);
+    const result = routePlayerPathWithReservations(
+      start,
+      target,
+      walls,
+      [],
+      radius,
+      separation,
+      otherStarts,
+      otherStarts,
+      candidateCache,
+    );
+    const mover = {
+      path: result.path,
+      delayMs: 0,
+      durationMs: result.durationMs || travelDuration(result.path),
+      conflicts: result.conflicts,
+      strategy: "single-mover-queue",
+      reachedTarget: pointDistance(result.path.at(-1), target) < 0.5,
+    };
+    const fallback = new Map(safeSources.map((candidate) => [candidate.id, candidate.id === player.id
+      ? mover
+      : {
+          path: [starts.get(candidate.id), starts.get(candidate.id)],
+          delayMs: 0,
+          durationMs: 460,
+          conflicts: 0,
+          strategy: "single-mover-hold",
+          reachedTarget: false,
+        }]));
+    if (playerPlansAreCollisionSafe(fallback, separation)) return fallback;
+  }
   // If every priority permutation still contains a temporal crossing, hold
-  // the chefs in their already-separated safe slots for this snapshot. It is
-  // better to wait for the next authoritative scan than to animate a sprite
-  // through another chef. A later state update can then produce a fresh route
-  // after one of the agents has moved.
+  // the chefs in their already-separated safe slots for this snapshot. This
+  // is the final safety gate for an over-constrained or impossible geometry.
   const holdingPlan = new Map(safeSources.map((player) => [player.id, {
     path: [player.position, player.position],
     delayMs: 0,

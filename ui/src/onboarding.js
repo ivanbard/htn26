@@ -52,3 +52,19 @@ export function calculateStarRating({ score = 0, maxScore = 0, maxStars = DEFAUL
   const thresholds = available === 1 ? [0.6] : available === 2 ? [0.45, 0.75] : [0.35, 0.65, 0.9];
   return thresholds.reduce((stars, threshold, index) => ratio >= threshold ? index + 1 : stars, 0);
 }
+
+/**
+ * Tally a round's orders for the results screen. Pass the full history when the
+ * transport supplies it; active-only lists still work (they just under-count).
+ */
+export function summarizeOrders(orders = []) {
+  const list = Array.isArray(orders) ? orders : [];
+  const count = (status) => list.filter((order) => String(order?.status || "").toLowerCase() === status).length;
+  return {
+    issued: list.length,
+    served: count("completed"),
+    expired: count("expired"),
+    active: count("active"),
+    maxScore: maxScoreForOrders(list),
+  };
+}

@@ -6,7 +6,7 @@ HTN26 is a local cooperative cooking game inspired by Overcooked.
 
 The first playable version uses one Raspberry Pi and one phone camera.
 
-The phone camera supplies 3-5 classroom photos to the current laptop-first root `server/` and `ui/` development surfaces. The server-side OpenAI room-layout endpoint reconciles them into a reviewable proposal; the API key remains server-side.
+The phone camera supplies 3-5 classroom photos to the current laptop-first root `server/` and `ui/` development surfaces. The server-side OpenAI room-layout endpoint reconciles them into the personalized room used by the tour; the API key remains server-side.
 
 The deterministic floorplan and authoritative game engine remain available. QNX/on-device inference is a future deployment path, not a claim made by the laptop-hosted OpenAI endpoint.
 
@@ -42,12 +42,11 @@ If a product summary here conflicts with a component implementation contract, ke
 ## v1 setup
 
 1. Use the phone camera to take 3-5 photos of the classroom.
-2. Open the root `ui/` against the root `server/` and generate a laptop-hosted AI room-layout proposal.
-3. Review and explicitly approve the proposed floor plan on the local UI.
-4. Generate the burger level and follow the placement instructions for the four NFC zones.
-5. Connect the host badge to the Pi and assign unique numbers to the three player badges.
-6. Select host mode on the host badge and player mode on the other badges.
-7. Start the round from the host badge.
+2. Open the root `ui/` against the root `server/` and choose the personalized room layout once the upload arrives, or continue with the normal layout when no photos are available.
+3. Follow the floor walkthrough and place the burger stations at the highlighted spots.
+4. Connect the host badge to the Pi and assign unique numbers to the three player badges.
+5. Select host mode on the host badge and player mode on the other badges.
+6. Start the round from the host badge.
 
 The setup photographs define the level layout only.
 

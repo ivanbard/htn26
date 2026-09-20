@@ -3,6 +3,7 @@ import {
   canRunAction,
   formatSeconds,
   isStale,
+  timestampMs,
   matchRuntimeStations,
   playerPosition,
   progressPercent,
@@ -13,7 +14,11 @@ import {
   UI_DISPLAY_MODES,
 } from "./state.js";
 import { validateFrontendSnapshot } from "./contracts.js";
+import { DEFAULT_MAX_STARS, calculateStarRating, summarizeOrders } from "./onboarding.js";
 import {
+  headingForPath,
+  MAX_PLAYER_MOVE_MS,
+  movementEase,
   planPlayerPaths,
   projectPointIntoWalkableRoom,
   routePlayerPath,
@@ -83,7 +88,11 @@ function orderTitle(order) {
 }
 
 function activeOrdersFor(state) {
-  const source = Array.isArray(state.orders) && state.orders.length ? state.orders : state.order ? [state.order] : [];
+  const source = Array.isArray(state.activeOrders) && state.activeOrders.length
+    ? state.activeOrders
+    : Array.isArray(state.orders) && state.orders.length
+      ? state.orders
+      : state.order ? [state.order] : [];
   return source.filter((order) => order?.status === "active").slice(0, 4);
 }
 
@@ -95,29 +104,64 @@ const TOUR_PREVIEW_ORDER = Object.freeze({
   toppings: [],
   components: ["BUN", "MEAT"],
   goldValue: 100,
-  remainingSeconds: 120,
-  totalSeconds: 120,
+  remainingSeconds: null,
+  totalSeconds: null,
   patience: { segments: 3, filledSegments: 3 },
 });
 
 function tourPreviewState(state) {
   const order = activeOrdersFor(state)[0] || TOUR_PREVIEW_ORDER;
+  const components = Array.isArray(order.components) && order.components.length
+    ? [...order.components]
+    : [...TOUR_PREVIEW_ORDER.components];
   const previewOrder = {
     ...TOUR_PREVIEW_ORDER,
     ...order,
+    components,
     status: "active",
-    remainingSeconds: Number(order.totalSeconds) > 0 ? Number(order.totalSeconds) : TOUR_PREVIEW_ORDER.totalSeconds,
-    totalSeconds: Number(order.totalSeconds) > 0 ? Number(order.totalSeconds) : TOUR_PREVIEW_ORDER.totalSeconds,
+    // The tour is a paused preview. A customer timer must not count down while
+    // somebody is still learning the room.
+    remainingSeconds: null,
+    totalSeconds: null,
+    preview: true,
     patience: { ...TOUR_PREVIEW_ORDER.patience, ...order.patience, filledSegments: 3 },
   };
   const totalSeconds = Number(state.clock?.totalSeconds) > 0 ? Number(state.clock.totalSeconds) : 240;
+  const previewStations = Array.isArray(state.stations)
+    ? state.stations.map((station) => ({
+      ...station,
+      status: station.kind === "ingredient" ? "ready" : "idle",
+      progress: 0,
+      remainingSeconds: 0,
+      totalSeconds: 0,
+      item: "EMPTY",
+      warning: false,
+      warningMessage: undefined,
+      actionState: undefined,
+    }))
+    : state.stations;
+  const previewPlayers = Array.isArray(state.players)
+    ? state.players.map((player) => ({
+      ...player,
+      inventory: [],
+      plate: [],
+      hasPlate: false,
+      heldItem: null,
+      actionState: undefined,
+      actionStateAt: undefined,
+    }))
+    : state.players;
   return {
     ...state,
     orders: [previewOrder],
+    activeOrders: [previewOrder],
     order: previewOrder,
+    stations: previewStations,
+    players: previewPlayers,
     score: { ...(state.score || {}), value: 0, delivered: 0 },
     gold: { ...(state.gold || {}), total: 0, earned: 0, lastChange: 0 },
     tips: { ...(state.tips || {}), total: 0, earned: 0, lastChange: 0 },
+    serving: { ...(state.serving || {}), lastEvent: null },
     clock: { ...(state.clock || {}), status: "ready", remainingSeconds: totalSeconds, totalSeconds },
   };
 }
@@ -129,9 +173,9 @@ function seconds(value) {
 }
 
 function stageIndex(phase) {
-  if (phase === SETUP_PHASES.RUNNING) return 4;
-  if (phase === SETUP_PHASES.BURGER_PLACEMENT || phase === SETUP_PHASES.LAYOUT_ACCEPTED) return 3;
-  if (phase === SETUP_PHASES.LAYOUT_PROPOSED) return 2;
+  if (phase === SETUP_PHASES.RUNNING) return 3;
+  if (phase === SETUP_PHASES.BURGER_PLACEMENT || phase === SETUP_PHASES.LAYOUT_ACCEPTED) return 2;
+  if (phase === SETUP_PHASES.LAYOUT_PROPOSED) return 1;
   if (phase === SETUP_PHASES.SCANNING) return 1;
   return 0;
 }
@@ -157,13 +201,11 @@ function stagesForLayout(layoutFromImage) {
   return layoutFromImage ? [
     { key: "host", label: "Wake the kitchen", description: "Turn on the host and setup camera", action: GAME_ACTIONS.START_HOST },
     { key: "scan", label: "Map the room", description: "Use setup photos for the play area", action: GAME_ACTIONS.SCAN_ROOM },
-    { key: "approve", label: "Choose the layout", description: "Review the image-based placement", action: GAME_ACTIONS.APPROVE_LAYOUT },
     { key: "place", label: "Place the stations", description: "Match pieces to those spots", action: null },
     { key: "play", label: "Start cooking", description: "Begin the four-minute round", action: GAME_ACTIONS.START_GAME },
   ] : [
     { key: "host", label: "Wake the kitchen", description: "Turn on the host badge and display", action: GAME_ACTIONS.START_HOST },
     { key: "scan", label: "Load the room", description: "Use the standard kitchen layout", action: GAME_ACTIONS.SCAN_ROOM },
-    { key: "approve", label: "Confirm the layout", description: "Review the fixed station positions", action: GAME_ACTIONS.APPROVE_LAYOUT },
     { key: "place", label: "Place the stations", description: "Put the NFC zones at the illustrated counters", action: null },
     { key: "play", label: "Start cooking", description: "Begin the four-minute round", action: GAME_ACTIONS.START_GAME },
   ];
@@ -323,6 +365,17 @@ function StationContents({ station, runtimeStation, serving }) {
   );
 }
 
+// The authoritative server sends `plate: []` for a player with NO plate and
+// says so explicitly through `hasPlate` / `heldItem`, while the offline mock
+// uses `plate: []` for an empty plate in hand. Trust the explicit fields first
+// and only fall back to the legacy array convention when they are absent.
+function playerHasPlate(player) {
+  if (typeof player?.hasPlate === "boolean") return player.hasPlate;
+  if (player?.heldItem != null && String(player.heldItem).trim() !== "") return ingredientKey(player.heldItem) === "PLATE";
+  return Array.isArray(player?.plate)
+    || (Array.isArray(player?.inventory) && player.inventory.some((item) => ingredientKey(item) === "PLATE"));
+}
+
 function playerPlateItems(player) {
   if (Array.isArray(player?.plate)) return player.plate;
   const inventory = Array.isArray(player?.inventory) ? player.inventory : [];
@@ -363,18 +416,46 @@ function playerPointAlongPath(path, progress) {
   return path.at(-1);
 }
 
-function AnimatedPlayer({ player, position, walls, stale, plannedPath, delayMs = 0, pathStrategy = "single-agent" }) {
+// The server's free-text `actionState`; only moments a player needs to notice
+// get a bubble (routine "holding ..." states are already visible as the item).
+const ACTION_BUBBLES = Object.freeze([
+  [/cut failed/i, "CUT FAILED", "bad"],
+  [/submission rejected|consensus expired/i, "REJECTED", "bad"],
+  [/order served/i, "SERVED!", "good"],
+  [/ready to submit/i, "SHAKE!", "info"],
+  [/no transfer/i, "NO SWAP", "bad"],
+  [/transferred/i, "SWAPPED", "good"],
+  [/dropped/i, "DROPPED", "info"],
+]);
+const ACTION_BUBBLE_LIFETIME_MS = 6000;
+
+function actionBubble(player, now) {
+  const state = String(player?.actionState || "");
+  const match = ACTION_BUBBLES.find(([pattern]) => pattern.test(state));
+  if (!match) return null;
+  // actionState persists until the player's next action, so fade it out using
+  // `actionStateAt` (stamped in the browser by action-tracker.js). With no stamp its age is unknown; hide it
+  // rather than leave a stale callout on screen.
+  const changedAt = timestampMs(player?.actionStateAt);
+  if (changedAt == null || !Number.isFinite(Number(now))) return null;
+  if (Number(now) - changedAt > ACTION_BUBBLE_LIFETIME_MS) return null;
+  return { text: match[1], tone: match[2] };
+}
+
+function AnimatedPlayer({ player, position, walls, stale, plannedPath, delayMs = 0, pathStrategy = "single-agent", now, tourTarget = false }) {
   const target = projectPointIntoWalkableRoom(position, walls, position);
   const targetKey = `${target.x.toFixed(3)}:${target.y.toFixed(3)}`;
   const wallKey = (walls || []).map((wall) => `${wall.x}:${wall.y}:${wall.width}:${wall.height}:${wall.blocksMovement}`).join("|");
   const plannedPathKey = Array.isArray(plannedPath) ? plannedPath.map((point) => `${point.x.toFixed(3)},${point.y.toFixed(3)}`).join("|") : "";
   const previousPoint = React.useRef(target);
+  const facingRef = React.useRef(0);
   const frame = React.useRef(0);
   const [visualPosition, setVisualPosition] = React.useState(target);
+  const [facing, setFacing] = React.useState(0);
   const [moving, setMoving] = React.useState(false);
   const plateItems = plateableIngredientKeys(playerPlateItems(player));
   const heldItems = playerHeldItems(player, plateItems);
-  const hasPlate = Array.isArray(player?.plate) || (Array.isArray(player?.inventory) && player.inventory.some((item) => ingredientKey(item) === "PLATE"));
+  const hasPlate = playerHasPlate(player);
   // The chef art no longer carries its own plate: one ready-made plate sprite
   // (plate + food in a single image) fills the plate region instead, so items
   // can never spill off. Only combos without drawn art (cheese+lettuce) keep
@@ -396,21 +477,28 @@ function AnimatedPlayer({ player, position, walls, stale, plannedPath, delayMs =
     if (from.x === destination.x && from.y === destination.y) return undefined;
 
     const distance = path.slice(1).reduce((sum, point, index) => sum + Math.hypot(point.x - path[index].x, point.y - path[index].y), 0);
-    const duration = Math.min(1_150, Math.max(460, distance * 19));
+    const duration = Math.min(MAX_PLAYER_MOVE_MS, Math.max(460, distance * 19));
     let delayTimer;
     const start = () => {
       const startedAt = performance.now();
+      const initialFacing = headingForPath(path, 0, facingRef.current);
+      facingRef.current = initialFacing;
+      setFacing(initialFacing);
       setMoving(true);
       const tick = (time) => {
         const linear = Math.min(1, (time - startedAt) / duration);
-        const accelerated = linear * linear * (3 - (2 * linear));
-        const next = playerPointAlongPath(path, accelerated);
+        const eased = movementEase(linear);
+        const next = playerPointAlongPath(path, eased);
+        const nextFacing = headingForPath(path, linear, facingRef.current);
+        facingRef.current = nextFacing;
         previousPoint.current = next;
         setVisualPosition(next);
+        setFacing(nextFacing);
         if (linear < 1) frame.current = requestAnimationFrame(tick);
         else {
           previousPoint.current = destination;
           setVisualPosition(destination);
+          setFacing(headingForPath(path, 1, nextFacing));
           setMoving(false);
         }
       };
@@ -427,27 +515,32 @@ function AnimatedPlayer({ player, position, walls, stale, plannedPath, delayMs =
   const label = player.label || player.id;
   const locationLabel = !position ? "location unavailable" : stale ? "last scan is stale" : "last scan confirmed";
   return h("div", {
-    className: cx("tracked-player", `player-team-${team}`, hasPlate && "has-plate", moving && "is-moving", stale && "is-stale"),
+    className: cx("tracked-player", `player-team-${team}`, hasPlate && "has-plate", moving && "is-moving", stale && "is-stale", tourTarget && "is-tour-target"),
     style: { left: `${visualPosition.x}%`, top: `${visualPosition.y}%` },
     "data-player": player.id,
+    "data-tour-target": tourTarget ? "player" : undefined,
     "data-stale": stale,
     "data-player-path": "barrier-safe",
     "data-path-strategy": pathStrategy,
     "aria-label": `${player.name || label}, ${locationLabel}`,
   },
-  h("div", { className: "player-token" },
-    h("div", { className: "player-avatar" },
+    h("div", { className: "player-token" },
+    h("div", { className: "player-avatar", style: { transform: `rotate(${facing}deg)` } },
       h("img", { className: "player-chef-art", src: hasPlate ? chefArt.holdBack : playerChefAsset(player), alt: "" }),
       hasPlate && plateArt && h("img", { className: "player-plate-sprite", "data-plate-sprite": plateCombo ? "combo" : "base", src: plateArt, alt: `${label} plate: ${plateItems.join(", ") || "empty"}` }),
       hasPlate && h("img", { className: "player-chef-art player-chef-hold-front", src: chefArt.holdFront, alt: "" }),
       hasPlate && !plateCombo && h(PlateIngredients, { ingredients: plateItems, stage: "plated", className: "player-plate-ingredients", label: `${label} plate: ${plateItems.join(", ") || "empty"}` }),
       !hasPlate && heldItems.length > 0 && h("div", { className: "player-held-item", "aria-label": `${label} is holding ${heldItems[0]}` }, h(IngredientIcon, { value: heldItems[0], stage: "plated" })),
     ),
+    (() => {
+      const bubble = actionBubble(player, now);
+      return bubble && h("span", { className: cx("player-action-bubble", `is-${bubble.tone}`), role: "status", "data-player-action": bubble.text }, bubble.text);
+    })(),
     h("span", { className: "player-tag" }, label),
   ));
 }
 
-function RoomSurface({ state, now, gameplay = false }) {
+function RoomSurface({ state, now, gameplay = false, tourFocus = [] }) {
   const plan = state.floorPlan || {};
   const accepted = plan.accepted === true;
   const layoutFromImage = plan.layoutFromImage === true;
@@ -473,13 +566,18 @@ function RoomSurface({ state, now, gameplay = false }) {
     "data-barrier": wall.id || index,
     "aria-hidden": true,
   }));
-  const stations = (plan.stations || []).map((station) => h("div", {
+  const stations = (plan.stations || []).map((station) => {
+    const tourTarget = tourFocus.some((target) => target === station.id || target === station.kind || target === station.assetKey?.toLowerCase());
+    return h("div", {
       key: station.id,
-      className: cx("room-station", gameplay ? "room-station-gameplay" : "room-station-setup", stationClass(station.kind), stationGridClass(station, plan.grid)),
+      className: cx("room-station", gameplay ? "room-station-gameplay" : "room-station-setup", stationClass(station.kind), stationGridClass(station, plan.grid), tourTarget && "is-tour-target"),
       style: rectStyle(station.display || station),
       "data-station": station.id,
+      "data-tour-target": tourTarget ? "station" : undefined,
       "data-grid-cell": station.grid ? `${station.grid.column}:${station.grid.row}` : undefined,
-    }, h(StationContents, { station, runtimeStation: runtimeStations.get(station.id), serving: state.serving })));
+    }, h(StationContents, { station, runtimeStation: runtimeStations.get(station.id), serving: state.serving }));
+  });
+  const playersAreTourTarget = tourFocus.includes("players") || tourFocus.includes("player");
   const positionedPlayers = separatePlayerPositions(state.players || [], movementWalls);
   const planningPlayers = positionedPlayers
     .filter((player) => player?.position)
@@ -502,9 +600,11 @@ function RoomSurface({ state, now, gameplay = false }) {
       position,
       walls: movementWalls,
       stale,
+      tourTarget: playersAreTourTarget,
       plannedPath: pathPlan?.path,
       delayMs: pathPlan?.delayMs,
       pathStrategy: pathPlan?.strategy,
+      now,
     }) : h("div", {
       key: player.id,
       className: "tracked-player is-stale",
@@ -521,12 +621,11 @@ function RoomSurface({ state, now, gameplay = false }) {
     "data-grid-rows": plan.grid?.rows,
     role: "img",
     "aria-label": `${accepted ? "Accepted burger" : "Proposed room"} top-down kitchen with scan-animated players`,
-  }, !layoutFromImage && h("div", { className: "kitchen-floor", "aria-hidden": true }), !gameplay && h("div", { className: "room-plan-grid", "aria-hidden": true }), walls, stations, players,
-  !accepted && h("div", { className: "room-approval-overlay" }, "Approve floor plan to generate burger level"));
+  }, !layoutFromImage && h("div", { className: "kitchen-floor", "aria-hidden": true }), !gameplay && h("div", { className: "room-plan-grid", "aria-hidden": true }), walls, stations, players);
 }
 
-function RoomStage({ state, now, gameplay = false }) {
-  return h("div", { className: cx("room-stage", gameplay && "room-stage-gameplay") }, h(RoomSurface, { state, now, gameplay }));
+function RoomStage({ state, now, gameplay = false, tourFocus = [] }) {
+  return h("div", { className: cx("room-stage", gameplay && "room-stage-gameplay") }, h(RoomSurface, { state, now, gameplay, tourFocus }));
 }
 
 function rectStyle(item) {
@@ -601,7 +700,7 @@ function BurgerPreview({ order, components }) {
   );
 }
 
-function OrderCard({ order, compact = false }) {
+function OrderCard({ order, compact = false, tourTarget = false }) {
   const components = Array.isArray(order.components) ? order.components.slice(0, 4) : [];
   const remaining = Number(order.remainingSeconds);
   const total = Number(order.totalSeconds);
@@ -616,7 +715,7 @@ function OrderCard({ order, compact = false }) {
       ? segments <= 1 ? "is-critical" : segments === 2 ? "is-warning" : "is-healthy"
       : "is-healthy";
   const titleId = `hud-title-${String(order.id || "order").replaceAll(/[^a-zA-Z0-9_-]/g, "-")}`;
-  return h("section", { className: cx("hud-order", compact && "hud-order-compact", urgency), "data-node-id": "39:26", "data-order-id": order.id, "aria-labelledby": titleId },
+  return h("section", { className: cx("hud-order", compact && "hud-order-compact", urgency, tourTarget && "is-tour-target"), "data-node-id": "39:26", "data-order-id": order.id, "data-tour-target": tourTarget ? "order" : undefined, "aria-labelledby": titleId },
     h(BurgerPreview, { order, components }),
     h("div", { className: "hud-order-main" },
       h("div", { className: "hud-order-heading" },
@@ -633,56 +732,23 @@ function OrderCard({ order, compact = false }) {
   );
 }
 
-function OrdersHud({ state }) {
+// The strip always has four slots, so a card is the same size whether one order
+// or four are open; cards fill from the left and the rest stay empty.
+function OrdersHud({ state, tourTarget = false }) {
   const orders = activeOrdersFor(state);
-  return h("div", { className: cx("game-board-orders", `orders-${orders.length}`), "data-order-count": orders.length, "aria-label": `${orders.length} active orders` },
+  return h("div", { className: "game-board-orders orders-4", "data-order-count": orders.length, "aria-label": `${orders.length} active orders` },
     orders.length
-      ? orders.map((order) => h(OrderCard, { key: order.id, order, compact: orders.length > 1 }))
+      ? orders.map((order, index) => h(OrderCard, { key: order.id, order, compact: true, tourTarget: tourTarget && index === 0 }))
       : h("div", { className: "orders-empty" }, "All orders served!"),
   );
 }
 
 function ScoreCard({ state }) {
   const score = state.score || {};
-  return h("div", { className: "board-score", "data-node-id": "31:25", "aria-label": `${score.value ?? 0} WatCoins, ${score.delivered ?? 0} burgers served` },
+  const value = Number(score.value) || 0;
+  return h("div", { className: "board-score", "data-node-id": "31:25", "aria-label": `${value} WatCoins, ${score.delivered ?? 0} burgers served` },
     h("img", { src: "/assets/score-coin-counter.png", alt: "", "aria-hidden": true }),
-    h("strong", { className: "board-score-value" }, score.value ?? 0),
-  );
-}
-
-// Short enough to read well under 30 seconds: five labeled steps, no
-// paragraphs. Grounded in the actual v1 rules (README.md / UPDATE_v1.1.md) —
-// pantry/fridge pickups, cutting-board chopping, stove cooking, plating, and
-// the three-player simultaneous-shake submission.
-const HOW_IT_WORKS_STEPS = Object.freeze([
-  { icon: "🧺", text: "Grab buns/lettuce at the pantry, cheese/meat at the fridge" },
-  { icon: "🔪", text: "Hold A at the cutting board to chop it" },
-  { icon: "🔥", text: "Cook cut meat on a stove (15s)" },
-  { icon: "🍽️", text: "Pick up a plate and stack the order's ingredients on it" },
-  { icon: "🤝", text: "All 3 players shake at once to submit the plate" },
-]);
-
-// Local UI-only: this never calls onCommand or touches authoritative state.
-// It appears once per gameplay mount (a fresh round re-mounts GameplayBoard,
-// so it naturally reappears next round) and only a viewer's own dismiss click
-// closes it early; the round timer underneath keeps running regardless.
-function HowItWorksOverlay() {
-  const [open, setOpen] = React.useState(true);
-  if (!open) return null;
-  return h("div", { className: "how-it-works", role: "dialog", "aria-label": "How this game works" },
-    h("div", { className: "how-it-works-card" },
-      h("p", { className: "how-it-works-kicker" }, "How this works"),
-      h("ol", { className: "how-it-works-steps" }, HOW_IT_WORKS_STEPS.map((step, index) => h("li", { key: index },
-        h("span", { className: "how-it-works-icon", "aria-hidden": true }, step.icon),
-        h("span", null, step.text),
-      ))),
-      h("button", {
-        type: "button",
-        className: "how-it-works-dismiss",
-        "data-dismiss": "how-it-works",
-        onClick: () => setOpen(false),
-      }, "Got it — start cooking"),
-    ),
+    h("strong", { className: cx("board-score-value", value < 0 && "is-negative") }, value),
   );
 }
 
@@ -696,30 +762,69 @@ const DELIVERY_TOAST_LIFETIME_MS = 3200;
 // much patience was left (the order's 3-segment meter — see
 // mock-transport.js's orderTip()/patience.filledSegments, ported from
 // pi/server's projection.mjs), or a wrong plate applies a penalty. This is
-// the live, in-round version of that result; ServingPanel (ResultsView)
-// still shows the final round's last event after the round ends.
-function DeliveryToast({ state, now }) {
+// the live, in-round version of that result; The results screen shows the round's
+// totals after it ends.
+// An order that ran out of patience is charged a penalty by the server and
+// simply leaves the active list; without a cue the card just vanishes.
+const orderExpiredAt = (order) => timestampMs(order?.expiredAt ?? order?.deadlineAt);
+
+function recentlyExpiredOrder(state, now) {
+  const history = Array.isArray(state.orderHistory) && state.orderHistory.length ? state.orderHistory : (state.orders || []);
+  let latest = null;
+  let latestAt = -Infinity;
+  for (const order of history) {
+    if (String(order?.status || "").toLowerCase() !== "expired") continue;
+    const at = orderExpiredAt(order);
+    const age = at == null ? NaN : Number(now) - at;
+    if (age >= 0 && age <= DELIVERY_TOAST_LIFETIME_MS && at > latestAt) {
+      latest = order;
+      latestAt = at;
+    }
+  }
+  return latest;
+}
+
+// The newest thing that just changed the WatCoin total (a served burger, a wrong
+// plate, or an expired order), with its signed amount. The toast explains it and
+// the coin counter floats the same amount, so a penalty is visibly coins lost.
+function latestScoreEvent(state, now) {
+  const found = [];
   const event = state.serving?.lastEvent;
-  if (!event) return null;
-  const age = Number(now) - Number(event.at);
-  if (!(age >= 0) || age > DELIVERY_TOAST_LIFETIME_MS) return null;
-  const success = event.status === "success";
-  const segments = Math.max(0, Math.min(3, Number(event.patienceSegments) || 0));
-  return h("div", {
-    key: event.at,
-    className: cx("delivery-toast", success ? "is-success" : "is-failure"),
-    role: "status",
-    "aria-live": "polite",
-  },
-    h("strong", { className: "delivery-toast-message" }, event.message),
-    success
-      ? h("div", { className: "delivery-toast-breakdown" },
-        h("span", { className: "delivery-toast-gold" }, `+${event.gold} WATCOINS`),
-        h("span", { className: "delivery-toast-tip" }, `+${event.tip} TIP`),
-        h("span", { className: "delivery-toast-patience", "aria-label": `Served with ${segments} of 3 patience segments remaining` },
-          [0, 1, 2].map((index) => h("i", { key: index, className: cx("delivery-toast-pip", index < segments && "is-filled") }))),
-      )
-      : h("div", { className: "delivery-toast-breakdown" }, h("span", { className: "delivery-toast-penalty" }, `${event.penalty ? "-" : ""}${event.penalty || 0} PENALTY`)),
+  const eventAt = timestampMs(event?.at);
+  const age = eventAt == null ? NaN : Number(now) - eventAt;
+  if (event && age >= 0 && age <= DELIVERY_TOAST_LIFETIME_MS) {
+    const success = event.status === "success";
+    found.push({ kind: "submission", at: eventAt, event, delta: success ? (Number(event.gold) || 0) + (Number(event.tip) || 0) : -(Number(event.penalty) || 0) });
+  }
+  const expired = recentlyExpiredOrder(state, now);
+  if (expired) found.push({ kind: "expired", at: orderExpiredAt(expired), order: expired, delta: -(Number(expired.penalty) || 0) });
+  return found.sort((a, b) => b.at - a.at)[0] || null;
+}
+
+// "BURGER SERVED" -> "Burger served": the server shouts, the screen shouldn't.
+const sentenceCase = (text) => {
+  const value = String(text || "").toLowerCase();
+  return value.charAt(0).toUpperCase() + value.slice(1);
+};
+
+// Bottom-centre announcement, styled like the WatCoin and clock pills it sits
+// between. It always names the coins ("+100 WatCoins", "-25 WatCoins"); a served
+// burger adds its tip as a smaller second figure.
+function DeliveryToast({ state, now }) {
+  const latest = latestScoreEvent(state, now);
+  if (!latest) return null;
+  const expired = latest.kind === "expired";
+  const success = !expired && latest.event.status === "success";
+  const message = expired ? "Order expired" : sentenceCase(latest.event.message);
+  const key = expired ? `expired-${latest.order.id}` : latest.event.at;
+  const coins = success ? Number(latest.event.gold) || 0 : -Math.abs(Number(expired ? latest.order.penalty : latest.event.penalty) || 0);
+  const tip = success ? Number(latest.event.tip) || 0 : 0;
+  return h("div", { className: "game-board-toast" },
+    h("div", { key, className: cx("delivery-toast", success ? "is-success" : "is-failure", expired && "is-expired"), role: "status", "aria-live": "polite" },
+      h("span", { className: "delivery-toast-message" }, message),
+      coins !== 0 && h("span", { className: "delivery-toast-amount" }, `${coins > 0 ? "+" : "-"}${Math.abs(coins)} WatCoins`),
+      tip > 0 && h("span", { className: "delivery-toast-tip" }, `+${tip} tip`),
+    ),
   );
 }
 
@@ -732,7 +837,6 @@ function GameplayBoard({ state, now }) {
       h(DeliveryToast, { state, now }),
       h("div", { className: "game-board-score" }, h(ScoreCard, { state })),
       h("div", { className: "game-board-timer" }, h(TimerCard, { state, compact: true })),
-      h(HowItWorksOverlay),
     ),
   );
 }
@@ -746,7 +850,7 @@ function SetupView({ state, now, onCommand, transportKind, onUploadPhotos, uploa
   return h("div", { className: "setup-flow" },
     h(HostPanel, { state, onCommand }),
     h("div", { className: "setup-workspace" },
-      h("section", { className: "setup-card map-card", "aria-labelledby": "map-title" }, h("div", { className: "map-heading" }, h("div", null, h("p", { className: "setup-kicker" }, accepted ? "Layout ready" : "Room preview"), h("h2", { id: "map-title" }, accepted ? "Your burger kitchen" : "Check the play area")), h("span", { className: cx("map-state", accepted && "is-ready") }, accepted ? "Ready to place" : "Needs approval")), h("p", null, accepted ? "Match each printed ingredient and station to its labelled spot on the map below. Keep chopping boards and stoves still once the round begins." : "Approve the layout to see where every station belongs."), transportKind === "http" && h("div", { className: "server-photo-upload" }, h("label", { htmlFor: "room-photo-input" }, "Room photos are uploaded from the phone to the master Pi"), h("input", { id: "room-photo-input", type: "file", accept: "image/*", multiple: true, onChange: (event) => onUploadPhotos?.(event.target.files) }), uploadStatus && h("span", { role: "status" }, uploadStatus)), h("div", { className: "map-frame" }, h(RoomStage, { state, now }))),
+      h("section", { className: "setup-card map-card", "aria-labelledby": "map-title" }, h("div", { className: "map-heading" }, h("div", null, h("p", { className: "setup-kicker" }, accepted ? "Layout ready" : "Room map"), h("h2", { id: "map-title" }, accepted ? "Your burger kitchen" : "Room map loading")), h("span", { className: cx("map-state", accepted && "is-ready") }, accepted ? "Ready to place" : "Mapping")), h("p", null, accepted ? "Match each printed ingredient and station to its labelled spot on the map below. Keep chopping boards and stoves still once the round begins." : "The room map is being prepared. Follow the floor walkthrough when it is ready."), transportKind === "http" && h("div", { className: "server-photo-upload" }, h("label", { htmlFor: "room-photo-input" }, "Room photos are uploaded from the phone to the master Pi"), h("input", { id: "room-photo-input", type: "file", accept: "image/*", multiple: true, onChange: (event) => onUploadPhotos?.(event.target.files) }), uploadStatus && h("span", { role: "status" }, uploadStatus)), h("div", { className: "map-frame" }, h(RoomStage, { state, now }))),
     ),
   );
 }
@@ -829,13 +933,16 @@ function RoomPhotoUpload({ state, uploadStatus }) {
   );
 }
 
-function PlayerSetupView({ state, onCommand, transportKind, onUploadPhotos, uploadStatus }) {
+function PlayerSetupView({ state, onCommand, onGenerateLayout, onUseDefaultLayout, transportKind, onUploadPhotos, uploadStatus, connectionError }) {
   const players = playersForSlots(state);
   const readyCount = players.filter(playerIsReady).length;
   const photoCount = roomPhotoCount(state);
   const hasMinimumPlayers = readyCount >= 1;
-  const hasPhotos = transportKind !== "http" || photoCount >= 3;
-  const canScan = canRunAction(state, GAME_ACTIONS.SCAN_ROOM) && hasMinimumPlayers && hasPhotos;
+  const personalizedReady = transportKind === "http" && photoCount >= 3;
+  const serverUnavailable = Boolean(connectionError) || /failed|unavailable|error/i.test(String(uploadStatus || ""));
+  const canContinue = hasMinimumPlayers && canRunAction(state, GAME_ACTIONS.SCAN_ROOM);
+  const personalizedAction = onGenerateLayout || (() => onCommand?.(GAME_ACTIONS.SCAN_ROOM));
+  const defaultAction = onUseDefaultLayout || (() => onCommand?.(GAME_ACTIONS.SCAN_ROOM));
   return h("main", { className: "onboarding-screen player-setup-screen", "data-onboarding": "players", "aria-labelledby": "player-setup-title" },
     h("div", { className: "player-setup-content" },
       h("div", { className: "onboarding-copy player-setup-heading" },
@@ -849,31 +956,128 @@ function PlayerSetupView({ state, onCommand, transportKind, onUploadPhotos, uplo
       h("button", {
         type: "button",
         className: "onboarding-button player-setup-continue",
-        disabled: !canScan,
+        disabled: !canContinue,
         "data-command": GAME_ACTIONS.SCAN_ROOM,
-        onClick: () => onCommand?.(GAME_ACTIONS.SCAN_ROOM),
-      }, "Continue"),
+        onClick: () => personalizedReady && !serverUnavailable ? personalizedAction() : defaultAction(),
+      }, personalizedReady && !serverUnavailable ? "Continue with Personalized Room Layout" : "Continue with Normal Room Layout"),
     ),
   );
 }
 
-function TourWalkthrough({ state, onCommand, onClose }) {
-  const [step, setStep] = React.useState(0);
-  const finalStep = step === HOW_IT_WORKS_STEPS.length - 1;
-  const current = HOW_IT_WORKS_STEPS[step];
-  return h("div", { className: "tour-welcome-layer", role: "dialog", "aria-labelledby": "tour-step-title" },
-    h("div", { className: "tour-step-content" },
-      h("p", { className: "tour-kicker" }, `Tour ${step + 1} of ${HOW_IT_WORKS_STEPS.length}`),
-      h("div", { className: "tour-step-icon", "aria-hidden": true }, current.icon),
-      h("h1", { id: "tour-step-title" }, current.text),
-      h("div", { className: "tour-actions" },
+const TOUR_STEPS = Object.freeze([
+  {
+    key: "orders",
+    title: "Read the order",
+    detail: "Start with the leftmost card. Its icons show what to collect.",
+    control: "No button yet — use the order as your recipe.",
+    focus: [],
+  },
+  {
+    key: "sources",
+    title: "Collect ingredients",
+    detail: "Pantry: buns + lettuce. Fridge: cheese + meat.",
+    control: "Press Left or Right to choose an ingredient.",
+    focus: ["ingredient", "pantry", "fridge"],
+  },
+  {
+    key: "chop",
+    title: "Chop ingredients",
+    detail: "Bring ingredients to a cutting board.",
+    control: "Hold A while scanning the board.",
+    focus: ["chop", "cutting_board"],
+  },
+  {
+    key: "stove",
+    title: "Cook the meat",
+    detail: "Chopped meat cooks for 15 seconds.",
+    control: "Press Left or Right, then scan a stove.",
+    focus: ["stove", "pot"],
+  },
+  {
+    key: "assembly",
+    title: "Build the burger",
+    detail: "Match the plate to the leftmost order.",
+    control: "Scan the plate to add ingredients.",
+    focus: ["assembly", "delivery", "serving"],
+  },
+  {
+    key: "submit",
+    title: "Submit together",
+    detail: "All three players shake at once.",
+    control: "Plate-holder: hold A + shake.",
+    focus: [],
+  },
+]);
+
+function stationMatchesTourFocus(station, focus) {
+  return focus.some((target) => target === station.id || target === station.kind || target === station.assetKey?.toLowerCase());
+}
+
+function tourFocusWindow(state, step) {
+  if (step.key === "orders") return { left: 3, top: 1, right: 36, bottom: 19 };
+  const stations = (state.floorPlan?.stations || [])
+    .filter((station) => stationMatchesTourFocus(station, step.focus))
+    .map((station) => station.display || station);
+  if (!stations.length) return null;
+  const bounds = stations.reduce((result, station) => ({
+    left: Math.min(result.left, Number(station.x) || 0),
+    top: Math.min(result.top, Number(station.y) || 0),
+    right: Math.max(result.right, (Number(station.x) || 0) + (Number(station.width) || 0)),
+    bottom: Math.max(result.bottom, (Number(station.y) || 0) + (Number(station.height) || 0)),
+  }), { left: 100, top: 100, right: 0, bottom: 0 });
+  const padding = 2;
+  return {
+    left: 15 + Math.max(0, bounds.left - padding) * .7,
+    top: 19 + Math.max(0, bounds.top - padding) * .62,
+    right: 15 + Math.min(100, bounds.right + padding) * .7,
+    bottom: 19 + Math.min(100, bounds.bottom + padding) * .62,
+  };
+}
+
+function tourPlacement(focusWindow) {
+  if (!focusWindow) return { side: "center", region: "center" };
+  const focusCenterX = (focusWindow.left + focusWindow.right) / 2;
+  const focusCenterY = (focusWindow.top + focusWindow.bottom) / 2;
+  return {
+    side: focusCenterX < 50 ? "right" : "left",
+    region: focusCenterY < 50 ? "lower" : "upper",
+  };
+}
+
+function TourWalkthrough({ step, placement, focusWindow, onStepChange, onCommand, onClose }) {
+  const current = TOUR_STEPS[step];
+  const finalStep = step === TOUR_STEPS.length - 1;
+  const washStyle = focusWindow ? {
+    "--tour-wash-top": `${focusWindow.top}%`,
+    "--tour-wash-bottom": `${focusWindow.bottom}%`,
+    "--tour-wash-left": `${focusWindow.left}%`,
+    "--tour-wash-right": `${focusWindow.right}%`,
+  } : undefined;
+  return h("div", { className: "tour-guide-layer", role: "dialog", "aria-labelledby": "tour-step-title" },
+    h("div", { className: "tour-guide-wash", style: washStyle, "aria-hidden": true },
+      focusWindow
+        ? [
+          h("div", { key: "top", className: "tour-wash-region tour-wash-top" }),
+          h("div", { key: "bottom", className: "tour-wash-region tour-wash-bottom" }),
+          h("div", { key: "left", className: "tour-wash-region tour-wash-left" }),
+          h("div", { key: "right", className: "tour-wash-region tour-wash-right" }),
+        ]
+        : h("div", { className: "tour-wash-region tour-wash-full" }),
+    ),
+    h("div", { className: "tour-guide-card", "data-tour-step": current.key, "data-tour-placement": placement.side, "data-tour-region": placement.region },
+      h("p", { className: "tour-kicker" }, `Tour ${step + 1} of ${TOUR_STEPS.length}`),
+      h("h1", { id: "tour-step-title" }, current.title),
+      h("p", { className: "tour-step-detail" }, current.detail),
+      h("p", { className: "tour-step-control" }, h("strong", null, "Press: "), current.control),
+      h("div", { className: "tour-actions tour-guide-actions" },
         h("button", {
           type: "button",
           className: "tour-primary-button",
-          onClick: () => finalStep ? onCommand?.(GAME_ACTIONS.START_GAME) : setStep((value) => value + 1),
-        }, finalStep ? "Start Cooking" : "Continue"),
-        h("button", { type: "button", className: "tour-secondary-button", onClick: onClose }, "Back"),
+          onClick: () => finalStep ? onCommand?.(GAME_ACTIONS.START_GAME) : onStepChange(step + 1),
+        }, finalStep ? "Start Cooking" : "Next"),
+        step > 0 && h("button", { type: "button", className: "tour-secondary-button", onClick: () => onStepChange(step - 1) }, "Back"),
         h("button", { type: "button", className: "tour-skip-button", "data-command": GAME_ACTIONS.START_GAME, onClick: () => onCommand?.(GAME_ACTIONS.START_GAME) }, "Skip to the Game"),
+        h("button", { type: "button", className: "tour-close-button", onClick: onClose }, "Exit tour"),
       ),
     ),
   );
@@ -881,15 +1085,19 @@ function TourWalkthrough({ state, onCommand, onClose }) {
 
 function TourIntroView({ state, now, onCommand }) {
   const [tourStarted, setTourStarted] = React.useState(false);
+  const [tourStep, setTourStep] = React.useState(0);
   const preview = tourPreviewState(state);
+  const currentStep = TOUR_STEPS[tourStep];
+  const focusWindow = tourStarted ? tourFocusWindow(preview, currentStep) : null;
+  const placement = tourPlacement(focusWindow);
   return h("main", { className: "tour-screen", "data-onboarding": "tour", "aria-labelledby": "tour-title" },
-    h("div", { className: "tour-game-board" },
-      h(RoomStage, { state: preview, now, gameplay: true }),
+    h("div", { className: cx("tour-game-board", tourStarted && "is-tour-active") },
+      h(RoomStage, { state: preview, now, gameplay: true, tourFocus: tourStarted ? currentStep.focus : [] }),
       h(OrdersHud, { state: preview }),
       h("div", { className: "game-board-score" }, h(ScoreCard, { state: preview })),
       h("div", { className: "game-board-timer" }, h(TimerCard, { state: preview, compact: true })),
       tourStarted
-        ? h(TourWalkthrough, { state: preview, onCommand, onClose: () => setTourStarted(false) })
+        ? h(TourWalkthrough, { step: tourStep, placement, focusWindow, onStepChange: setTourStep, onCommand, onClose: () => setTourStarted(false) })
         : h("div", { className: "tour-welcome-layer", role: "dialog", "aria-labelledby": "tour-title" },
           h("div", { className: "tour-welcome-content" },
             h("img", { className: "tour-burger", src: "/assets/order-burger.png", alt: "" }),
@@ -904,46 +1112,81 @@ function TourIntroView({ state, now, onCommand }) {
   );
 }
 
-function StationsPanel({ state }) {
-  const cards = (state.stations || []).map((station) => {
-    const progress = progressPercent(station.progress);
-    return h("article", { key: station.id, className: "border border-[#2a435a] bg-[#0c1824] p-3" },
-      h("div", { className: "flex items-center justify-between gap-2" },
-        h("h3", { className: "font-extrabold text-white" }, station.label || station.id),
-        h(StatusBadge, { status: station.status || "unknown", label: station.status || "unknown" }),
-      ),
-      h("p", { className: "my-3 text-sm text-[#a9bac9]" }, station.item || "EMPTY"),
-      h("div", { className: "h-2 overflow-hidden bg-[#071019]" }, h("span", { className: "block h-full bg-[#ffd166]", style: { width: `${progress}%` } })),
-      h("div", { className: "mt-2 flex justify-between text-xs font-bold text-[#a9bac9]" },
-        h("span", null, `${progress.toFixed(0)}%`),
-        h("span", null, station.remainingSeconds == null ? "--:--" : `${formatSeconds(station.remainingSeconds)} remaining`),
-      ),
-    );
-  });
-  return h("section", { className: "border border-[#2a435a] bg-[#101c29] p-5", "aria-labelledby": "stations-title" },
-    h("div", { className: "mb-4 flex items-center justify-between" },
-      h("div", null, h("p", { className: "mb-1 text-xs font-black uppercase tracking-[0.16em] text-[#a9bac9]" }, "Authoritative station state"), h("h2", { id: "stations-title", className: "text-xl font-black text-white" }, "Cut, cook & assemble")),
-      h(StatusBadge, { status: "running", label: "Live" }),
-    ),
-    h("div", { className: "grid gap-3 sm:grid-cols-2" }, cards),
-  );
-}
-
-function ServingPanel({ state }) {
-  const queue = Math.max(0, Number(state.serving?.gooseQueue || 0));
-  const event = state.serving?.lastEvent;
-  return h("section", { className: cx("delivery-panel serving-panel border bg-[#101c29] p-5", event?.status === "success" ? "delivery-success border-[#57e389]" : event ? "delivery-failure border-[#ff6f6f]" : "border-[#2a435a]"), "aria-labelledby": "serving-title" }, h("p", { className: "mb-1 text-xs font-black uppercase tracking-[0.16em] text-[#a9bac9]" }, event ? "Serving result" : "Serving / Waterloo geese"), h("h2", { id: "serving-title", className: "text-xl font-black text-white" }, event?.message || `${queue} geese waiting`), h("div", { className: "my-4 flex flex-wrap gap-2" }, Array.from({ length: Math.min(queue, 8) }, (_, index) => h("span", { key: index, className: "border border-[#d6dce3] bg-[#f5f7fa] px-2 py-1 text-[10px] font-black text-[#16212b]" }, "GOOSE"))), h("p", { className: "text-sm text-[#a9bac9]" }, event?.detail || "Bring a completed burger to the serving badge. No washing dishes."), event && h("strong", { className: cx("delivery-points mt-5 block text-3xl", event.status === "success" ? "text-[#57e389]" : "text-[#ff6f6f]") }, event.status === "success" ? `+${event.points ?? 0}` : "NO SCORE"));
-}
-
 function GameplayView({ state, now }) {
   return h(GameplayBoard, { state, now });
 }
 
-function ResultsView({ state, now, onCommand }) {
-  return h(React.Fragment, null, h("section", { className: "flex flex-col justify-between gap-4 border border-[#ffd166] bg-[#2a2415] p-5 md:flex-row md:items-center" }, h("div", null, h("p", { className: "mb-1 text-xs font-black uppercase tracking-[0.16em] text-[#ffd166]" }, "Round complete"), h("h2", { className: "text-2xl font-black text-white" }, phaseLabel(state.setup?.phase)), h("p", { className: "mt-1 text-sm text-[#a9bac9]" }, state.setup?.message)), h(ActionButton, { state, action: GAME_ACTIONS.RESET_GAME, label: "Reset game", onCommand })), h("div", { className: "mt-5 grid gap-5 xl:grid-cols-[minmax(0,1.55fr)_minmax(320px,.85fr)]" }, h("section", { className: "border border-[#2a435a] bg-[#101c29] p-5" }, h("div", { className: "mb-4 flex items-center justify-between" }, h("h2", { className: "text-xl font-black text-white" }, "Room mirror"), h(StatusBadge, { status: "healthy", label: "Final layout" })), h("div", { className: "aspect-[1672/941] overflow-hidden border border-[#45647d]" }, h(RoomSurface, { state, now }))), h(ServingPanel, { state })));
+function ResultStat({ label, value, tone }) {
+  return h("div", { className: cx("results-stat", tone && `is-${tone}`), "data-result-stat": label.toLowerCase().replaceAll(" ", "-") },
+    h("strong", null, value),
+    h("span", null, label),
+  );
 }
 
-export function App({ state, now = Date.now(), connectionError = "", uploadStatus = "", transportKind, onCommand, onUploadPhotos }) {
+// The final card. Score, gold, tips and order outcomes are read from the
+// authoritative snapshot; only the star rating is a presentation rule.
+function ResultsView({ state, onCommand }) {
+  const history = Array.isArray(state.orderHistory) && state.orderHistory.length ? state.orderHistory : (state.orders || []);
+  const summary = summarizeOrders(history);
+  const score = Number(state.score?.value) || 0;
+  const served = Number(state.score?.delivered ?? summary.served) || 0;
+  const maxStars = Number(state.level?.maxStars) || DEFAULT_MAX_STARS;
+  const stars = calculateStarRating({ score, maxScore: summary.maxScore, maxStars });
+  const penalties = state.penalties?.total;
+  return h("main", { className: "onboarding-screen results-screen", "data-onboarding": "results", "aria-labelledby": "results-title" },
+    h("div", { className: "results-content" },
+      h("div", { className: "onboarding-copy" },
+        h("h1", { id: "results-title" }, "Round complete"),
+        h("p", null, state.serving?.lastEvent?.message ? `Last order: ${state.serving.lastEvent.message}` : "Great teamwork!"),
+      ),
+      h("div", { className: "results-stars", role: "img", "aria-label": `${stars} of ${maxStars} stars`, "data-stars": stars },
+        Array.from({ length: maxStars }, (_, index) => h("span", { key: index, className: cx("results-star", index < stars && "is-earned"), "aria-hidden": true }, "★"))),
+      h("div", { className: "results-score", "aria-label": `${score} WatCoins` },
+        h("img", { src: "/assets/order-burger.png", alt: "" }),
+        h("strong", null, score),
+        h("span", null, "WatCoins"),
+      ),
+      h("div", { className: "results-stats" },
+        h(ResultStat, { label: "Burgers served", value: served, tone: "good" }),
+        summary.expired > 0 && h(ResultStat, { label: "Orders missed", value: summary.expired, tone: "bad" }),
+        state.gold?.total != null && h(ResultStat, { label: "Gold", value: state.gold.total }),
+        state.tips?.total != null && h(ResultStat, { label: "Tips", value: state.tips.total }),
+        penalties != null && Number(penalties) > 0 && h(ResultStat, { label: "Penalties", value: `-${penalties}`, tone: "bad" }),
+      ),
+      h("button", {
+        type: "button",
+        className: "onboarding-button",
+        disabled: !canRunAction(state, GAME_ACTIONS.RESET_GAME),
+        "data-command": GAME_ACTIONS.RESET_GAME,
+        onClick: () => onCommand?.(GAME_ACTIONS.RESET_GAME),
+      }, "Play again"),
+    ),
+  );
+}
+
+// Shown after the UI's START_GAME while the server waits for the physical host
+// badge. The round (and its timer) starts from the badge, so this screen has no
+// start button of its own: it only tells the operator what to do next.
+function WaitingForHostView({ state, onCommand }) {
+  return h("main", { className: "onboarding-screen waiting-host-screen", "data-onboarding": "waiting", "aria-labelledby": "waiting-title" },
+    h("div", { className: "onboarding-content" },
+      h("img", { className: "onboarding-burger", src: "/assets/order-burger.png", alt: "" }),
+      h("div", { className: "onboarding-copy" },
+        h("h1", { id: "waiting-title" }, "Ready when you are"),
+        h("p", { className: "waiting-host-pulse", role: "status" }, "Press START on the host badge"),
+        h("p", null, "The four-minute round begins from the badge."),
+      ),
+      h("button", {
+        type: "button",
+        className: "onboarding-button onboarding-button-secondary",
+        "data-command": GAME_ACTIONS.RESET_GAME,
+        onClick: () => onCommand?.(GAME_ACTIONS.RESET_GAME),
+      }, "Cancel and reset"),
+    ),
+  );
+}
+
+export function App({ state, now = Date.now(), connectionError = "", uploadStatus = "", transportKind, onCommand, onGenerateLayout, onUseDefaultLayout, onUploadPhotos }) {
   if (!state) return h("section", { className: "mx-auto mt-24 max-w-2xl border border-[#2a435a] bg-[#101c29] p-8 text-center" }, h("p", { className: "text-xs font-black uppercase tracking-[0.16em] text-[#a9bac9]" }, "Burger level"), h("h1", { className: "mt-2 text-3xl font-black text-white" }, "Waiting for authoritative state…"), connectionError && h("div", { id: "ui-error", className: "ui-error", role: "alert" }, connectionError));
   const validation = validateFrontendSnapshot(state);
   if (!validation.valid) return h("section", { className: "mx-auto mt-24 max-w-3xl border border-[#ff6f6f] bg-[#2c1820] p-8", role: "alert" }, h("p", { className: "text-xs font-black uppercase tracking-[0.16em] text-[#ff6f6f]" }, "Burger level"), h("h1", { className: "mt-2 text-3xl font-black text-white" }, "Authoritative state unavailable"), h("p", { className: "mt-3 text-[#a9bac9]" }, "The received snapshot does not match the frontend contract. No game values were rendered."), h("p", { className: "mt-3 text-white" }, validation.errors.map((error) => error.message).join(" ")));
@@ -951,10 +1194,14 @@ export function App({ state, now = Date.now(), connectionError = "", uploadStatu
   const onboarding = state.setup?.phase === SETUP_PHASES.IDLE;
   const playerSetup = state.setup?.phase === SETUP_PHASES.SCANNING;
   const tour = [SETUP_PHASES.BURGER_PLACEMENT, SETUP_PHASES.LAYOUT_ACCEPTED].includes(state.setup?.phase);
+  const waitingForHost = state.setup?.phase === SETUP_PHASES.WAITING_FOR_HOST;
+  const results = mode === UI_DISPLAY_MODES.RESULTS;
   const content = onboarding
     ? h(OnboardingView, { state, onCommand })
+    : waitingForHost
+      ? h(WaitingForHostView, { state, onCommand })
     : playerSetup
-      ? h(PlayerSetupView, { state, onCommand, transportKind, onUploadPhotos, uploadStatus })
+      ? h(PlayerSetupView, { state, onCommand, onGenerateLayout, onUseDefaultLayout, transportKind, onUploadPhotos, uploadStatus, connectionError })
       : tour
         ? h(TourIntroView, { state, now, onCommand })
       : mode === UI_DISPLAY_MODES.GAMEPLAY
@@ -964,7 +1211,7 @@ export function App({ state, now = Date.now(), connectionError = "", uploadStatu
         : h(SetupView, { state, now, onCommand, transportKind, onUploadPhotos, uploadStatus });
   const gameplay = mode === UI_DISPLAY_MODES.GAMEPLAY;
   const setupMode = mode === UI_DISPLAY_MODES.SETUP;
-  return h("div", { className: cx("app-shell", gameplay && "is-gameplay", setupMode && "is-setup", onboarding && "is-onboarding", playerSetup && "is-player-setup", tour && "is-tour"), "data-display-mode": mode },
+  return h("div", { className: cx("app-shell", gameplay && "is-gameplay", setupMode && "is-setup", (onboarding || waitingForHost || results) && "is-onboarding", playerSetup && "is-player-setup", tour && "is-tour"), "data-display-mode": mode },
     connectionError && h("div", { id: "ui-error", className: "ui-error mb-4", role: "alert" }, connectionError),
     content,
   );

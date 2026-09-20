@@ -26,6 +26,8 @@ export function createApp({ root, transport, now = () => Date.now() }) {
       uploadStatus,
       transportKind: transport.kind,
       onCommand,
+      onGenerateLayout,
+      onUseDefaultLayout,
       onUploadPhotos,
     };
     if (reactRoot) reactRoot.render(React.createElement(App, props));
@@ -59,6 +61,35 @@ export function createApp({ root, transport, now = () => Date.now() }) {
     }
     render(state);
   };
+
+  const runLayoutChoice = async (operation, progressMessage, successMessage) => {
+    if (typeof operation !== "function") return onCommand("SCAN_ROOM");
+    connectionError = "";
+    uploadStatus = progressMessage;
+    render(state);
+    const stateAtCommandStart = state;
+    try {
+      const nextState = await operation();
+      if (state !== stateAtCommandStart) return;
+      uploadStatus = successMessage;
+      render(nextState);
+    } catch (error) {
+      connectionError = `ROOM LAYOUT FAILED — ${error.message}`;
+      render(state);
+    }
+  };
+
+  const onGenerateLayout = () => runLayoutChoice(
+    transport.generateRoomLayout?.bind(transport),
+    "Mapping the uploaded room photos…",
+    "Personalized room layout ready.",
+  );
+
+  const onUseDefaultLayout = () => runLayoutChoice(
+    transport.useDefaultLayout?.bind(transport),
+    "Loading the normal room layout…",
+    "Normal room layout ready.",
+  );
 
   const onFallbackClick = async (event) => {
     const button = event.target.closest("button[data-command]");

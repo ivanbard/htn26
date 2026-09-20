@@ -17,6 +17,13 @@ export const INGREDIENT_KINDS = Object.freeze(Object.keys(INGREDIENT_SPRITES));
 export const PLATE_SPRITES = Object.freeze({
   "": sprite("plate"),
   BUN: sprite("plate_bun"),
+  "BUN+CHEESE": sprite("plate_bun_cheese"),
+  "BUN+CHEESE+LETTUCE": sprite("plate_bun_cheese_lettuce"),
+  "BUN+CHEESE+MEAT": sprite("plate_bun_meat_cheese"),
+  "BUN+LETTUCE": sprite("plate_bun_lettuce"),
+  "BUN+LETTUCE+MEAT": sprite("plate_bun_meat_lettuce"),
+  "BUN+MEAT": sprite("plate_bun_meat"),
+  "BUN+CHEESE+LETTUCE+MEAT": sprite("plate_bun_meat_lettuce_cheese"),
   CHEESE: sprite("plate_cheese_slice"),
   LETTUCE: sprite("plate_lettuce_leaf"),
   MEAT: sprite("plate_meat_cooked"),
