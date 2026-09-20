@@ -16,14 +16,19 @@ export function PhotosPage({ fetchImpl = globalThis.fetch }) {
   const [busy, setBusy] = React.useState(false);
 
   const onChange = async (event) => {
+    const input = event.target;
+    const files = Array.from(input.files || []);
     setBusy(true);
     setStatus("Generating room layout…");
     try {
-      await uploadRoomPhotos(event.target.files, { fetchImpl });
+      await uploadRoomPhotos(files, { fetchImpl });
       setStatus("Layout generated. Continue on the laptop.");
     } catch (error) {
-      setStatus(error.message);
+      setStatus(`${error.message} You can choose the photos again.`);
     } finally {
+      // Clear the picker: the browser does not fire a change event when the same
+      // files are chosen again, which would make a retry silently do nothing.
+      input.value = "";
       setBusy(false);
     }
   };

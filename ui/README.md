@@ -11,7 +11,7 @@ Requires Node.js 20 or newer.
 ```sh
 cd ui
 npm test
-npm run dev
+npm run dev:live
 ```
 
 `npm run build` creates the production bundle in `dist/`.
@@ -89,6 +89,43 @@ Authoritative values stay explicit:
 - `health.gateway`, `health.workers`, and `health.inference` remain available to the host integration, but system-health warnings are intentionally excluded from the player-facing gameplay HUD.
 - `stations[].item`, `stations[].status`, and `stations[].remainingSeconds` are rendered directly on their physical boards or plates. Empty stations explicitly show `EMPTY`; the player-facing screen has no separate live-activity feed.
 - `serving.lastEvent` remains available to results/integration surfaces, while `score` is rendered exactly as delivered by the transport.
+
+## Fixture simulator (opt-in)
+
+`npm run dev` is also hardware-safe, but use `npm run dev:live` for a live
+presentation because it explicitly forces fixture simulation off. Neither
+command starts scripts or sends fake player events. The server therefore waits
+for the host badge's real `START_GAME|240|<1-3>` record and displays the full
+four-minute round.
+
+Use `npm run dev:simulate` only when deliberately watching the frontend without
+a phone or badges. It enables `dev-simulator.mjs`, which runs Ethan's two
+fixture scripts, `server/simulate-photos.mjs` then `server/simulate-game.mjs`,
+after setup starts. It only polls `/api/state` on the server the `/api` proxy
+targets (`HTN26_API_PROXY_TARGET`, default `http://127.0.0.1:8787`) and runs
+the existing scripts; it changes nothing outside `ui/`.
+
+- It fires when the setup phase moves from `idle` (or `ended`) to `scanning`, which is the operator pressing Get Started. The scripts send `START_HOST` themselves, so a run blocks re-triggering until it finishes; it re-arms once the game is back at rest.
+- If a script exits with an error the next one still runs (the photo script fails on a repeat game because the server keeps and caps earlier photos; the game script does its own setup). A game already in progress when the dev server starts is left alone. Output appears in the dev-server console prefixed `[sim]`.
+- The fixture game intentionally ends early after showing a success and a
+  failure result. Never use it around live badges; stop it with Ctrl-C and
+  restart with `npm run dev:live`. It needs the game server running and waits
+  quietly until the server answers.
+
+## Never stranded
+
+Every screen in the setup-to-play flow has a working way forward or back, whatever fails (`test/no-dead-ends.test.js`, `test/connection-resilience.test.js`):
+
+- **No server yet, or it dies later:** the page keeps retrying; "Try again now", "Reload the page" and "Open the offline demo" are on the waiting screen. If the connection drops after it was working, a banner says so and the last screen stays up; it clears when the server answers again. A quiet or broken event stream is backed by a 5 s check of `/api/state`.
+- **State it cannot read** (for example a phase it has never heard of) or a **render error** shows what happened with Reload / Reset the game instead of a dead end or a blank page; the error screen clears itself when a newer snapshot arrives.
+- **Player setup:** with no badges connected the normal buttons stay disabled, but "Continue anyway" is always available (the round starts from the host badge, which does not require the badges to have connected first). If the personalized layout fails, the normal layout is offered first and "Try the personalized layout again" stays available.
+- **Tour:** the card can never hide its own buttons. A step with no target, a board that cannot be measured, or a measurement that throws all show the card centred; a second "Skip tour" button lives outside the card while it is not yet showing and on very short windows.
+- **Failed commands** show the server's reason when it gives one and can be dismissed; a failure that lands after the game already moved on (a double click) is not reported. The waiting-for-host screen explains a long wait and always keeps "Cancel and reset".
+- **Phone photos page:** after a failed upload the same photos can be chosen again.
+
+## Server not running
+
+If the browser shows "GAME SERVER UNAVAILABLE", the game server is not reachable (through the dev proxy that appears as a 5xx). Start it with `node server/server.mjs --serial DEVICE`, replacing `DEVICE` with the host badge's USB serial path; the page retries every 3 s and recovers on its own without a reload. The server intentionally does not attach to a badge unless `--serial` is supplied.
 
 ## Tests
 

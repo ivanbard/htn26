@@ -4,7 +4,7 @@
 @import "@fontsource/outfit/latin-600.css";
 @import "@fontsource/outfit/latin-700.css";
 @import "@fontsource/outfit/latin-800.css";
-@import "@fontsource/outfit/latin-900.css";
+
 @import "tailwindcss";
 
 :root {
@@ -1108,6 +1108,17 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--yellow); ou
   font-size: .75rem;
 }
 
+.player-setup-layout-actions {
+  display: grid;
+  width: 100%;
+  gap: .75rem;
+}
+
+.player-setup-layout-actions .onboarding-button {
+  width: 100%;
+  margin: 0;
+}
+
 .player-setup-continue {
   align-self: center;
   width: 100%;
@@ -1306,6 +1317,13 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--yellow); ou
   color: #fff;
   box-shadow: 0 14px 28px rgba(5, 36, 58, .28);
   pointer-events: auto;
+}
+
+/* No target to point at: centred, and visible. */
+.tour-guide-card[data-tour-ready="true"][data-tour-placement="center"] {
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
 }
 
 .tour-guide-card[data-tour-ready="false"] {
@@ -1923,6 +1941,22 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--yellow); ou
   font-weight: 600 !important;
 }
 
+.waiting-host-status,
+.waiting-host-detail,
+.waiting-host-hint {
+  max-width: 38ch;
+}
+
+.waiting-host-status {
+  margin-top: 1.25rem !important;
+  font-weight: 700 !important;
+}
+
+.waiting-host-status.is-connected { color: #236b3a; }
+.waiting-host-status.is-disconnected { color: #a24727; }
+.waiting-host-status.is-unknown { color: #6d5d2f; }
+.waiting-host-detail { font-size: .95rem !important; }
+
 @keyframes waiting-host-pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: .45; }
@@ -2101,7 +2135,81 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--yellow); ou
 .player-action-bubble.is-bad { color: #ff8a8a; }
 .player-action-bubble.is-good { color: #7be8a4; }
 .player-action-bubble.is-info { color: #ffd166; }
+/* A chef with a callout is drawn above the others, so a chef stacked on top of
+   them (later in the page) cannot paint over it. */
+.tracked-player:has(.player-action-bubble) { z-index: 6; }
 
 
 /* A negative total reads red. */
 .board-score-value.is-negative { color: #ff8a8a; }
+
+
+/* Ways out of dead-end screens, and dismissible notices. */
+.escape-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: .6rem 1rem;
+  margin-top: 1.5rem;
+}
+.escape-button {
+  border: 2px solid rgba(255, 255, 255, .55);
+  border-radius: 8px;
+  background: transparent;
+  padding: .55rem 1.1rem;
+  color: #fff;
+  cursor: pointer;
+  font-weight: 700;
+}
+.escape-button:hover { background: rgba(255, 255, 255, .12); }
+.escape-link { color: #a9bac9; font-size: .9rem; text-decoration: underline; }
+
+.ui-error { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.ui-error-dismiss {
+  flex: none;
+  border: 1px solid currentColor;
+  border-radius: 6px;
+  background: transparent;
+  padding: .2rem .7rem;
+  color: inherit;
+  cursor: pointer;
+  font-size: .8rem;
+  font-weight: 700;
+}
+
+.player-setup-note {
+  margin: 0;
+  color: #384152;
+  font-size: .85rem;
+  text-align: center;
+}
+.waiting-host-hint { font-size: 1rem !important; font-style: normal !important; font-weight: 500 !important; max-width: 32ch; }
+
+/* A second way out of the tour that does not live inside the card. Hidden while the
+   card is showing, except on very short windows where the card can be taller than
+   the screen. */
+.tour-escape-skip {
+  position: absolute;
+  z-index: 3;
+  bottom: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 0;
+  border-radius: 8px;
+  background: #005eaa;
+  padding: .5rem 1rem;
+  color: #fff;
+  cursor: pointer;
+  font-weight: 700;
+  pointer-events: auto;
+}
+.tour-escape-skip.is-redundant { display: none; }
+@media (max-height: 420px) {
+  .tour-escape-skip.is-redundant { display: block; }
+}
+/* On short windows the card scrolls instead of running off the screen. */
+@media (max-height: 560px) {
+  .tour-guide-card { max-height: calc(100% - 16px); overflow-y: auto; }
+  .tour-guide-card::before { display: none; }
+}

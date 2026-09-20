@@ -18,6 +18,7 @@ import {
   planPlayerPaths,
   playerPlansAreCollisionSafe,
   pointAlongPath,
+  PLAYER_RADIUS,
   projectPointIntoWalkableRoom,
   routePlayerPath,
   separatePlayerPositions,
@@ -181,6 +182,9 @@ test("renders room upload and server-driven player readiness during scanning", (
   const readyHtml = renderApp(state, 1_000, "", "http");
   assert.match(readyHtml, /data-command="SCAN_ROOM">Continue with Personalized Room Layout/);
   assert.match(readyHtml, /Use Normal Room Layout/);
+  assert.match(readyHtml, /player-setup-layout-actions[\s\S]*player-setup-continue[\s\S]*player-setup-default-layout/);
+  assert.match(styles, /\.player-setup-layout-actions\s*\{[\s\S]*display:\s*grid/);
+  assert.match(styles, /\.player-setup-layout-actions \.onboarding-button\s*\{[\s\S]*width:\s*100%/);
   const failedHtml = renderApp(state, 1_000, "ROOM LAYOUT FAILED — offline", "http");
   assert.match(failedHtml, /data-command="SCAN_ROOM">Continue with Normal Room Layout/);
 });
@@ -463,7 +467,8 @@ test("keeps player targets inside the room and routes them around barrier walls"
   const safeBarrier = projectPointIntoWalkableRoom({ x: 50, y: 50 }, walls, { x: 10, y: 10 });
   const path = routePlayerPath({ x: 22, y: 50 }, { x: 78, y: 50 }, walls);
 
-  assert.deepEqual(safeEdge, { x: 11, y: 89 });
+  // A point outside the room is pulled in to exactly one chef-radius from the corner.
+  assert.deepEqual(safeEdge, { x: PLAYER_RADIUS, y: 100 - PLAYER_RADIUS });
   assert.equal(isWalkablePosition(safeBarrier, walls), true);
   assert.ok(path.length >= 3);
   assert.ok(path.every((point) => isWalkablePosition(point, walls)));

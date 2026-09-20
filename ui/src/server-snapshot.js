@@ -54,8 +54,10 @@ function normalizePoint(point, dimensions, normalized) {
 function inferredStationPosition(stationId, floorPlan) {
   const requested = String(stationId || "center").toLowerCase();
   const stations = Array.isArray(floorPlan?.stations) ? floorPlan.stations : [];
-  const exactId = requested.startsWith("stove-") ? "stove" : requested;
-  const exact = stations.find((candidate) => String(candidate?.id || "").toLowerCase() === exactId);
+  const byId = (id) => stations.find((candidate) => String(candidate?.id || "").toLowerCase() === id);
+  // An exact tile wins (the per-stove tiles stove-left / stove-right); only a plan
+  // with one shared `stove` tile falls back to it.
+  const exact = byId(requested) || (requested.startsWith("stove-") ? byId("stove") : null);
   const indexed = (kind, index = 0) => stations.filter((candidate) => candidate?.kind === kind)[index] || null;
   const station = exact
     || (requested === "pantry" ? stations.find((candidate) => /pantry|bun|lettuce/i.test(`${candidate?.id} ${candidate?.label} ${candidate?.nfcTag}`)) : null)
@@ -64,10 +66,16 @@ function inferredStationPosition(stationId, floorPlan) {
     || (requested === "stove-left" ? (stations.find((candidate) => /stove1|left/i.test(`${candidate?.id} ${candidate?.label}`)) || indexed("stove")) : null)
     || (requested === "stove-right" ? (stations.find((candidate) => /stove2|right/i.test(`${candidate?.id} ${candidate?.label}`)) || indexed("stove", 1)) : null)
     || (requested === "serving" ? stations.find((candidate) => ["assembly", "delivery", "serving"].includes(candidate?.kind) || /assembly|serv/i.test(`${candidate?.id} ${candidate?.label}`)) : null);
-  if (!station) return requested === "center" ? { x: 50, y: 50 } : null;
+  // The server reported a location this plan has nothing to draw for (for example
+  // "serving": v1 has no serving station). Show the chef at the room's default
+  // spot rather than making them disappear.
+  if (!station) return { x: 50, y: 50 };
+  const rect = [station.display?.x, station.display?.y, station.display?.width, station.display?.height].every((value) => Number.isFinite(Number(value)))
+    ? station.display
+    : station;
   return {
-    x: Number(station.x) + (Number(station.width) / 2),
-    y: Number(station.y) + (Number(station.height) / 2),
+    x: Number(rect.x) + (Number(rect.width) / 2),
+    y: Number(rect.y) + (Number(rect.height) / 2),
   };
 }
 
@@ -88,11 +96,19 @@ function sourceContentsForStation(station) {
   return undefined;
 }
 
+// Percent lengths are of the floor plan's width horizontally and of its height
+// vertically. The floor plan is the 1672:941 board minus its wooden frame, about
+// 2.1:1, and a station tile is a CSS square sized by its width. So a tile that
+// is square on screen and `tileSize`% tall must be tileSize / PLAN_ASPECT % wide.
+// Using the same percentage on both axes made tiles ~2x too wide, and the
+// collision model (which uses these rectangles) disagreed with what was drawn.
+const PLAN_ASPECT = 2.12;
+
 function normalizedDisplayRect(rect, tileSize = 18) {
   const centerX = finite(rect.x) + finite(rect.width) / 2;
   const centerY = finite(rect.y) + finite(rect.height) / 2;
-  const width = Math.min(tileSize, 100);
   const height = Math.min(tileSize, 100);
+  const width = Math.min(tileSize / PLAN_ASPECT, 100);
   return {
     x: clamp(centerX - width / 2, 0, 100 - width),
     y: clamp(centerY - height / 2, 0, 100 - height),
@@ -174,15 +190,32 @@ function normalizeFloorPlan(plan) {
   };
 }
 
-function normalizePlayer(player, dimensions, normalized, floorPlan) {
+// A server player has no `tracking.lastSeenAt` when the position is inferred from
+// their latest action (there is no live tracking in v1), and the UI reads a
+// missing timestamp as "stale", which drew every chef at 62% opacity for a whole
+// round. An inferred spot is current until something says otherwise, so keep it
+// fresh; only a dead gateway dims it.
+const INFERRED_LOCATION_FRESH_MS = 60 * 60 * 1000;
+
+function normalizePlayer(player, dimensions, normalized, floorPlan, gatewayDown = false) {
   const color = String(player?.color || "green").toLowerCase();
   const explicitPosition = normalizePoint(player?.position, dimensions, normalized);
   const stationId = player?.simulatedLocation?.stationId || player?.currentStation;
   const inferredPosition = explicitPosition || inferredStationPosition(stationId, floorPlan);
+  const inferred = Boolean(inferredPosition) && !explicitPosition;
   return {
     ...player,
     color: TEAM_ALIASES[color] || color,
     position: inferredPosition,
+    ...(inferred ? {
+      tracking: {
+        ...player?.tracking,
+        status: gatewayDown ? "lost" : "inferred",
+        source: player?.tracking?.source || "action-inference",
+        lastSeenAt: player?.simulatedLocation?.sinceAt || player?.tracking?.lastSeenAt || null,
+        staleAfterMs: INFERRED_LOCATION_FRESH_MS,
+      },
+    } : {}),
     ...(inferredPosition && !explicitPosition ? {
       location: player?.simulatedLocation?.label || stationId,
       positionSource: player?.simulatedLocation?.source || "action-inference",
@@ -216,7 +249,7 @@ export function normalizeServerSnapshot(snapshot) {
     version: 2,
     floorPlan: normalizedPlan,
     players: (Array.isArray(snapshot.players) ? snapshot.players : [])
-      .map((player) => normalizePlayer(player, dimensions, normalized, normalizedPlan)),
+      .map((player) => normalizePlayer(player, dimensions, normalized, normalizedPlan, snapshot.health?.gateway?.status === "offline")),
     orders,
     // Completed/expired orders are dropped from `orders` (active only); keep the
     // history so the results screen can summarize the round.

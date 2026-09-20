@@ -1,8 +1,15 @@
 // This matches the footprint of the scaled Figma chef sprite in the inset
 // landscape room. It includes the plate sprite's vertical reach so the art
 // cannot visibly cross a counter when its centre point is technically clear.
-export const PLAYER_RADIUS = 11;
-export const PLAYER_SEPARATION = 16;
+// Both are in percent of the floor plan, which is ~2.1x wider than tall, so one
+// number cannot fit both axes. They are chosen from measurements of the rendered
+// chef (~90 px) on a ~1240 x 585 px plan: a chef beside a station tile stands
+// about a chef-width clear of it (a radius of 11 left ~100 px of daylight). Two
+// chefs stacked vertically need a chef (~85 px) + a name tag (~22 px) + a
+// callout above the lower one (~31 px), about 138 px, or a callout lands on the
+// upper chef's tag; on this plan that is a separation of ~24.
+export const PLAYER_RADIUS = 6;
+export const PLAYER_SEPARATION = 24;
 export const MAX_PLAYER_MOVE_MS = 1_150;
 
 const PATH_CLEARANCE = 0.35;

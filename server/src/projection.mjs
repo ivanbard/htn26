@@ -8,6 +8,12 @@ const COOK_SECONDS = 15;
 const DONE_SECONDS = 2;
 const WARNING_SECONDS = 3;
 const DEFAULT_ORDER_INTERVAL_SECONDS = 30;
+// How long a customer waits, by recipe. This is deliberately NOT the spawn
+// interval: a burger needs a 3 s chop, a 15 s cook (plus a done/warning window)
+// and walking between NFC zones, so a patience rolled from the 8-35 s spawn gap
+// made orders expire before anyone could possibly finish them.
+const ORDER_PATIENCE_BASE_SECONDS = 60;
+const ORDER_PATIENCE_PER_TOPPING_SECONDS = 15;
 const WRONG_ORDER_PENALTY = 25;
 const EXPIRED_ORDER_PENALTY = 20;
 const DEFAULT_LOCATION_HOLD_SECONDS = 2;
@@ -43,6 +49,10 @@ function recipeForDifficulty(difficulty, orderSequence) {
   return null;
 }
 
+// A request that is fine on its own but does not fit the game's current state
+// (approve with nothing proposed, start before approval...). Carries a 409 so the
+// HTTP layer sends the real reason instead of an opaque "server error".
+function conflict(message) { return Object.assign(new Error(message), { statusCode: 409 }); }
 function clone(value) { return structuredClone(value); }
 function iso(ms) { return new Date(ms).toISOString(); }
 function projectRotatedRect(rect) {
@@ -277,8 +287,11 @@ export class ServerProjection {
     return minimum + Math.floor(value * (span + 1));
   }
 
-  _patienceSeconds() {
-    return this.orderPatienceSeconds || this._randomSeconds();
+  // A fixed HTN26_ORDER_PATIENCE_SECONDS override wins; otherwise fussier orders
+  // (more toppings, more work) get more time.
+  _patienceSeconds(recipe) {
+    return this.orderPatienceSeconds
+      || ORDER_PATIENCE_BASE_SECONDS + ORDER_PATIENCE_PER_TOPPING_SECONDS * (recipe?.toppings?.length || 0);
   }
 
   _activeOrders() { return this._state.orders.filter((order) => order.status === "active"); }
@@ -323,7 +336,7 @@ export class ServerProjection {
     const fallbackRecipe = BURGER_RECIPES[this._orderSequence % BURGER_RECIPES.length];
     const recipe = recipeForDifficulty(recommendation?.difficulty, this._orderSequence) || fallbackRecipe;
     this._orderSequence += 1;
-    const order = makeOrder(`order-${this._orderSequence}`, recipe, now, this._patienceSeconds());
+    const order = makeOrder(`order-${this._orderSequence}`, recipe, now, this._patienceSeconds(recipe));
     this._state.orders.push(order);
     while (this._state.orders.length > 32) this._state.orders.shift();
     this._syncActiveOrder();
@@ -674,7 +687,7 @@ export class ServerProjection {
 
   approveFloorplan(approved = true, now = this.now()) {
     if (!approved) return this.snapshot(now);
-    if (this._state.setup.phase !== "layout-proposed") throw new Error("a proposed floorplan is required before approval");
+    if (this._state.setup.phase !== "layout-proposed") throw conflict("a proposed floorplan is required before approval; run the floorplan review first (another setup may have restarted the host in the meantime)");
     this._state.floorPlan.accepted = true;
     if (this._state.proposedRoomLayout) {
       this._state.roomLayout = clone(this._state.proposedRoomLayout);
@@ -781,8 +794,13 @@ export class ServerProjection {
       case "ACCEPT_LAYOUT":
         return this.approveFloorplan(true, now);
       case "START_GAME":
-        if (this._state.floorPlan.accepted !== true) throw new Error("approve the floorplan before preparing the game");
-        if (this._state.timer.status === "running") throw new Error("round is already running from a host lifecycle event");
+        if (this._state.floorPlan.accepted !== true) throw conflict("approve the floorplan before preparing the game");
+        // The physical host is allowed to win the race with the browser. A
+        // serial START can arrive just before the operator reaches this
+        // button, so preparing the round must be idempotent instead of turning
+        // a healthy running round into a command error.
+        if (this._state.timer.status === "running") return this.snapshot(now);
+        if (this._state.setup.phase === "waiting-for-host-start") return this.snapshot(now);
         this._state.playerCount = playerCount(payload.playerCount, this._state.playerCount);
         this._state.setup.phase = "waiting-for-host-start";
         this._state.setup.message = `Setup is ready for ${this._state.playerCount} player${this._state.playerCount === 1 ? "" : "s"}. Press START on the physical host badge; the native GAME START record begins the production round.`;
@@ -801,7 +819,17 @@ export class ServerProjection {
   }
 
   ingestHostControl(record, now = this.now()) {
+    // Resolve an expired local timer before deciding whether an incoming START
+    // is a duplicate. This lets a fresh physical round recover even if the
+    // previous GAME_END line was lost during a USB reconnect.
+    this._tick(now);
     if (record.control === "START") {
+      // USB serial reconnects and badge retries can replay a lifecycle record.
+      // Never clear a live round just because its START record was observed
+      // twice; the first accepted start remains authoritative.
+      if (this._state.timer.status === "running") {
+        return { accepted: true, duplicate: true, detail: "host start already applied", stateVersion: this._state.version };
+      }
       const physicalHost = record.framing === "legacy-game";
       const state = this._startRound(now, {
         durationSeconds: record.durationSeconds || this.roundSeconds,
@@ -1373,6 +1401,10 @@ export const GAME_TIMINGS = Object.freeze({
   cookSeconds: COOK_SECONDS,
   doneSeconds: DONE_SECONDS,
   warningSeconds: WARNING_SECONDS,
+});
+export const ORDER_RULES = Object.freeze({
+  patienceBaseSeconds: ORDER_PATIENCE_BASE_SECONDS,
+  patiencePerToppingSeconds: ORDER_PATIENCE_PER_TOPPING_SECONDS,
 });
 export const MONEY_RULES = Object.freeze({ wrongOrderPenalty: WRONG_ORDER_PENALTY, expiredOrderPenalty: EXPIRED_ORDER_PENALTY });
 export { plateSummary, itemsFromPlateSummary, patienceTier };

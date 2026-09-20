@@ -6,3 +6,4 @@ ui/dist/
 server/data/
 __pycache__/
 *.pyc
+.env

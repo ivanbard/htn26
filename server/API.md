@@ -29,8 +29,8 @@ Open the Vite URL with `?transport=http&api=http://127.0.0.1:8787`.
 The two fixtures target that server and use real wall-clock time:
 
 ```sh
-node server/simulate-photos.mjs   # upload four fixture photos and approve layout
-node server/simulate-game.mjs    # run setup, a full burger round, then GAME_END
+node server/simulate-photos.mjs   # upload four fixture photos (or reuse existing ones) and approve layout
+node server/simulate-game.mjs    # run setup, a round with one served burger and one wrong plate, then GAME_END
 ```
 
 Use `HTN26_API_URL` for another server address:
@@ -183,7 +183,7 @@ snapshot. It also accepts a bare command string or `{ "action": "COMMAND" }`.
 | `START_HOST` | `idle`/`ended` -> `scanning`; clears layout acceptance. |
 | `SCAN_ROOM` | Creates the deterministic local floorplan proposal. |
 | `APPROVE_LAYOUT` / `ACCEPT_LAYOUT` | Activates proposal -> `burger-placement`. |
-| `START_GAME` | Prepares the round -> `waiting-for-host-start`; does not start timer. |
+| `START_GAME` | Prepares the round -> `waiting-for-host-start`; does not start timer. It is idempotent if the host has already started the round, so a browser/serial race does not fail the setup flow. |
 | `END_GAME` | Ends active round -> `ended`. |
 | `RESET_GAME` | Clears round; returns to `burger-placement` if layout remains accepted, otherwise `idle`. |
 
