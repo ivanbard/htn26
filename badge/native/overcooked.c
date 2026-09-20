@@ -1013,9 +1013,11 @@ static void tick(App *self) {
 }
 
 static void leave(App *self) {
+    int radio_started = self->phase == 2;
     release(&self->active, 0);
     if (self->nfc_enabled) NFC_STOP();
-    RADIO_STOP(); LED_CLEAR(); LED_SHOW(); heap("exit");
+    if (radio_started) RADIO_STOP();
+    LED_CLEAR(); LED_SHOW(); heap("exit");
     self->status = 0; self->phase = 0; self->ticks = 0; self->info = self->icon_widget = 0;
     self->shown_icon = 0;
     self->inbox_full = self->wait_ticks = self->advertise_ticks = self->pulse_ticks = 0;
