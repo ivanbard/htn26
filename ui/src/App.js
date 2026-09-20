@@ -79,6 +79,29 @@ function activeOrdersFor(state) {
   return source.filter((order) => order?.status === "active").slice(0, 4);
 }
 
+function collocatedPlayerOffset(player, players) {
+  const position = playerPosition(player);
+  if (!position) return { side: "center", value: "0px" };
+  const collocated = players
+    .filter((candidate) => {
+      const candidatePosition = playerPosition(candidate);
+      return candidatePosition
+        && finite(candidatePosition.x, NaN) === finite(position.x, NaN)
+        && finite(candidatePosition.y, NaN) === finite(position.y, NaN);
+    })
+    .sort((left, right) => String(left.id).localeCompare(String(right.id)));
+  const index = collocated.findIndex((candidate) => candidate.id === player.id);
+  if (collocated.length < 2 || index < 0) return { side: "center", value: "0px" };
+  const midpoint = (collocated.length - 1) / 2;
+  if (index === midpoint) return { side: "center", value: "0px" };
+  const side = index < midpoint ? "left" : "right";
+  const distance = Math.abs(index - midpoint);
+  const magnitude = distance <= 0.5
+    ? "clamp(58px, 5vw, 90px)"
+    : "clamp(116px, 10vw, 180px)";
+  return { side, value: side === "left" ? `calc(-1 * ${magnitude})` : magnitude };
+}
+
 function seconds(value) {
   if (value == null || !Number.isFinite(Number(value))) return "--:--";
   const amount = Math.max(0, Math.round(Number(value)));
@@ -302,7 +325,7 @@ function playerPointAlongPath(path, progress) {
   return path.at(-1);
 }
 
-function AnimatedPlayer({ player, position, walls, plannedPath, delayMs = 0, pathStrategy = "single-agent", gameplay = false, submission }) {
+function AnimatedPlayer({ player, position, walls, plannedPath, delayMs = 0, pathStrategy = "single-agent", gameplay = false, submission, visualOffset = { side: "center", value: "0px" } }) {
   const target = projectPointIntoWalkableRoom(position, walls, position);
   const targetKey = `${target.x.toFixed(3)}:${target.y.toFixed(3)}`;
   const wallKey = (walls || []).map((wall) => `${wall.x}:${wall.y}:${wall.width}:${wall.height}:${wall.blocksMovement}`).join("|");
@@ -368,11 +391,12 @@ function AnimatedPlayer({ player, position, walls, plannedPath, delayMs = 0, pat
 
   const label = player.label || player.id;
   const locationLabel = player.location || (position ? "event position" : "position unavailable");
-  return h("div", {
+  return h("article", {
     className: cx("tracked-player", "event-player", `player-team-${team}`, hasPlate && "has-plate", moving && "is-moving"),
-    style: { left: `${visualPosition.x}%`, top: `${visualPosition.y}%` },
+    style: { left: `${visualPosition.x}%`, top: `${visualPosition.y}%`, "--player-visual-offset": visualOffset.value },
     "data-player": player.id,
     "data-location": locationLabel,
+    "data-visual-offset": visualOffset.side,
     "data-held-item": held,
     "data-action-state": player.actionState || "idle",
     "data-submission-status": submission?.status || "none",
@@ -433,7 +457,14 @@ function RoomSurface({ state, now, gameplay = false }) {
       "data-station": station.id,
       "data-grid-cell": station.grid ? `${station.grid.column}:${station.grid.row}` : undefined,
     }, h(StationContents, { station, runtimeStation: runtimeStations.get(station.id), serving: state.serving })));
-  const positionedPlayers = separatePlayerPositions(state.players || [], movementWalls);
+  const playerStates = state.players || [];
+  const positionedPlayers = separatePlayerPositions(playerStates, movementWalls).map((player) => {
+    const sourcePlayer = playerStates.find((candidate) => candidate.id === player.id) || player;
+    const visualOffset = collocatedPlayerOffset(sourcePlayer, playerStates);
+    return visualOffset.side === "center"
+      ? { ...player, visualOffset }
+      : { ...player, position: playerPosition(sourcePlayer), visualOffset };
+  });
   const planningPlayers = positionedPlayers
     .filter((player) => player?.position)
     .map((player) => ({
@@ -459,11 +490,13 @@ function RoomSurface({ state, now, gameplay = false }) {
       pathStrategy: pathPlan?.strategy,
       gameplay,
       submission,
+      visualOffset: player.visualOffset,
     }) : h("div", {
       key: player.id,
       className: "tracked-player",
       "data-player": player.id,
       "data-location": "position unavailable",
+      "data-visual-offset": player.visualOffset?.side || "center",
       "data-held-item": player.heldItem || "EMPTY",
       "data-action-state": player.actionState || "idle",
       "data-submission-status": submission?.status || "none",

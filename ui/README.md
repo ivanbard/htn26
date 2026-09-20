@@ -78,7 +78,7 @@ The frontend snapshot boundary is defined in `src/contracts.js` (schema version 
 Authoritative values stay explicit:
 
 - `floorPlan.accepted`, `floorPlan.stations`, and `burgerLevel.placementInstructions` describe the accepted map and where the physical burger level belongs.
-- `players[].position`, `location`, `heldItem`, `inventory`, and `actionState` come from the laptop's badge-event projection. Player state is rendered at that inferred location; tokens never claim camera tracking and never animate between snapshots.
+- `players[].position`, `location`, `heldItem`, `inventory`, and `actionState` come from the laptop's badge-event projection. Player state is rendered at that inferred location; collocated bump participants retain the same authoritative location and receive deterministic side-by-side visual offsets so both states remain readable. Tokens never claim camera tracking and never animate between snapshots.
 - `orders[].remainingSeconds`, `order.remainingSeconds`, `clock.remainingSeconds`, station `progress`, and cooking state are displayed values from the laptop-server snapshot. The UI never decrements them locally.
 - `health.gateway`, `health.workers`, and `health.inference` remain available to the host integration, but system-health warnings are intentionally excluded from the player-facing gameplay HUD.
 - `stations[].item`, `stations[].status`, and `stations[].remainingSeconds` are rendered directly on their physical boards or plates. Empty stations explicitly show `EMPTY`; the player-facing screen has no separate live-activity feed.

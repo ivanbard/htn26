@@ -480,6 +480,44 @@ test("renders only event-inferred player locations", () => {
   assert.doesNotMatch(html, /LOCAL SYSTEM HEALTH/);
 });
 
+test("renders collocated bump players side by side at their shared location", () => {
+  const state = createInitialMockState(1_000);
+  state.setup.phase = SETUP_PHASES.RUNNING;
+  state.floorPlan.accepted = true;
+  state.clock.status = "running";
+  state.players[0] = {
+    ...state.players[0],
+    heldItem: "PLATE",
+    inventory: ["BUN"],
+    actionState: "transferred",
+    location: "bump-middle",
+    position: { x: 50, y: 58 },
+  };
+  state.players[1] = {
+    ...state.players[1],
+    heldItem: "BUN",
+    inventory: ["BUN"],
+    actionState: "transferred",
+    location: "bump-middle",
+    position: { x: 50, y: 58 },
+  };
+
+  const html = renderApp(state, 7_000);
+  const tags = Object.fromEntries([...html.matchAll(/<article[^>]*data-player="([^"]+)"[^>]*>/g)]
+    .map((match) => [match[1], match[0]]));
+
+  assert.match(tags.p1, /style="left:50%;top:58%;--player-visual-offset:[^"]+"/);
+  assert.match(tags.p2, /style="left:50%;top:58%;--player-visual-offset:[^"]+"/);
+  assert.match(tags.p1, /data-location="bump-middle" data-visual-offset="left"/);
+  assert.match(tags.p2, /data-location="bump-middle" data-visual-offset="right"/);
+  assert.notEqual(
+    tags.p1.match(/--player-visual-offset:([^;"]+)/)[1],
+    tags.p2.match(/--player-visual-offset:([^;"]+)/)[1],
+  );
+  assert.match(html, /PLATE · BUN/);
+  assert.equal((html.match(/TRANSFERRED/g) || []).length, 2);
+});
+
 test("receives named state events from the laptop server", async () => {
   const initial = createInitialMockState(1_000);
   const updated = structuredClone(initial);

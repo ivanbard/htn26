@@ -107,7 +107,7 @@ button:focus-visible { outline: 3px solid var(--yellow); outline-offset: 3px; }
 .player-marker-cyan { --player-color: #5bd8ee; border-color: #5bd8ee; }
 .player-marker-violet { --player-color: #c995ff; border-color: #c995ff; }
 .player-marker-stale { border-style: dashed; border-color: #ff6f6f; }
-.event-player { --player-color: #ff9d45; pointer-events: none; }
+.event-player { --player-color: #ff9d45; transform: translate(calc(-50% + var(--player-visual-offset, 0px)), -50%); pointer-events: none; }
 .event-player-orange { --player-color: #ff9d45; }
 .event-player-cyan { --player-color: #5bd8ee; }
 .event-player-violet { --player-color: #c995ff; }
@@ -497,7 +497,7 @@ button:focus-visible { outline: 3px solid var(--yellow); outline-offset: 3px; }
 .tracked-player {
   position: absolute;
   z-index: 12;
-  transform: translate(-50%, -50%);
+  transform: translate(calc(-50% + var(--player-visual-offset, 0px)), -50%);
   transform-origin: center center;
   pointer-events: none;
 }
