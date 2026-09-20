@@ -5,6 +5,7 @@ import { request as httpRequest } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { createRuntime } from "../server.mjs";
+import { ServerProjection } from "../src/projection.mjs";
 import { LayoutSubmissionStore } from "../src/layout-submission-store.mjs";
 import {
   REQUIRED_STATION_TYPES,
@@ -72,6 +73,40 @@ async function slowMultipartPhotos(base, { count = 3, delayMs = 20, preprocessMs
     setTimeout(() => request.end(body.subarray(split)), delayMs);
   });
 }
+
+test("keeps schema version stable and revision monotonic across reset and snapshots", async () => {
+  await withRuntime(async () => responseFor({ output_text: JSON.stringify(candidate()) }), async (_base, runtime) => {
+    const initial = runtime.projection.snapshot();
+    runtime.projection.command("START_HOST");
+    const started = runtime.projection.snapshot();
+    runtime.projection.command("RESET_GAME");
+    const reset = runtime.projection.snapshot();
+    runtime.projection.applyAuthoritativeSnapshot({ ...reset, revision: 0 }, 20_000);
+    const adopted = runtime.projection.snapshot();
+    assert.ok(initial.revision < started.revision);
+    assert.ok(started.revision < reset.revision);
+    assert.ok(reset.revision < adopted.revision);
+    assert.ok([initial, started, reset, adopted].every((snapshot) => snapshot.version === 2));
+  });
+});
+
+test("replaces the proposed layout without discarding the approved layout", () => {
+  const instance = new ServerProjection({ now: () => 1_000 });
+  const first = candidate();
+  instance.proposeRoomLayout(first, 1_000);
+  instance.approveFloorplan(true, 1_000);
+  const active = instance.snapshot().roomLayout;
+  const second = structuredClone(first);
+  second.playArea.center = { x: 0.4, y: 0.6 };
+  instance.proposeRoomLayout(second, 2_000);
+  const proposed = instance.snapshot();
+  assert.deepEqual(proposed.roomLayout, active);
+  assert.deepEqual(proposed.proposedRoomLayout.playArea.center, { x: 0.4, y: 0.6 });
+  assert.equal(proposed.floorPlan.accepted, false);
+  assert.throws(() => instance.command("START_GAME"), /approve the floorplan/);
+  instance.approveFloorplan(true, 2_000);
+  assert.deepEqual(instance.snapshot().roomLayout.playArea.center, { x: 0.4, y: 0.6 });
+});
 
 test("sanitizes rotated geometry, boundaries, and normalized rotation", () => {
   const rect = sanitizeRotatedRect({ center: { x: 5, y: -2 }, width: 4, height: 3, rotationDeg: -45 });

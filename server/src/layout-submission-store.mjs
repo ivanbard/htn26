@@ -153,13 +153,15 @@ export class LayoutSubmissionStore {
     if (!submission) throw new Error("layout submission not found");
     submission.status = status === "success" ? "success" : "failure";
     submission.completedAt = new Date(this.now()).toISOString();
-    submission.metrics = timingMetrics({ ...submission.metrics, ...metrics });
+    submission.metrics = timingMetrics({
+      ...submission.metrics,
+      ...metrics,
+      ...(typeof finalizeMetrics === "function" ? finalizeMetrics() : {}),
+    });
     submission.failure = submission.status === "failure" ? { code: "generation_unavailable" } : null;
+    // Commit terminal status and its complete metrics in one atomic metadata
+    // replacement so restart reconciliation cannot observe a half-finished record.
     await this.persist(submission);
-    if (typeof finalizeMetrics === "function") {
-      submission.metrics = timingMetrics({ ...submission.metrics, ...finalizeMetrics() });
-      await this.persist(submission);
-    }
     return publicSubmission(submission);
   }
 

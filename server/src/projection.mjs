@@ -192,9 +192,12 @@ export class ServerProjection {
     this.locationHoldSeconds = clampInteger(locationHoldSeconds, 0, 30, DEFAULT_LOCATION_HOLD_SECONDS);
     this.random = typeof random === "function" ? random : Math.random;
     this.authoritativeEngine = authoritativeEngine || null;
+    this._revision = 1;
     this._nextOrderAt = null;
     this._orderSequence = 0;
     this._state = createInitialProjectionState(now(), this.roundSeconds);
+    this._state.version = 2;
+    this._state.revision = this._revision;
     this._badges = new Map();
     this._seenEvents = new Set();
     this._listeners = new Set();
@@ -217,7 +220,8 @@ export class ServerProjection {
   }
 
   _publish(now = this.now()) {
-    this._state.version += 1;
+    this._revision += 1;
+    this._state.revision = this._revision;
     this._emit(now);
   }
 
@@ -236,7 +240,10 @@ export class ServerProjection {
 
   applyAuthoritativeSnapshot(snapshot, now = this.now()) {
     if (!snapshot || typeof snapshot !== "object") throw new Error("an authoritative snapshot is required");
+    this._revision = Math.max(this._revision + 1, Number(snapshot.revision) || 0);
     this._state = clone(snapshot);
+    this._state.version = 2;
+    this._state.revision = this._revision;
     this._state.setup ??= { phase: "idle", message: "", updatedAt: iso(now) };
     this._state.setup.updatedAt = iso(now);
     this._state.eventHistory ??= [];
@@ -506,7 +513,8 @@ export class ServerProjection {
     }
 
     if (changed) {
-      this._state.version += 1;
+      this._revision += 1;
+      this._state.revision = this._revision;
       this._emit(now);
     }
     return changed;
@@ -548,7 +556,7 @@ export class ServerProjection {
 
   proposeRoomLayout(candidate, now = this.now(), { photoCount = this._state.photos.length } = {}) {
     const layout = sanitizeRoomLayout(candidate);
-    this._state.roomLayout = null;
+    if (this._state.setup.phase === "running") throw new Error("cannot replace the room layout while a game is running");
     this._state.proposedRoomLayout = clone(layout);
     const stations = layout.stations.map((station) => ({
       id: station.type,
@@ -715,6 +723,7 @@ export class ServerProjection {
         return this.snapshot(now);
       case "RESET_GAME":
         return this.resetGame(now);
+
       default:
         throw new Error(`unsupported command: ${type}`);
     }
