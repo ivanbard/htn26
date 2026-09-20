@@ -374,8 +374,18 @@ function normalizeLaptopFloorPlan(floorPlan) {
 }
 
 function stationPosition(stationId, floorPlan) {
-  const physicalStationId = String(stationId || "center").startsWith("stove-") ? "stove" : stationId;
-  const station = floorPlan?.stations?.find((candidate) => candidate.id === physicalStationId);
+  const requested = String(stationId || "center").toLowerCase();
+  const stations = Array.isArray(floorPlan?.stations) ? floorPlan.stations : [];
+  const exactId = requested.startsWith("stove-") ? "stove" : requested;
+  const exact = stations.find((candidate) => String(candidate?.id || "").toLowerCase() === exactId);
+  const indexed = (kind, index = 0) => stations.filter((candidate) => candidate?.kind === kind)[index] || null;
+  const station = exact
+    || (requested === "pantry" ? stations.find((candidate) => /pantry|bun|lettuce/i.test(`${candidate?.id} ${candidate?.label} ${candidate?.nfcTag}`)) : null)
+    || (requested === "fridge" ? stations.find((candidate) => /fridge|meat|cheese/i.test(`${candidate?.id} ${candidate?.label} ${candidate?.nfcTag}`)) : null)
+    || (requested === "cutting-board" ? indexed("chop") : null)
+    || (requested === "stove-left" ? (stations.find((candidate) => /stove1|left/i.test(`${candidate?.id} ${candidate?.label}`)) || indexed("stove")) : null)
+    || (requested === "stove-right" ? (stations.find((candidate) => /stove2|right/i.test(`${candidate?.id} ${candidate?.label}`)) || indexed("stove", 1)) : null)
+    || (requested === "serving" ? (stations.find((candidate) => ["assembly", "delivery", "serving"].includes(candidate?.kind) || /assembly|serv/i.test(`${candidate?.id} ${candidate?.label}`)) || null) : null);
   if (!station) return { x: 50, y: 50 };
   return {
     x: Number(station.x) + (Number(station.width) / 2),

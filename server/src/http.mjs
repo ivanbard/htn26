@@ -276,9 +276,21 @@ export function createHttpServer({ projection, photoStore, layoutSubmissionStore
     const body = await readBody(req, MAX_REQUEST_BYTES);
     const type = contentType(req);
     const mime = mediaType(type);
-    const uploads = mime === "multipart/form-data"
+    let uploads = mime === "multipart/form-data"
       ? parseMultipart(body, type)
-      : [{ filename: req.headers["x-photo-name"] || "room-photo", mime: mime || "application/octet-stream", bytes: body }];
+      : body.length
+        ? [{ filename: req.headers["x-photo-name"] || "room-photo", mime: mime || "application/octet-stream", bytes: body }]
+        : [];
+    // The phone upload path stores the images first, then the laptop UI starts
+    // generation with a lightweight request. Reuse those server-side files so
+    // the browser never has to download and re-upload the room photos.
+    if (!uploads.length && photoStore.photos.length >= 3 && photoStore.photos.length <= 5) {
+      uploads = await Promise.all(photoStore.photos.map(async (photo) => ({
+        filename: photo.filename,
+        mime: photo.mime,
+        bytes: await photoStore.read(photo),
+      })));
+    }
     if (uploads.length < 3 || uploads.length > 5) throw Object.assign(new Error("upload 3 to 5 room photos"), { statusCode: 400 });
     const submission = await layoutSubmissionStore.create(uploads, { preprocessMs });
     const auditHeaders = {

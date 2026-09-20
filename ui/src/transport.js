@@ -58,6 +58,37 @@ export function createHttpTransport({ baseUrl = "", fetchImpl = globalThis.fetch
       if (!response.ok) throw new Error(`Master Pi photo upload failed (${response.status})`);
       return response.json();
     },
+    async generateRoomLayout() {
+      const generated = await fetchImpl(apiUrl(baseUrl, "/api/layout/generate"), {
+        method: "POST",
+        headers: { accept: "application/json" },
+      });
+      if (!generated.ok) throw new Error(`Room layout generation failed (${generated.status})`);
+      await generated.json();
+      const approved = await fetchImpl(apiUrl(baseUrl, "/api/floorplan/approve"), {
+        method: "POST",
+        headers: { "content-type": "application/json", accept: "application/json" },
+        body: JSON.stringify({ approved: true }),
+      });
+      if (!approved.ok) throw new Error(`Room layout activation failed (${approved.status})`);
+      return normalizeSnapshot(await approved.json());
+    },
+    async useDefaultLayout() {
+      const proposed = await fetchImpl(apiUrl(baseUrl, "/api/floorplan/review"), {
+        method: "POST",
+        headers: { "content-type": "application/json", accept: "application/json" },
+        body: JSON.stringify({ allowEmpty: true }),
+      });
+      if (!proposed.ok) throw new Error(`Default room layout failed (${proposed.status})`);
+      await proposed.json();
+      const approved = await fetchImpl(apiUrl(baseUrl, "/api/floorplan/approve"), {
+        method: "POST",
+        headers: { "content-type": "application/json", accept: "application/json" },
+        body: JSON.stringify({ approved: true }),
+      });
+      if (!approved.ok) throw new Error(`Default room layout activation failed (${approved.status})`);
+      return normalizeSnapshot(await approved.json());
+    },
   };
 }
 

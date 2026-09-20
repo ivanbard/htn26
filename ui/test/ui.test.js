@@ -9,8 +9,11 @@ import { normalizeServerSnapshot } from "../src/server-snapshot.js";
 import { createHttpTransport } from "../src/transport.js";
 import {
   isWalkablePosition,
+  headingForPath,
+  movementEase,
   planPlayerPaths,
   playerPlansAreCollisionSafe,
+  pointAlongPath,
   projectPointIntoWalkableRoom,
   routePlayerPath,
   separatePlayerPositions,
@@ -86,7 +89,7 @@ test("renders room upload and server-driven player readiness during scanning", (
 
   assert.match(html, /data-onboarding="players"/);
   assert.match(html, /Room photos/);
-  assert.match(html, /disabled="" data-command="SCAN_ROOM"/);
+  assert.match(html, /data-command="SCAN_ROOM">Continue with Normal Room Layout/);
   assert.match(html, /data-player-slot="1" data-player-ready="true"/);
   assert.match(html, /data-player-slot="2" data-player-ready="false"/);
   assert.match(html, /data-player-slot="3" data-player-ready="false"/);
@@ -100,7 +103,9 @@ test("renders room upload and server-driven player readiness during scanning", (
 
   state.photos = [{ id: "room-1" }, { id: "room-2" }, { id: "room-3" }];
   const readyHtml = renderApp(state, 1_000, "", "http");
-  assert.doesNotMatch(readyHtml, /disabled="" data-command="SCAN_ROOM"/);
+  assert.match(readyHtml, /data-command="SCAN_ROOM">Continue with Personalized Room Layout/);
+  const failedHtml = renderApp(state, 1_000, "ROOM LAYOUT FAILED — offline", "http");
+  assert.match(failedHtml, /data-command="SCAN_ROOM">Continue with Normal Room Layout/);
 });
 
 test("renders the approved setup flow with the aligned physical layout", async () => {
@@ -200,7 +205,7 @@ test("only canonical processed food states render as plateable ingredients", () 
     ["BUN", "MEAT", "CHEESE", "LETTUCE"],
   );
   assert.deepEqual(
-    plateableIngredientKeys(["RAW MEAT", "CHEESE", "LETTUCE", "BURNT MEAT"]),
+    plateableIngredientKeys(["RAW MEAT", "RAW CHEESE", "RAW LETTUCE", "BURNT MEAT"]),
     [],
   );
 });
@@ -389,6 +394,59 @@ test("routes the default scan animation across the open room with sprite clearan
   });
 });
 
+test("eases every movement under 1.5 seconds and turns the chef toward each lane", () => {
+  const path = [{ x: 20, y: 50 }, { x: 50, y: 50 }, { x: 50, y: 80 }];
+  assert.equal(movementEase(0), 0);
+  assert.equal(movementEase(1), 1);
+  assert.ok(movementEase(0.2) < 0.2);
+  assert.ok(movementEase(0.8) > 0.8);
+  assert.equal(Math.round(headingForPath(path, 0.25)), -90);
+  assert.equal(Math.round(headingForPath(path, 0.75)) || 0, 0);
+  assert.deepEqual(pointAlongPath(path, movementEase(0)), path[0]);
+  assert.deepEqual(pointAlongPath(path, movementEase(1)), path.at(-1));
+});
+
+test("simulates repeated three-chef station scans without wall hits or chef collisions", () => {
+  const state = createInitialMockState(1_000);
+  const movementWalls = [
+    ...(state.floorPlan.walls || []),
+    ...(state.floorPlan.stations || []).map((station) => ({
+      ...station,
+      ...(station.display || {}),
+      blocksMovement: true,
+    })),
+  ];
+  const scanPoints = [
+    { x: 20, y: 50 }, { x: 40, y: 50 }, { x: 60, y: 50 },
+    { x: 80, y: 50 }, { x: 35, y: 45 }, { x: 65, y: 55 },
+  ];
+  assert.ok(scanPoints.every((point) => isWalkablePosition(point, movementWalls)));
+
+  let players = [
+    { id: "p1", position: scanPoints[0] },
+    { id: "p2", position: scanPoints[1] },
+    { id: "p3", position: scanPoints[2] },
+  ];
+  for (let scan = 0; scan < 6; scan += 1) {
+    const next = scanPoints.map((_, index) => scanPoints[(index + scan + 3) % scanPoints.length]);
+    const plans = planPlayerPaths(players.map((player, index) => ({
+      ...player,
+      targetPosition: next[index],
+    })), movementWalls);
+    assert.equal(playerPlansAreCollisionSafe(plans), true, `scan ${scan} has a chef collision`);
+    plans.forEach((movement) => {
+      for (let sample = 0; sample <= 40; sample += 1) {
+        assert.equal(
+          isWalkablePosition(pointAlongPath(movement.path, sample / 40), movementWalls),
+          true,
+          `scan ${scan} leaves the walkable room`,
+        );
+      }
+    });
+    players = players.map((player) => ({ ...player, position: plans.get(player.id).path.at(-1) }));
+  }
+});
+
 test("gives players who scan the same station stable, non-overlapping display slots", () => {
   const players = [
     { id: "p1", position: { x: 20, y: 20 } },
@@ -464,7 +522,9 @@ test("adapts the Pi server projection at the HTTP boundary", async () => {
   assert.equal(normalized.floorPlan.units, "percent");
   assert.equal(validateFrontendSnapshot(normalized).valid, true);
   assert.deepEqual(normalized.players.map((player) => player.color), ["red", "blue", "green"]);
-  assert.deepEqual(normalized.floorPlan.stations.map((station) => station.assetKey), ["PANTRY", "FRIDGE", "CHOP", "STOVE"]);
+  assert.deepEqual(normalized.floorPlan.stations.map((station) => station.assetKey), ["PANTRY", "FRIDGE", "CHOP", "STOVE", "STOVE"]);
+  // One physical stove NFC zone is still the only stove placement instruction.
+  assert.equal(normalized.floorPlan.placementInstructions.filter((station) => station.id.startsWith("stove")).length, 1);
   assert.equal(new Set(normalized.floorPlan.stations.map((station) => `${station.display.width}x${station.display.height}`)).size, 1);
 
   const fetchCalls = [];
@@ -493,6 +553,25 @@ test("adapts the Pi server projection at the HTTP boundary", async () => {
   cleanup();
 });
 
+test("projects action-inferred player scans onto the matching room stations", () => {
+  const snapshot = createInitialProjectionState(1_000);
+  snapshot.players = snapshot.players.map((player, index) => ({
+    ...player,
+    currentStation: ["pantry", "fridge", "cutting-board"][index],
+    simulatedLocation: {
+      ...player.simulatedLocation,
+      stationId: ["pantry", "fridge", "cutting-board"][index],
+    },
+  }));
+  const normalized = normalizeServerSnapshot(snapshot);
+  assert.deepEqual(normalized.players.map((player) => [player.position.x, player.position.y]), [
+    [16, 15],
+    [84, 15],
+    [24, 81.5],
+  ]);
+  assert.ok(normalized.players.every((player) => player.positionSource === "action-inference"));
+});
+
 test("renders gameplay as a framed room board with state shown on each station", async () => {
   const transport = await approvedTransport();
   await transport.command(GAME_ACTIONS.START_GAME);
@@ -507,8 +586,8 @@ test("renders gameplay as a framed room board with state shown on each station",
   assert.match(html, /STOVE 1/);
   assert.match(html, /STOVE 2/);
   assert.match(html, /CHOP 2/);
-  // 02:00 is the first order's patience; the round clock itself is 04:00.
-  assert.match(html, /02:00/);
+  // 01:00 is the first (plain meat) order's patience; the round clock itself is 04:00.
+  assert.match(html, /01:00/);
   assert.match(html, /class="hud-timer-value">04:00</);
   assert.match(html, /class="game-board panel\s/);
   assert.match(html, /class="board-score"/);
@@ -519,8 +598,9 @@ test("renders gameplay as a framed room board with state shown on each station",
   assert.match(html, /data-station="chop1"[^>]*>[\s\S]*?data-station-content="LETTUCE"/);
   assert.match(html, /data-station="chop2"[^>]*>[\s\S]*?data-station-content="CHEESE"/);
   assert.match(html, /data-station="buns-source"[^>]*>[\s\S]*?data-station-content="BUN"/);
-  assert.equal((html.match(/data-node-id="39:26"/g) || []).length, 4);
-  assert.match(html, /data-order-count="4"/);
+  // A round opens with ONE order; more arrive over time (see order-pacing.test.js).
+  assert.equal((html.match(/data-node-id="39:26"/g) || []).length, 1);
+  assert.match(html, /data-order-count="1"/);
   assert.match(html, /id="hud-title-order-1"[^>]*>PLAIN MEAT BURGER/);
   assert.match(html, /data-ingredient-slot="1"/);
   assert.match(html, /data-node-id="20:2"/);
@@ -613,24 +693,22 @@ test("retains the image-derived room branch behind the layout boolean", () => {
   assert.match(html, /game-room-background\.png/);
 });
 
-test("shows a dismissible how-it-works explainer only in gameplay mode, open by default", async () => {
+test("removes the old gameplay explainer and keeps the room tour focused", async () => {
   const setupHtml = renderApp((await approvedTransport()).snapshot(), 1_000);
   assert.doesNotMatch(setupHtml, /class="how-it-works"/);
 
   const transport = await approvedTransport();
   await transport.command(GAME_ACTIONS.START_GAME);
   const gameplayHtml = renderApp(transport.snapshot(), 1_000);
-  assert.match(gameplayHtml, /class="how-it-works" role="dialog" aria-label="How this game works"/);
-  // Grounded in the real rules: pantry/fridge, cutting board, stove, plate, shake-submit.
-  assert.match(gameplayHtml, /pantry/i);
-  assert.match(gameplayHtml, /fridge/i);
-  assert.match(gameplayHtml, /cutting board/i);
-  assert.match(gameplayHtml, /stove/i);
-  assert.match(gameplayHtml, /shake/i);
-  // useState defaults it open; renderApp is a static-markup snapshot so the
-  // click-to-dismiss interaction itself isn't exercised by this harness, but
-  // the dismiss control's presence and hook are checked here.
-  assert.match(gameplayHtml, /<button type="button" class="how-it-works-dismiss" data-dismiss="how-it-works">/);
+  assert.doesNotMatch(gameplayHtml, /class="how-it-works"/);
+  assert.doesNotMatch(gameplayHtml, /Got it — start cooking/);
+
+  const tourHtml = renderApp((await approvedTransport()).snapshot(), 1_000);
+  assert.match(tourHtml, /Welcome to/);
+  assert.doesNotMatch(tourHtml, /Incoming orders/);
+  assert.doesNotMatch(tourHtml, /Read the leftmost card first\. Its ingredient icons show what to collect\./);
+  assert.doesNotMatch(tourHtml, /How this works/);
+  assert.doesNotMatch(tourHtml, /Grab buns\/lettuce/);
 
   await transport.command(GAME_ACTIONS.END_GAME);
   const resultsHtml = renderApp(transport.snapshot(), 1_000);
@@ -671,7 +749,7 @@ test("marks old or missing player tracking and stale worker health", () => {
   assert.doesNotMatch(html, /LOCAL SYSTEM HEALTH/);
 });
 
-test("host commands follow start, scan, approval, burger placement, and round lifecycle", async () => {
+test("host commands move from scan directly to burger placement and round lifecycle", async () => {
   let now = 10_000;
   const transport = createMockTransport({ now: () => now });
 
@@ -685,19 +763,18 @@ test("host commands follow start, scan, approval, burger placement, and round li
   await transport.command(GAME_ACTIONS.START_HOST);
   assert.equal(transport.snapshot().setup.phase, SETUP_PHASES.SCANNING);
   await transport.command(GAME_ACTIONS.SCAN_ROOM);
-  assert.equal(transport.snapshot().setup.phase, SETUP_PHASES.LAYOUT_PROPOSED);
-  assert.equal(transport.snapshot().floorPlan.accepted, false);
+  assert.equal(transport.snapshot().setup.phase, SETUP_PHASES.BURGER_PLACEMENT);
+  assert.equal(transport.snapshot().floorPlan.accepted, true);
+  assert.equal(transport.snapshot().burgerLevel.status, "placement-ready");
   await transport.command(GAME_ACTIONS.RESCAN);
   assert.equal(transport.snapshot().setup.phase, SETUP_PHASES.SCANNING);
   await transport.command(GAME_ACTIONS.SCAN_ROOM);
-  assert.equal(transport.snapshot().setup.phase, SETUP_PHASES.LAYOUT_PROPOSED);
-
-  await transport.command(GAME_ACTIONS.APPROVE_LAYOUT);
   assert.equal(transport.snapshot().setup.phase, SETUP_PHASES.BURGER_PLACEMENT);
   assert.equal(transport.snapshot().floorPlan.accepted, true);
   assert.equal(transport.snapshot().burgerLevel.status, "placement-ready");
   const placementHtml = renderApp(transport.snapshot(), now);
   assert.match(placementHtml, /data-command="START_GAME"(?! disabled)/);
+  assert.doesNotMatch(placementHtml, /Confirm the layout/);
 
   now += 1_000;
   await transport.command(GAME_ACTIONS.START_GAME);
@@ -828,7 +905,8 @@ test("successful delivery awards the recipe's gold plus a patience-based tip, ma
   // order-1 is PLAIN_MEAT (gold: 100); START_GAME resets it to full patience
   // (remaining === total), so pi/server's tip formula — max(1, round(gold *
   // 0.1 + ratio * 5)) — gives round(10 + 5) = 15 at a 1.0 ratio.
-  assert.deepEqual(served.score, { value: 100, delivered: 1 });
+  // The WatCoin total is gold plus tip, like the server's net.
+  assert.deepEqual(served.score, { value: 115, delivered: 1 });
   assert.deepEqual(served.gold, { total: 100, earned: 100, lastChange: 100 });
   assert.deepEqual(served.tips, { total: 15, earned: 15, lastChange: 15 });
   assert.equal(served.orders[0].status, "completed");
@@ -840,7 +918,7 @@ test("successful delivery awards the recipe's gold plus a patience-based tip, ma
   assert.equal(served.serving.lastEvent.patienceSegments, 3);
 
   await assertCommandUnchanged(transport, { type: GAME_ACTIONS.DELIVERY_SUCCESS, orderId: "order-1" });
-  assert.deepEqual(transport.snapshot().score, { value: 100, delivered: 1 });
+  assert.deepEqual(transport.snapshot().score, { value: 115, delivered: 1 });
 });
 
 test("failed delivery applies the documented penalty and does not complete the order", async () => {
@@ -886,7 +964,11 @@ test("setup flow reaches gameplay and results display modes", async () => {
 
   await transport.command(GAME_ACTIONS.END_GAME);
   assert.equal(displayModeForPhase(transport.snapshot().setup.phase), UI_DISPLAY_MODES.RESULTS);
-  assert.match(renderApp(transport.snapshot(), 1_000), /GAME ENDED/);
+  const results = renderApp(transport.snapshot(), 1_000);
+  assert.match(results, /data-display-mode="results"/);
+  assert.match(results, /Round complete/);
+  assert.match(results, /data-command="RESET_GAME"/);
+  assert.doesNotMatch(results, /serving badge|geese/i);
 });
 
 test("renders serving success, gold/tip breakdown, and score update from the authoritative snapshot", async () => {
@@ -895,18 +977,20 @@ test("renders serving success, gold/tip breakdown, and score update from the aut
   await transport.command(GAME_ACTIONS.DELIVERY_SUCCESS);
   const state = transport.snapshot();
 
-  assert.equal(state.score.value, 100);
+  // Gold plus tip, exactly what the announcement reports (the server's net does the same).
+  assert.equal(state.score.value, 115);
   assert.equal(state.orders[0].status, "completed");
   const html = renderApp(state, 2_000);
   assert.doesNotMatch(html, /LIVE ACTIVITY/);
   assert.match(html, /data-node-id="31:25"/);
   assert.match(html, /score-coin-counter\.png/);
-  // The live delivery toast (age 1s, well inside its 3.2s lifetime) shows
-  // the gold/tip breakdown, not just the final score chip.
+  // The live announcement (age 1s, inside its 3.2s lifetime) says what happened
+  // and how many WatCoins it was worth, in plain sentence case.
+  assert.match(html, /class="game-board-toast"/);
   assert.match(html, /class="delivery-toast is-success"/);
-  assert.match(html, /BURGER SERVED/);
-  assert.match(html, /\+100 WATCOINS/);
-  assert.match(html, /\+15 TIP/);
+  assert.match(html, /Burger served/);
+  assert.match(html, /\+115 WatCoins/);
+  assert.doesNotMatch(html, /BURGER SERVED|TIP/);
 });
 
 test("renders a rejected burger's live penalty and updates the score", async () => {
@@ -920,8 +1004,9 @@ test("renders a rejected burger's live penalty and updates the score", async () 
   const html = renderApp(state, 2_000);
   assert.doesNotMatch(html, /LIVE ACTIVITY/);
   assert.match(html, /class="delivery-toast is-failure"/);
-  assert.match(html, /WRONG BURGER/);
-  assert.match(html, /-25 PENALTY/);
+  assert.match(html, /Wrong burger/);
+  assert.match(html, /-25 WatCoins/);
+  assert.doesNotMatch(html, /WRONG BURGER|PENALTY/);
 });
 
 test("renders one, two, and four active orders with unique accessible headings", () => {
@@ -943,6 +1028,22 @@ test("renders one, two, and four active orders with unique accessible headings",
     assert.equal(progressValues.length, count);
     assert.ok(progressValues.every((value) => value >= 0 && value <= 100));
   }
+});
+
+test("uses active order order and left-aligns the queue after completed orders leave", () => {
+  const state = createInitialMockState(1_000);
+  state.setup.phase = SETUP_PHASES.RUNNING;
+  state.floorPlan.accepted = true;
+  state.clock.status = "running";
+  state.orders = state.orders.map((order, index) => ({ ...order, status: index === 0 ? "completed" : "active" }));
+  state.activeOrders = state.orders.filter((order) => order.status === "active");
+  const html = renderApp(state, 1_000);
+  const styles = fs.readFileSync(new URL("../styles.css", import.meta.url), "utf8");
+
+  assert.match(html, /data-order-count="3"/);
+  assert.doesNotMatch(html, /data-order-id="order-1"/);
+  assert.match(html, /data-order-id="order-2"/);
+  assert.match(styles, /\.game-board-orders[\s\S]*justify-content:\s*start/);
 });
 
 test("renders readable burger stacks and full-width time remaining rails", () => {
@@ -1084,19 +1185,23 @@ test("gives the Pi's stove-left/stove-right/cutting-board runtime stations to th
   const normalized = normalizeServerSnapshot(server);
   normalized.floorPlan.accepted = true;
 
-  // The server-shaped ids really do differ: plan `stove`, runtime `stove-left`.
-  assert.deepEqual(normalized.floorPlan.stations.map((station) => station.id), ["pantry", "fridge", "cutting-board", "stove"]);
+  // The server plans ONE physical `stove` zone but runs two logical stoves, so
+  // the boundary draws two tiles whose ids match the runtime stations exactly.
+  assert.deepEqual(normalized.floorPlan.stations.map((station) => station.id), ["pantry", "fridge", "cutting-board", "stove-left", "stove-right"]);
   assert.ok(normalized.stations.some((station) => station.id === "stove-left"));
   assert.ok(!normalized.stations.some((station) => station.id === "stove"));
 
   const matches = matchRuntimeStations(normalized.floorPlan.stations, normalized.stations);
-  assert.equal(matches.get("stove").id, "stove-left");
+  assert.equal(matches.get("stove-left").id, "stove-left");
+  assert.equal(matches.get("stove-right").id, "stove-right");
   assert.equal(matches.get("cutting-board").id, "cutting-board");
   assert.equal(matches.get("pantry").id, "pantry");
 
   const html = renderApp(normalized, 1_000);
-  const stove = stationHtml(html, "stove");
+  const stove = stationHtml(html, "stove-left");
   assert.match(stove, /data-station-phase="cooking"/);
+  // The second stove is drawn too, with its own (burnt) state.
+  assert.match(stationHtml(html, "stove-right"), /data-station-phase="burnt"/);
   assert.match(stove, /COOKING/);
   assert.match(stove, /class="station-progress-track"[^>]*data-progress="40"/);
   assert.match(stove, /data-remaining-seconds="9"/);
@@ -1111,9 +1216,10 @@ test("gives the Pi's stove-left/stove-right/cutting-board runtime stations to th
   );
   assert.equal(twoStoves.get("stove").id, "stove-left");
   assert.equal(twoStoves.get("stove-b").id, "stove-right");
-  const burnt = normalizeServerSnapshot({ ...server, stations: server.stations.map((station) => station.id === "stove-left" ? { ...station, status: "idle", item: null, progress: 0, remainingSeconds: 0 } : station) });
-  const burntMatch = matchRuntimeStations([{ id: "stove", kind: "stove" }], burnt.stations);
-  assert.equal(burntMatch.get("stove").id, "stove-left");
+  const idleLeft = normalizeServerSnapshot({ ...server, stations: server.stations.map((station) => station.id === "stove-left" ? { ...station, status: "idle", item: null, progress: 0, remainingSeconds: 0 } : station) });
+  // A legacy single-`stove` plan still falls back to the first runtime stove.
+  const legacyMatch = matchRuntimeStations([{ id: "stove", kind: "stove" }], idleLeft.stations);
+  assert.equal(legacyMatch.get("stove").id, "stove-left");
 });
 
 test("keeps exact station-id matches ahead of the kind fallback so the mock's ids are unchanged", () => {
@@ -1205,7 +1311,7 @@ test("colours an order's patience bar by its share of its own patience, not abso
     state.orders = [{ ...state.orders[0], remainingSeconds: remaining, totalSeconds: total }];
     state.order = { ...state.orders[0] };
     const html = renderApp(state, 1_000);
-    assert.match(html, new RegExp(`class="hud-order ${urgency}"[^>]*data-order-id="order-1"`), `${remaining}/${total} is ${urgency}`);
+    assert.match(html, new RegExp(`class="hud-order(?: hud-order-compact)? ${urgency}"[^>]*data-order-id="order-1"`), `${remaining}/${total} is ${urgency}`);
     const width = Math.max(0, Math.min(100, (remaining / total) * 100));
     assert.match(html, new RegExp(`class="hud-order-progress"[^>]*aria-valuenow="${Math.round(width)}"[^>]*><span style="width:${width}%"`));
   }
@@ -1223,8 +1329,9 @@ test("round clock is four minutes (240 s) in the mock, matching the Pi's ROUND_S
   const html = renderApp(running, 1_000);
   assert.match(html, /class="hud-timer-value">04:00</);
   assert.match(html, /Round timer 04:00/);
-  // Per-order patience is separate and stays two minutes for mock orders.
-  assert.ok(running.orders.every((order) => order.totalSeconds === 120));
+  // Per-order patience is separate from the round clock: a plain burger waits 60 s.
+  assert.equal(running.orders.length, 1);
+  assert.ok(running.orders.every((order) => order.totalSeconds === 60));
   const preGame = renderApp(await approvedTransport().then((t) => t.snapshot()), 1_000);
   assert.match(preGame, /Welcome to [\s\S]*UnderCooked Interactive Tour/);
   assert.match(preGame, /data-order-count="1"/);
@@ -1239,16 +1346,16 @@ test("advanceMockState counts the round clock and active orders down with recomp
   assert.deepEqual(start, before, "the input state is not mutated");
   assert.equal(next.clock.remainingSeconds, 239);
   assert.equal(next.clock.status, "running");
-  assert.ok(next.orders.every((order) => order.remainingSeconds === 119 && order.status === "active"));
-  assert.equal(next.order.remainingSeconds, 119);
+  assert.ok(next.orders.every((order) => order.remainingSeconds === 59 && order.status === "active"));
+  assert.equal(next.order.remainingSeconds, 59);
   assert.equal(next.orders[0].patience.filledSegments, 3);
 
-  // 80 s in, a 120 s order has 40 s left: one patience segment.
-  const later = advanceMockState(start, 80_000, 81_000);
-  assert.equal(later.orders[0].remainingSeconds, 40);
+  // 40 s in, a 60 s order has 20 s left: one patience segment.
+  const later = advanceMockState(start, 40_000, 41_000);
+  assert.equal(later.orders[0].remainingSeconds, 20);
   assert.equal(later.orders[0].patience.filledSegments, 1);
-  assert.equal(advanceMockState(start, 40_000, 41_000).orders[0].patience.filledSegments, 2);
-  assert.equal(later.clock.remainingSeconds, 160);
+  assert.equal(advanceMockState(start, 20_000, 21_000).orders[0].patience.filledSegments, 2);
+  assert.equal(later.clock.remainingSeconds, 200);
   assert.equal(validateFrontendSnapshot(later).valid, true);
 
   // Sub-second ticks accumulate: two half-seconds make one second (whole seconds round up like the Pi).
@@ -1258,21 +1365,27 @@ test("advanceMockState counts the round clock and active orders down with recomp
   assert.equal(advanceMockState(advanceMockState(half, 500, 2_000), 1_000, 3_000).clock.remainingSeconds, 238);
 });
 
-test("advanceMockState expires an order that runs out and keeps the snapshot valid", async () => {
+test("advanceMockState expires an order that runs out, replaces it, and keeps the snapshot valid", async () => {
   const start = await runningMockState();
-  const next = advanceMockState(start, 120_000, 121_000);
+  const next = advanceMockState(start, 60_000, 61_000);
 
-  assert.ok(next.orders.every((order) => order.status === "expired" && order.remainingSeconds === 0));
-  assert.ok(next.orders.every((order) => order.patience.filledSegments === 0));
-  assert.equal(next.clock.remainingSeconds, 120);
+  assert.equal(next.orders[0].status, "expired");
+  assert.equal(next.orders[0].remainingSeconds, 0);
+  assert.equal(next.orders[0].patience.filledSegments, 0);
+  // The kitchen is never left without an order: a replacement arrives at once.
+  assert.equal(next.orders.filter((order) => order.status === "active").length, 1);
+  assert.equal(next.order.id, "order-2");
+  assert.equal(next.clock.remainingSeconds, 180);
   assert.equal(next.setup.phase, SETUP_PHASES.RUNNING);
   assert.equal(validateFrontendSnapshot(next).valid, true);
-  assert.match(renderApp(next, 121_000), /All orders served!/);
+  assert.doesNotMatch(renderApp(next, 61_000), /All orders served!/);
 
   // Only the shortest-patience order expires when the others still have time.
   const staggered = structuredClone(start);
-  staggered.orders[1].remainingSeconds = 5;
-  staggered.orders[1].patience.filledSegments = 1;
+  const second = structuredClone(createInitialMockState(1_000).orders[1]);
+  second.remainingSeconds = 5;
+  second.patience.filledSegments = 1;
+  staggered.orders.push(second);
   const partial = advanceMockState(staggered, 5_000, 6_000);
   assert.equal(partial.orders[1].status, "expired");
   assert.equal(partial.orders[0].status, "active");
@@ -1398,7 +1511,8 @@ test("advanceMockState does nothing unless a round is running and time has passe
   await transport.command(GAME_ACTIONS.START_GAME);
   const fresh = transport.snapshot();
   assert.equal(fresh.clock.remainingSeconds, 240);
-  assert.ok(fresh.orders.every((order) => order.remainingSeconds === 120 && order.patience.filledSegments === 3));
+  assert.equal(fresh.orders.length, 1, "a new round opens with a single order");
+  assert.ok(fresh.orders.every((order) => order.remainingSeconds === 60 && order.patience.filledSegments === 3));
   assert.equal(advanceMockState(fresh, 1_000, 71_000).clock.remainingSeconds, 239);
 });
 
@@ -1417,13 +1531,13 @@ test("the mock heartbeat advances a running round by the real elapsed time and i
     // Frozen `now`: the heartbeat fires but no time has passed, so nothing moves.
     await new Promise((resolve) => setTimeout(resolve, 1_150));
     assert.equal(transport.snapshot().clock.remainingSeconds, 240);
-    assert.equal(transport.snapshot().orders[0].remainingSeconds, 120);
+    assert.equal(transport.snapshot().orders[0].remainingSeconds, 60);
 
     // 7 s of "real" time pass: the next heartbeat applies exactly that.
     now += 7_000;
     await new Promise((resolve) => setTimeout(resolve, 1_150));
     assert.equal(transport.snapshot().clock.remainingSeconds, 233);
-    assert.equal(transport.snapshot().orders[0].remainingSeconds, 113);
+    assert.equal(transport.snapshot().orders[0].remainingSeconds, 53);
     assert.equal(transport.snapshot().stations.find((station) => station.id === "stove1").remainingSeconds, 8);
     assert.equal(seen.at(-1).clock.remainingSeconds, 233);
     // Player tracking is kept fresh by the same heartbeat.

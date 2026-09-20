@@ -9,6 +9,8 @@ export const PLATABLE_ITEM_STATES = Object.freeze({
   SHREDDED_LETTUCE: Object.freeze(["SHREDDED LETTUCE", "SLICED LETTUCE", "CHOPPED LETTUCE", "CUT LETTUCE"]),
 });
 
+const PLAIN_PLATE_COMPONENTS = Object.freeze({ BUN: "BUN", MEAT: "MEAT", LETTUCE: "LETTUCE", CHEESE: "CHEESE" });
+
 const normalize = (value) => String(value || "")
   .trim()
   .toUpperCase()
@@ -22,6 +24,10 @@ function includesAny(value, candidates) {
 export function plateableState(value) {
   const normalized = normalize(value);
   if (!normalized || normalized.includes("BURNT") || normalized.includes("RAW")) return null;
+  // The authoritative server normalizes plate contents to the bare component
+  // names, so an exact BUN/MEAT/LETTUCE/CHEESE is already a plated item. Only an
+  // exact match counts: "CHOPPED MEAT" (uncooked) must still be rejected below.
+  if (PLAIN_PLATE_COMPONENTS[normalized]) return PLAIN_PLATE_COMPONENTS[normalized];
   if (includesAny(normalized, PLATABLE_ITEM_STATES.BUN)) return "BUN";
   if (includesAny(normalized, PLATABLE_ITEM_STATES.COOKED_MEAT)) return "MEAT";
   if (includesAny(normalized, PLATABLE_ITEM_STATES.CHOPPED_CHEESE)) return "CHEESE";

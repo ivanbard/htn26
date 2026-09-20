@@ -53,6 +53,9 @@ const RECIPE_BY_ID = new Map(BURGER_RECIPES.map((recipe) => [recipe.id, recipe])
 // a penalty amount, so this is this mock's own reasonable stand-in for that
 // documented-but-unspecified value, not a value read from server code.
 const FAILED_SUBMISSION_PENALTY = 25;
+// server/src/projection.mjs EXPIRED_ORDER_PENALTY: an order that runs out of
+// patience costs the team coins.
+const EXPIRED_ORDER_PENALTY = 20;
 
 function makeMockOrder(id, recipe, remainingSeconds, totalSeconds = 120) {
   return {
@@ -85,6 +88,39 @@ function orderTip(recipe, remainingSeconds, totalSeconds) {
   return Math.max(1, Math.round(recipe.gold * 0.1 + ratio * 5));
 }
 
+// Order pacing mirrors server/src/projection.mjs: ONE order when the round
+// starts, then another after a random gap, at most MAX_ACTIVE_ORDERS open at
+// once, and never zero open orders while the round runs. Patience is the
+// customer's wait (by recipe), not the spawn gap.
+const MAX_ACTIVE_ORDERS = 3;
+const ORDER_INTERVAL_SECONDS = Object.freeze({ min: 8, max: 35 });
+const ORDER_PATIENCE_BASE_SECONDS = 60;
+const ORDER_PATIENCE_PER_TOPPING_SECONDS = 15;
+const ORDER_HISTORY_LIMIT = 32;
+
+function recipePatienceSeconds(recipe) {
+  return ORDER_PATIENCE_BASE_SECONDS + ORDER_PATIENCE_PER_TOPPING_SECONDS * Math.max(0, recipe.components.length - 2);
+}
+
+function randomIntervalMs(random) {
+  const span = ORDER_INTERVAL_SECONDS.max - ORDER_INTERVAL_SECONDS.min;
+  const value = Math.max(0, Math.min(0.999999, Number(random()) || 0));
+  return (ORDER_INTERVAL_SECONDS.min + Math.floor(value * (span + 1))) * 1000;
+}
+
+const isActiveOrder = (order) => order?.status === "active";
+
+// `schedule.sequence` counts orders issued so far, so recipes cycle in the same
+// order as the server's (`BURGER_RECIPES[sequence % 4]`).
+function issueOrder(orders, schedule, random) {
+  const recipe = BURGER_RECIPES[schedule.sequence % BURGER_RECIPES.length];
+  const patience = recipePatienceSeconds(recipe);
+  return {
+    orders: [...orders, makeMockOrder(`order-${schedule.sequence + 1}`, recipe, patience, patience)].slice(-ORDER_HISTORY_LIMIT),
+    schedule: { sequence: schedule.sequence + 1, nextInMs: randomIntervalMs(random) },
+  };
+}
+
 const MOCK_ORDERS = Object.freeze([
   makeMockOrder("order-1", BURGER_RECIPES[0], 112),
   makeMockOrder("order-2", BURGER_RECIPES[1], 96),
@@ -94,7 +130,7 @@ const MOCK_ORDERS = Object.freeze([
 
 function normalizedOrders(state) {
   const source = Array.isArray(state.orders) && state.orders.length ? state.orders : state.order ? [state.order] : [];
-  return source.slice(0, 4);
+  return source;
 }
 
 function withPrimaryOrder(orders, fallback) {
@@ -164,22 +200,6 @@ function carriedRemainingMs(item, fallbackMs) {
     : fallbackMs;
 }
 
-function restartOrder(order) {
-  const totalSeconds = order.totalSeconds;
-  return {
-    ...withoutCarry(order),
-    status: "active",
-    remainingSeconds: totalSeconds,
-    patience: {
-      ...order.patience,
-      segments: order.patience?.segments ?? 3,
-      remainingSeconds: totalSeconds,
-      totalSeconds,
-      filledSegments: orderPatienceSegments(totalSeconds, totalSeconds),
-    },
-  };
-}
-
 // A new round starts the workstation timers from zero, the way a fresh Pi
 // round starts a fresh cook: the fixture's mid-cook stove/board restart their
 // clocks so their bars visibly fill during the round.
@@ -206,11 +226,12 @@ function startHost(state, now) {
 function scanRoom(state, now) {
   if (!canRunAction(state, GAME_ACTIONS.SCAN_ROOM)) return state;
   const message = state.floorPlan?.layoutFromImage
-    ? "Proposed image-based floor plan ready. Approve it to generate burger-level placement instructions."
-    : "Standard kitchen ready. Approve it to generate burger-level placement instructions.";
+    ? "Personalized kitchen mapped. Follow the floor walkthrough to place the stations."
+    : "Normal kitchen loaded. Follow the floor walkthrough to place the stations.";
   return withUpdate(state, {
-    setup: { phase: SETUP_PHASES.LAYOUT_PROPOSED, message },
-    floorPlan: { ...state.floorPlan, accepted: false },
+    setup: { phase: SETUP_PHASES.BURGER_PLACEMENT, message },
+    floorPlan: { ...state.floorPlan, accepted: true },
+    burgerLevel: { ...state.burgerLevel, status: "placement-ready" },
   }, now);
 }
 
@@ -235,9 +256,9 @@ function approveLayout(state, now) {
   }, now);
 }
 
-function startGame(state, now) {
+function startGame(state, now, random = Math.random) {
   if (!canRunAction(state, GAME_ACTIONS.START_GAME)) return state;
-  const orders = normalizedOrders(state).map((order) => restartOrder(order));
+  const { orders, schedule } = issueOrder([], { sequence: 0 }, random);
   return withUpdate(state, {
     setup: { phase: SETUP_PHASES.RUNNING, message: "Burger game running. Live locations and orders come from the master Pi." },
     score: { value: 0, delivered: 0 },
@@ -246,6 +267,7 @@ function startGame(state, now) {
     clock: { ...withoutCarry(state.clock), status: "running", remainingSeconds: state.clock.totalSeconds },
     order: { ...withPrimaryOrder(orders, state.order) },
     orders,
+    orderSchedule: schedule,
     stations: Array.isArray(state.stations) ? state.stations.map(restartStationTimer) : state.stations,
     serving: { ...state.serving, lastEvent: null },
     burgerLevel: { ...state.burgerLevel, status: "in-play" },
@@ -270,7 +292,7 @@ function hasActiveRound(state) {
 // this mock computes the same numbers the authoritative Pi would. The
 // penalty side has no numeric spec anywhere in the codebase (see
 // FAILED_SUBMISSION_PENALTY above), so it's this mock's own stand-in.
-function recordDelivery(state, success, now, orderId) {
+function recordDelivery(state, success, now, orderId, random = Math.random) {
   if (!hasActiveRound(state)) return state;
   const orders = normalizedOrders(state);
   const targetIndex = orderId
@@ -298,20 +320,24 @@ function recordDelivery(state, success, now, orderId) {
     : {
       status: "failure",
       message: "WRONG BURGER",
-      detail: `Serving badge rejected the topping combination — penalty applied.`,
+      detail: "The plate did not match an active order — penalty applied.",
       points: -penalty,
       gold: 0,
       tip: 0,
       penalty,
       at: now,
     };
-  const nextOrders = success
+  let nextOrders = success
     ? orders.map((order, index) => index === targetIndex ? { ...order, status: "completed" } : { ...order })
     : orders.map((order) => ({ ...order }));
+  let schedule = state.orderSchedule;
+  // Never leave the kitchen without an order: serving the last open one brings
+  // the next straight away (the server does the same).
+  if (success && schedule && !nextOrders.some(isActiveOrder)) ({ orders: nextOrders, schedule } = issueOrder(nextOrders, schedule, random));
   return withUpdate(state, {
     score: {
       ...state.score,
-      value: Number(state.score?.value || 0) + (success ? gold : -penalty),
+      value: Number(state.score?.value || 0) + (success ? gold + tip : -penalty),
       delivered: Number(state.score?.delivered || 0) + (success ? 1 : 0),
     },
     gold: success
@@ -322,11 +348,15 @@ function recordDelivery(state, success, now, orderId) {
       : { ...state.tips, lastChange: 0 },
     order: { ...withPrimaryOrder(nextOrders, state.order) },
     orders: nextOrders,
+    ...(schedule ? { orderSchedule: schedule } : {}),
+    ...(success
+      ? (state.penalties ? { penalties: { ...state.penalties, lastChange: 0 } } : {})
+      : { penalties: { total: Number(state.penalties?.total || 0) + penalty, lastChange: -penalty } }),
     serving: { ...state.serving, lastEvent: event },
   }, now);
 }
 
-export function reduceMockState(state, command, now = Date.now()) {
+export function reduceMockState(state, command, now = Date.now(), random = Math.random) {
   const action = typeof command === "string" ? command : command?.type;
   const orderId = typeof command === "object" ? command?.orderId || command?.payload?.orderId : undefined;
   switch (action) {
@@ -334,11 +364,11 @@ export function reduceMockState(state, command, now = Date.now()) {
     case GAME_ACTIONS.SCAN_ROOM: return scanRoom(state, now);
     case GAME_ACTIONS.RESCAN: return rescanRoom(state, now);
     case GAME_ACTIONS.APPROVE_LAYOUT: return approveLayout(state, now);
-    case GAME_ACTIONS.START_GAME: return startGame(state, now);
+    case GAME_ACTIONS.START_GAME: return startGame(state, now, random);
     case GAME_ACTIONS.END_GAME: return endGame(state, now);
     case GAME_ACTIONS.RESET_GAME: return createInitialMockState(now);
-    case GAME_ACTIONS.DELIVERY_SUCCESS: return recordDelivery(state, true, now, orderId);
-    case GAME_ACTIONS.DELIVERY_FAILURE: return recordDelivery(state, false, now, orderId);
+    case GAME_ACTIONS.DELIVERY_SUCCESS: return recordDelivery(state, true, now, orderId, random);
+    case GAME_ACTIONS.DELIVERY_FAILURE: return recordDelivery(state, false, now, orderId, random);
     default: return state;
   }
 }
@@ -417,7 +447,7 @@ function advanceStation(station, elapsedMs) {
   return station;
 }
 
-function advanceOrder(order, elapsedMs) {
+function advanceOrder(order, elapsedMs, now) {
   if (order?.status !== "active") return order;
   const totalSeconds = Number(order.totalSeconds);
   const remainingMs = carriedRemainingMs(order, Number(order.remainingSeconds || 0) * 1000) - elapsedMs;
@@ -425,6 +455,8 @@ function advanceOrder(order, elapsedMs) {
     return {
       ...withoutCarry(order),
       status: "expired",
+      expiredAt: now,
+      penalty: EXPIRED_ORDER_PENALTY,
       remainingSeconds: 0,
       patienceState: 0,
       patience: { ...order.patience, remainingSeconds: 0, filledSegments: 0, state: 0 },
@@ -485,7 +517,7 @@ function endRound(state, now) {
  * Returns the same `state` object when the round is not running or no time has
  * elapsed, so callers can cheaply detect a no-op.
  */
-export function advanceMockState(state, elapsedMs, now = Date.now()) {
+export function advanceMockState(state, elapsedMs, now = Date.now(), random = Math.random) {
   const elapsed = Number(elapsedMs);
   if (!Number.isFinite(elapsed) || elapsed <= 0) return state;
   if (state?.setup?.phase !== SETUP_PHASES.RUNNING || state.clock?.status !== "running") return state;
@@ -494,18 +526,32 @@ export function advanceMockState(state, elapsedMs, now = Date.now()) {
   if (clockMs <= 0) return endRound(state, now);
 
   const hasOrders = Array.isArray(state.orders) && state.orders.length > 0;
-  const orders = hasOrders ? state.orders.map((order) => advanceOrder(order, elapsed)) : state.orders;
+  let orders = hasOrders ? state.orders.map((order) => advanceOrder(order, elapsed, now)) : state.orders;
+  // Only a round started through START_GAME carries a schedule, so hand-built
+  // fixture states keep their fixed order list.
+  const newlyExpired = hasOrders ? orders.filter((order, index) => order.status === "expired" && state.orders[index]?.status === "active").length : 0;
+  const penaltyCoins = newlyExpired * EXPIRED_ORDER_PENALTY;
+  let schedule = hasOrders && state.orderSchedule ? { ...state.orderSchedule, nextInMs: state.orderSchedule.nextInMs - elapsed } : null;
+  if (schedule) {
+    const open = orders.filter(isActiveOrder).length;
+    if (open === 0 || (schedule.nextInMs <= 0 && open < MAX_ACTIVE_ORDERS)) ({ orders, schedule } = issueOrder(orders, schedule, random));
+    else if (schedule.nextInMs <= 0) schedule = { ...schedule, nextInMs: randomIntervalMs(random) };
+  }
   return {
     ...state,
     clock: { ...state.clock, remainingSeconds: Math.ceil(clockMs / 1000), remainingMs: clockMs },
+    ...(penaltyCoins ? {
+      score: { ...state.score, value: Number(state.score?.value || 0) - penaltyCoins },
+      penalties: { total: Number(state.penalties?.total || 0) + penaltyCoins, lastChange: -penaltyCoins },
+    } : {}),
     ...(hasOrders
-      ? { orders, order: { ...withPrimaryOrder(orders, state.order) } }
-      : { order: advanceOrder(state.order, elapsed) }),
+      ? { orders, order: { ...withPrimaryOrder(orders, state.order) }, ...(schedule ? { orderSchedule: schedule } : {}) }
+      : { order: advanceOrder(state.order, elapsed, now) }),
     stations: Array.isArray(state.stations) ? state.stations.map((station) => advanceStation(station, elapsed)) : state.stations,
   };
 }
 
-export function createMockTransport({ initialState, now = () => Date.now() } = {}) {
+export function createMockTransport({ initialState, now = () => Date.now(), random = Math.random } = {}) {
   let state = cloneState(initialState || createInitialMockState(now()));
   const listeners = new Set();
   const emit = () => { const snapshot = cloneState(state); listeners.forEach((listener) => listener(snapshot)); };
@@ -517,7 +563,7 @@ export function createMockTransport({ initialState, now = () => Date.now() } = {
     const at = now();
     const elapsedMs = at - lastTickAt;
     lastTickAt = at;
-    state = advanceMockState(state, elapsedMs, at);
+    state = advanceMockState(state, elapsedMs, at, random);
   };
   // Real badges keep re-scanning, so tracking.lastSeenAt keeps advancing. The
   // mock never dispatches anything per-player, so without a heartbeat every
@@ -539,7 +585,7 @@ export function createMockTransport({ initialState, now = () => Date.now() } = {
     kind: "mock",
     connect(listener) { listeners.add(listener); listener(cloneState(state)); return () => listeners.delete(listener); },
     snapshot() { return cloneState(state); },
-    async command(command) { tick(); state = reduceMockState(state, command, now()); emit(); return cloneState(state); },
+    async command(command) { tick(); state = reduceMockState(state, command, now(), random); emit(); return cloneState(state); },
     close() { clearInterval(heartbeat); listeners.clear(); },
   };
 }

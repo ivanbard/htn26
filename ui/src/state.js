@@ -4,6 +4,9 @@ export const SETUP_PHASES = Object.freeze({
   LAYOUT_PROPOSED: "layout-proposed",
   BURGER_PLACEMENT: "burger-placement",
   LAYOUT_ACCEPTED: "layout-accepted",
+  // The server holds here after the UI's START_GAME until the physical host
+  // badge emits its START record; the round only begins from the badge.
+  WAITING_FOR_HOST: "waiting-for-host-start",
   RUNNING: "running",
   ENDED: "ended",
 });
@@ -23,6 +26,7 @@ const SETUP_PHASE_DISPLAY_MODES = Object.freeze({
   [SETUP_PHASES.LAYOUT_PROPOSED]: UI_DISPLAY_MODES.SETUP,
   [SETUP_PHASES.BURGER_PLACEMENT]: UI_DISPLAY_MODES.SETUP,
   [SETUP_PHASES.LAYOUT_ACCEPTED]: UI_DISPLAY_MODES.SETUP,
+  [SETUP_PHASES.WAITING_FOR_HOST]: UI_DISPLAY_MODES.SETUP,
   [SETUP_PHASES.RUNNING]: UI_DISPLAY_MODES.GAMEPLAY,
   [SETUP_PHASES.ENDED]: UI_DISPLAY_MODES.RESULTS,
 });
