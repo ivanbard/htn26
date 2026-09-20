@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { request as httpRequest } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { createRuntime } from "../server.mjs";
@@ -38,6 +39,38 @@ async function formPhotos(base, count = 3, headers = {}) {
   const form = new FormData();
   for (let index = 0; index < count; index += 1) form.append("photos", new Blob([`photo-${index}`], { type: "image/jpeg" }), `room-${index}.jpg`);
   return fetch(`${base}/api/layout/generate`, { method: "POST", body: form, headers: { accept: "application/json", ...headers } });
+}
+
+async function slowMultipartPhotos(base, { count = 3, delayMs = 20, preprocessMs = 0 } = {}) {
+  const boundary = "----WebKitFormBoundaryAbCdEf123456";
+  const sections = [];
+  for (let index = 0; index < count; index += 1) {
+    sections.push(`--${boundary}\r\nContent-Disposition: form-data; name="photos"; filename="room-${index}.jpg"\r\nContent-Type: image/jpeg\r\n\r\nphoto-${index}\r\n`);
+  }
+  sections.push(`--${boundary}--\r\n`);
+  const body = Buffer.from(sections.join(""));
+  const split = Math.floor(body.length / 2);
+  return new Promise((resolve, reject) => {
+    const request = httpRequest(new URL("/api/layout/generate", base), {
+      method: "POST",
+      headers: {
+        "content-type": `multipart/form-data; boundary=${boundary}`,
+        "content-length": body.length,
+        "x-htn26-photo-preprocess-ms": String(preprocessMs),
+      },
+    }, (response) => {
+      const chunks = [];
+      response.on("data", (chunk) => chunks.push(chunk));
+      response.on("end", () => resolve({
+        status: response.statusCode,
+        headers: response.headers,
+        body: JSON.parse(Buffer.concat(chunks).toString("utf8")),
+      }));
+    });
+    request.on("error", reject);
+    request.write(body.subarray(0, split));
+    setTimeout(() => request.end(body.subarray(split)), delayMs);
+  });
 }
 
 test("sanitizes rotated geometry, boundaries, and normalized rotation", () => {
@@ -141,6 +174,37 @@ test("retains isolated audit submissions across failure and retry", async () => 
       assert.equal(persisted.photos.length, 5);
       assert.equal(persisted.status, submission.status);
     }
+  });
+});
+
+test("preserves mixed-case multipart boundaries and endpoint-wide timing", async () => {
+  let attempts = 0;
+  await withRuntime(async () => {
+    attempts += 1;
+    return attempts === 1
+      ? responseFor({ output_text: JSON.stringify(candidate()) })
+      : responseFor({ error: { message: "provider detail" } }, false, 500);
+  }, async (base, runtime) => {
+    const create = runtime.layoutSubmissionStore.create.bind(runtime.layoutSubmissionStore);
+    runtime.layoutSubmissionStore.create = async (...args) => {
+      await new Promise((resolve) => setTimeout(resolve, 15));
+      return create(...args);
+    };
+
+    const success = await slowMultipartPhotos(base, { preprocessMs: 11 });
+    const failure = await slowMultipartPhotos(base, { preprocessMs: 7 });
+    assert.equal(success.status, 200);
+    assert.deepEqual(Object.keys(success.body).sort(), ["objects", "playArea", "presentationArea", "stations"]);
+    assert.equal(failure.status, 503);
+    assert.deepEqual(failure.body, { error: "Room layout generation is unavailable. Try again." });
+    assert.equal(attempts, 2);
+
+    const audit = await fetch(`${base}/api/layout/submissions`).then((response) => response.json());
+    assert.deepEqual(audit.submissions.map(({ status }) => status), ["success", "failure"]);
+    assert.ok(audit.submissions[0].metrics.totalMs >= 36);
+    assert.ok(audit.submissions[1].metrics.totalMs >= 32);
+    assert.equal(JSON.parse(success.headers["x-htn26-layout-metrics"]).totalMs, audit.submissions[0].metrics.totalMs);
+    assert.equal(JSON.parse(failure.headers["x-htn26-layout-metrics"]).totalMs, audit.submissions[1].metrics.totalMs);
   });
 });
 

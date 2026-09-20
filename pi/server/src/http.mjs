@@ -8,7 +8,9 @@ const MAX_PHOTO_BYTES = 12 * 1024 * 1024;
 
 function json(value) { return JSON.stringify(value); }
 function publicError(message) { return { error: message }; }
-function contentType(req) { return String(req.headers["content-type"] || "").toLowerCase(); }
+function contentType(req) { return String(req.headers["content-type"] || ""); }
+function mediaType(type) { return type.split(";", 1)[0].trim().toLowerCase(); }
+function elapsedMs(start) { return Math.max(0, Number(process.hrtime.bigint() - start) / 1_000_000); }
 
 function send(res, status, body, headers = {}) {
   const payload = Buffer.isBuffer(body) ? body : Buffer.from(typeof body === "string" ? body : json(body));
@@ -246,9 +248,10 @@ export function createHttpServer({ projection, photoStore, layoutSubmissionStore
   async function uploadPhotos(req, res) {
     const body = await readBody(req, MAX_REQUEST_BYTES);
     const type = contentType(req);
-    const uploads = type.startsWith("multipart/form-data")
+    const mime = mediaType(type);
+    const uploads = mime === "multipart/form-data"
       ? parseMultipart(body, type)
-      : [{ filename: req.headers["x-photo-name"] || "room-photo", mime: type.split(";")[0] || "application/octet-stream", bytes: body }];
+      : [{ filename: req.headers["x-photo-name"] || "room-photo", mime: mime || "application/octet-stream", bytes: body }];
     if (!uploads.length) throw Object.assign(new Error("no photo parts found"), { statusCode: 400 });
     if (photoStore.photos.length + uploads.length > 4) throw Object.assign(new Error("at most four room photos are supported"), { statusCode: 409 });
     const saved = [];
@@ -265,30 +268,36 @@ export function createHttpServer({ projection, photoStore, layoutSubmissionStore
   }
 
   async function generateRoomLayout(req, res, headers) {
+    const totalStart = process.hrtime.bigint();
+    const preprocessHeader = req.headers["x-htn26-photo-preprocess-ms"];
+    const preprocessMs = preprocessHeader !== undefined && String(preprocessHeader).trim() !== "" && Number.isFinite(Number(preprocessHeader))
+      ? Math.max(0, Number(preprocessHeader))
+      : null;
     const body = await readBody(req, MAX_REQUEST_BYTES);
     const type = contentType(req);
-    const uploads = type.startsWith("multipart/form-data")
+    const mime = mediaType(type);
+    const uploads = mime === "multipart/form-data"
       ? parseMultipart(body, type)
-      : [{ filename: req.headers["x-photo-name"] || "room-photo", mime: type.split(";")[0] || "application/octet-stream", bytes: body }];
+      : [{ filename: req.headers["x-photo-name"] || "room-photo", mime: mime || "application/octet-stream", bytes: body }];
     if (uploads.length < 3 || uploads.length > 5) throw Object.assign(new Error("upload 3 to 5 room photos"), { statusCode: 400 });
-    const preprocessMs = Number(req.headers["x-htn26-photo-preprocess-ms"]);
     const submission = await layoutSubmissionStore.create(uploads, { preprocessMs });
     const auditHeaders = {
       "x-htn26-layout-request-id": submission.requestId,
       "x-htn26-layout-audit-folder": submission.folder,
     };
-    const totalStart = process.hrtime.bigint();
     try {
       const result = await roomLayoutGenerator?.generate(uploads.map((upload, index) => ({ ...upload, id: submission.photos[index].id })), { preprocessMs });
       if (!result?.layout) throw new Error("no layout returned");
-      const completed = await layoutSubmissionStore.finish(submission.requestId, { status: "success", metrics: result.metrics });
+      const metrics = { ...result.metrics, totalMs: (preprocessMs ?? 0) + elapsedMs(totalStart) };
+      const completed = await layoutSubmissionStore.finish(submission.requestId, { status: "success", metrics });
       projection.proposeRoomLayout(result.layout, Date.now(), { photoCount: submission.photoCount });
+      if (process.env.NODE_ENV !== "production") console.debug("[htn26] room layout generation", { requestId: submission.requestId, ...completed.metrics });
       send(res, 200, result.layout, { ...headers, ...auditHeaders, ...timingHeader(completed.metrics) });
     } catch (error) {
       const metrics = {
         preprocessMs,
         ...error?.metrics,
-        totalMs: error?.metrics?.totalMs ?? (Number.isFinite(preprocessMs) ? Math.max(0, preprocessMs) : 0) + Number(process.hrtime.bigint() - totalStart) / 1_000_000,
+        totalMs: (preprocessMs ?? 0) + elapsedMs(totalStart),
       };
       const completed = await layoutSubmissionStore.finish(submission.requestId, { status: "failure", metrics });
       send(res, Number(error?.statusCode) || 503, { error: "Room layout generation is unavailable. Try again." }, { ...headers, ...auditHeaders, ...timingHeader(completed.metrics) });
