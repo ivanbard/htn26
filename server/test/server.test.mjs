@@ -1,13 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import { readFile, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { createSerialStreamAdapter, parseCanonicalLine, parseGatewayRxLine, parseGatewaySerialLine } from "../src/protocol.mjs";
 import { browserDocument } from "../src/http.mjs";
 import { LocalFloorplanProvider } from "../src/provider.mjs";
 import { BURGER_RECIPES, GAME_TIMINGS, MONEY_RULES, ServerProjection } from "../src/projection.mjs";
-import { createRuntime, startupGuide } from "../server.mjs";
+import { createRuntime, startupGuide, usage } from "../server.mjs";
 import { openSerialDevice } from "../src/serial-device.mjs";
 
 const MAC = "AA:BB:CC:DD:EE:01";
@@ -35,6 +37,55 @@ function submitWithTeam(projection, playerId, plate, now) {
 async function post(base, route, body, headers = { "content-type": "application/json" }) {
   const response = await fetch(`${base}${route}`, { method: "POST", headers, body: typeof body === "string" ? body : JSON.stringify(body) });
   return { response, data: await response.json() };
+}
+
+async function runServerProcess(args, env, ready, timeoutMs = 3_000) {
+  const entrypoint = fileURLToPath(new URL("../server.mjs", import.meta.url));
+  const child = spawn(process.execPath, [entrypoint, ...args], {
+    env: { ...process.env, ...env },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  let stdout = "";
+  let stderr = "";
+  let settled = false;
+  let timer;
+  const exited = new Promise((resolve) => child.once("exit", resolve));
+  const reachedReadyState = new Promise((resolve, reject) => {
+    const check = () => {
+      if (!settled && ready({ stdout, stderr })) {
+        settled = true;
+        clearTimeout(timer);
+        resolve();
+      }
+    };
+    child.stdout.on("data", (chunk) => { stdout += chunk; check(); });
+    child.stderr.on("data", (chunk) => { stderr += chunk; check(); });
+    child.once("error", (error) => {
+      if (!settled) { settled = true; clearTimeout(timer); reject(error); }
+    });
+    child.once("exit", (code, signal) => {
+      if (!settled) {
+        settled = true;
+        clearTimeout(timer);
+        reject(new Error(`server exited before startup (code=${code}, signal=${signal}): ${stderr}`));
+      }
+    });
+    timer = setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        reject(new Error(`timed out waiting for server output\nstdout:\n${stdout}\nstderr:\n${stderr}`));
+      }
+    }, timeoutMs);
+    timer.unref?.();
+  });
+  try {
+    await reachedReadyState;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  } finally {
+    if (child.exitCode == null && child.signalCode == null) child.kill("SIGTERM");
+    await exited;
+  }
+  return { stdout, stderr };
 }
 
 async function approveAndStart(base) {
@@ -138,6 +189,39 @@ test("canonical protocol covers host, gateway, player actions, and submissions w
   assert.equal(parseGatewaySerialLine("noise HTN26|GAME|START_GAME|120|3").kind, "host-control");
   assert.equal(parseGatewaySerialLine("noise HTN26|GAME|GAME_END|3").control, "END");
   assert.equal(parseGatewaySerialLine(`noise HTN26|RX|${MAC}|-44|OC2|7|E|P2:PU:R`).kind, "badge-event");
+});
+
+test("server CLI ignores HTN26_SERIAL_DEVICE and attaches serial only with --serial", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "htn26-serial-cli-"));
+  const devicePath = path.join(directory, "usb-serial.fixture");
+  const dataDir = path.join(directory, "data");
+  const line = "driver noise HTN26|GW|UP|7|0";
+  await writeFile(devicePath, `${line}\n`);
+  try {
+    const plain = await runServerProcess(["--port", "0"], {
+      HTN26_DATA_DIR: dataDir,
+      HTN26_SERIAL_DEVICE: devicePath,
+    }, ({ stdout }) => stdout.includes("HTN26 serial input disabled"));
+    assert.match(plain.stdout, /serial input disabled; pass --serial DEVICE to attach explicitly/);
+    assert.doesNotMatch(plain.stdout, /\[serial\]/);
+    assert.ok(!plain.stdout.includes(devicePath), "plain startup must not use the environment-selected path");
+    assert.equal(plain.stderr, "");
+
+    const explicit = await runServerProcess(["--port", "0", "--serial", devicePath], {
+      HTN26_DATA_DIR: dataDir,
+      HTN26_SERIAL_DEVICE: path.join(directory, "ignored-device"),
+    }, ({ stdout }) => stdout.includes(`HTN26 serial input: ${devicePath}`) && stdout.includes(`[serial] ${line}`));
+    assert.ok(explicit.stdout.includes(`HTN26 serial input: ${devicePath}`));
+    assert.ok(explicit.stdout.includes(`[serial] ${line}`));
+    assert.equal(explicit.stderr, "");
+
+    const help = usage();
+    assert.match(help, /--serial DEVICE/);
+    assert.match(help, /Serial input is disabled unless --serial DEVICE is explicitly passed/);
+    assert.match(help, /HTN26_SERIAL_DEVICE is ignored/);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });
 
 test("configurable serial-device adapter opens a fixture stream", async () => {
