@@ -1066,6 +1066,8 @@ test("setup flow reaches gameplay and results display modes", async () => {
   const results = renderApp(transport.snapshot(), 1_000);
   assert.match(results, /data-display-mode="results"/);
   assert.match(results, /Round complete/);
+  assert.match(results, /class="onboarding-copy player-setup-heading results-heading"/);
+  assert.match(results, /class="onboarding-button player-setup-continue"/);
   assert.match(results, /data-command="RESET_GAME"/);
   assert.doesNotMatch(results, /serving badge|geese/i);
 });
