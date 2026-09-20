@@ -133,10 +133,15 @@ Every attempt has its own timestamped
 photos and safe metadata. `X-HTN26-Layout-Request-Id` and
 `X-HTN26-Layout-Audit-Folder` expose its identity for manual audit or deletion.
 Startup reconciles interrupted `processing` records as failures without
-combining batches. `Server-Timing` and `X-HTN26-Layout-Metrics` cover reported
-client preprocessing, provider upload/request and response parsing, local
-validation, audit persistence, and total time. The provider timeout defaults
-to 12 seconds; under 15 seconds is a typical target, not a guarantee.
+combining batches. Timing uses the selected compact schema in both `Server-Timing` and
+`X-HTN26-Layout-Metrics`: `{ preprocessMs, requestMs, validationMs, totalMs }`.
+`preprocessMs` is reported client preprocessing; `requestMs` covers the single
+provider request and response-body consumption; `validationMs` covers local
+structured-output validation; `totalMs` covers the full HTTP operation,
+including photo upload and audit persistence. Stages that do not run remain
+`null`; timing is intentionally not split into separate upload/body/audit
+fields. The provider timeout defaults to 12 seconds; under 15 seconds is a
+typical target, not a guarantee.
 
 ## Canonical UI snapshot
 
