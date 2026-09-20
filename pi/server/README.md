@@ -379,11 +379,13 @@ only `easy`, `normal`, or `hectic`. Laptop code then selects a recipe from
 `BURGER_RECIPES`.
 
 The request is made after an order is created so a timely response can guide a
-later order. An absent service, network error, timeout, stale response, invalid
-label, or extra response field is discarded and the original order sequence is
-used. The sidecar cannot set recipes, active-order limits, patience/deadlines,
-score, gold, inventory, submissions, timers, floorplans, or badge state. It is
-separate from the setup-photo/OpenAI provider.
+later order. A label remains eligible for at most one configured maximum order
+interval from its feature snapshot; if an active-order cap delays creation past
+that boundary, the label is stale. An absent service, network error, timeout,
+stale response, invalid label, or extra response field is discarded and the
+original order sequence is used. The sidecar cannot set recipes, active-order
+limits, patience/deadlines, score, gold, inventory, submissions, timers,
+floorplans, or badge state. It is separate from the setup-photo/OpenAI provider.
 
 ## Validation
 

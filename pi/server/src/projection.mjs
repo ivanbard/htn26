@@ -283,6 +283,7 @@ export class ServerProjection {
     const epoch = this._difficultyEpoch;
     const requestId = ++this._difficultyRequestId;
     const features = this._difficultyFeatures(now);
+    const expiresAt = now + this.orderIntervalMaxSeconds * 1000;
     Promise.resolve()
       .then(() => this.difficultySidecar.recommend(features))
       .then((result) => {
@@ -293,6 +294,8 @@ export class ServerProjection {
           source: result.source,
           model: result.model,
           latencyMs: result.latencyMs,
+          requestedAt: now,
+          expiresAt,
         };
       })
       .catch(() => {
@@ -307,8 +310,11 @@ export class ServerProjection {
   }
 
   _issueOrder(now = this.now()) {
-    const recommendation = this._nextDifficulty;
+    const candidate = this._nextDifficulty;
     this._nextDifficulty = null;
+    const recommendation = candidate && now >= candidate.requestedAt && now <= candidate.expiresAt
+      ? candidate
+      : null;
     const fallbackRecipe = BURGER_RECIPES[this._orderSequence % BURGER_RECIPES.length];
     const recipe = recipeForDifficulty(recommendation?.difficulty, this._orderSequence) || fallbackRecipe;
     this._orderSequence += 1;

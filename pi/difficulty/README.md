@@ -158,5 +158,8 @@ loopback HTTP server:
 python3 pi/difficulty/smoke.py
 ```
 
+For this revision's validation, the real OpenCV model smoke was not run because
+`cv2` was unavailable. No QNX hardware validation was performed or claimed.
+
 These are laptop-hosted checks. They do not claim QNX, physical badge,
 phone-camera, or deployed-network validation.
