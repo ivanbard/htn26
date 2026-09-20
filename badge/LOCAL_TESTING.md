@@ -1,9 +1,11 @@
 # Local badge testing
 
-The current fixed player app is tested by the focused production-helper suite
-documented in [`slave/README.md`](slave/README.md). The older local gameplay
-runner below remains a legacy compatibility slice; it is not the current
-player-badge contract.
+The production/live fixed-player app is the native role tested as documented in
+[`native/README.md`](native/README.md). The Lua helper suite in
+[`slave/README.md`](slave/README.md) validates rollback compatibility. The older
+local gameplay runner below remains a legacy slice; it is not the current
+player-badge contract. The current server host is a laptop; QNX is only a
+possible future target.
 
 Run from the repository root:
 
@@ -63,8 +65,8 @@ current fixed player flow:
 | Path | Protocol/state owner | Verified scope |
 | --- | --- | --- |
 | Three-app MVP | Type-first OC1; Lua host owns plates and score | Complete raw-tomato slice through `GAME` logs |
-| PR player/gateway | Sequence-first OC1; gateway emits `HTN26` logs | NFC actions, forwarding, serving plate logs |
-| Pi engine | Sequence-first OC1; C++ owns tomato-soup state | Standalone core tests, timers, tracking, delivery, score |
+| PR player/gateway | Sequence-first OC2; gateway emits `HTN26` logs | NFC actions, forwarding, serving plate logs |
+| Pi engine | Sequence-first OC2; C++ owns tomato-soup state | Standalone core tests, timers, tracking, delivery, score |
 | UI | Snapshot/command transport; default fixture | Offline burger setup/rendering tests |
 
 The Pi core still needs the gateway `HTN26|PLATE|P:nn` path connected to physical

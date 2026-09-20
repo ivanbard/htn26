@@ -36,7 +36,9 @@ export function adapterCommand(type, payload) {
  * @property {Array<Object>} stations
  * @property {Object} clock
  * @property {Object} score
- * @property {Object} submission
+ * @property {Object} gold
+ * @property {Object} tips
+ * @property {Array<Object>} submissions
  * @property {Object} serving
  * @property {Object} health
  */

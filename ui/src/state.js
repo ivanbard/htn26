@@ -4,6 +4,7 @@ export const SETUP_PHASES = Object.freeze({
   LAYOUT_PROPOSED: "layout-proposed",
   BURGER_PLACEMENT: "burger-placement",
   LAYOUT_ACCEPTED: "layout-accepted",
+  WAITING_FOR_HOST_START: "waiting-for-host-start",
   RUNNING: "running",
   ENDED: "ended",
 });
@@ -23,6 +24,7 @@ const SETUP_PHASE_DISPLAY_MODES = Object.freeze({
   [SETUP_PHASES.LAYOUT_PROPOSED]: UI_DISPLAY_MODES.SETUP,
   [SETUP_PHASES.BURGER_PLACEMENT]: UI_DISPLAY_MODES.SETUP,
   [SETUP_PHASES.LAYOUT_ACCEPTED]: UI_DISPLAY_MODES.SETUP,
+  [SETUP_PHASES.WAITING_FOR_HOST_START]: UI_DISPLAY_MODES.SETUP,
   [SETUP_PHASES.RUNNING]: UI_DISPLAY_MODES.GAMEPLAY,
   [SETUP_PHASES.ENDED]: UI_DISPLAY_MODES.RESULTS,
 });
@@ -37,7 +39,7 @@ export const GAME_ACTIONS = Object.freeze({
   START_HOST: "START_HOST",
   SCAN_ROOM: "SCAN_ROOM",
   APPROVE_LAYOUT: "APPROVE_LAYOUT",
-  // Kept as a protocol alias for existing master-Pi adapters.
+  // Kept as a protocol alias for existing laptop-server adapters.
   ACCEPT_LAYOUT: "APPROVE_LAYOUT",
   RESCAN: "RESCAN",
   START_GAME: "START_GAME",

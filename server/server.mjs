@@ -8,6 +8,7 @@ import { openSerialDevice } from "./src/serial-device.mjs";
 import { PhotoStore, createHttpServer } from "./src/http.mjs";
 import { createRoomLayoutGenerator } from "./src/layout-generator.mjs";
 import { LayoutSubmissionStore } from "./src/layout-submission-store.mjs";
+import { DifficultySidecarClient } from "./src/difficulty-sidecar.mjs";
 
 function parseArgs(argv) {
   const options = {};
@@ -25,7 +26,7 @@ function parseArgs(argv) {
   return options;
 }
 
-export async function createRuntime({ env = process.env, now = () => Date.now(), fetchImpl = globalThis.fetch, dataDir, authoritativeEngine } = {}) {
+export async function createRuntime({ env = process.env, now = () => Date.now(), fetchImpl = globalThis.fetch, dataDir, authoritativeEngine, difficultySidecar } = {}) {
   const directory = dataDir || env.HTN26_DATA_DIR || path.join(path.dirname(fileURLToPath(import.meta.url)), "data");
   const photoStore = new PhotoStore({ directory });
   await photoStore.init();
@@ -33,6 +34,13 @@ export async function createRuntime({ env = process.env, now = () => Date.now(),
   await layoutSubmissionStore.init();
   const provider = createFloorplanProvider({ env, fetchImpl, now });
   const roomLayoutGenerator = createRoomLayoutGenerator({ env, fetchImpl, now });
+  const configuredDifficultySidecar = difficultySidecar === undefined && env.HTN26_DIFFICULTY_SIDECAR_URL
+    ? new DifficultySidecarClient({
+      baseUrl: env.HTN26_DIFFICULTY_SIDECAR_URL,
+      timeoutMs: Number(env.HTN26_DIFFICULTY_SIDECAR_TIMEOUT_MS) || 200,
+      fetchImpl,
+    })
+    : difficultySidecar || null;
   const projection = new ServerProjection({
     provider,
     now,
@@ -43,6 +51,7 @@ export async function createRuntime({ env = process.env, now = () => Date.now(),
     maxActiveOrders: Number(env.HTN26_MAX_ACTIVE_ORDERS) || 3,
     locationHoldSeconds: env.HTN26_PLAYER_LOCATION_HOLD_SECONDS == null ? undefined : Number(env.HTN26_PLAYER_LOCATION_HOLD_SECONDS),
     authoritativeEngine,
+    difficultySidecar: configuredDifficultySidecar,
   });
   const serialAdapter = createSerialStreamAdapter({
     onRecord: (record) => {
@@ -71,6 +80,7 @@ export async function createRuntime({ env = process.env, now = () => Date.now(),
     photoStore,
     layoutSubmissionStore,
     roomLayoutGenerator,
+    difficultySidecar: configuredDifficultySidecar,
     serialAdapter,
     serialDevice,
     server,

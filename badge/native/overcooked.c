@@ -10,6 +10,21 @@ enum Stove { STOVE_EMPTY, STOVE_COOKING, STOVE_COOKED, STOVE_WARNING, STOVE_BURN
 enum Selection { SELECT_NONE, SELECT_LEFT, SELECT_RIGHT, SELECT_DOWN };
 enum Role { ROLE_NONE, ROLE_PLAYER_SETUP, ROLE_PLAYER, ROLE_HOST };
 
+typedef struct NativeImageHeader {
+    u8 magic, color_format;
+    unsigned short flags, width, height, stride, reserved;
+} NativeImageHeader;
+typedef struct NativeImage {
+    NativeImageHeader header;
+    u32 data_size;
+    const u8 *data;
+    const void *reserved;
+} NativeImage;
+_Static_assert(sizeof(NativeImageHeader) == 12, "Recovered LVGL image header ABI changed");
+_Static_assert(sizeof(NativeImage) == 24, "Recovered LVGL image descriptor ABI changed");
+
+#include "generated_icons.h"
+
 typedef struct NfcCard {
     u8 uid[10], padding[2];
     u32 uid_size;
@@ -40,8 +55,10 @@ typedef struct App {
     u8 ready_ticks[3];
     u32 process_ticks, stove_ticks[2], stove_view_ticks;
     u32 game_ticks, control_sequence, tap_cooldown;
+    void *icon_widget;
+    const NativeImage *shown_icon;
 } App;
-_Static_assert(sizeof(App) == 300, "Update heap report when app size changes");
+_Static_assert(sizeof(App) == 308, "Update heap report when app size changes");
 
 #define ACK_BYTES 15
 #define WAIT_TICKS 150
@@ -80,6 +97,13 @@ _Static_assert(sizeof(App) == 300, "Update heap report when app size changes");
 #define LED_SHOW FN(0x4200f58a, void, void)
 #define LED_CLEAR FN(0x4200f54a, void, void)
 #define LABEL_TEXT FN(0x420ce086, void, void *, const char *)
+#define IMAGE_CREATE FN(0x420ccc76, void *, void *)
+#define IMAGE_SOURCE FN(0x420cd1ac, void, void *, const NativeImage *)
+#define OBJECT_POSITION FN(0x420a908c, void, void *, int, int)
+#define OBJECT_WIDTH FN(0x420a90b2, void, void *, int)
+#define OBJECT_HIDE FN(0x420a73c4, void, void *, u32)
+#define OBJECT_SHOW FN(0x420a6c5c, void, void *, u32)
+#define OBJECT_FLAG_HIDDEN 1
 
 static void heap(const char *stage) {
     PRINT("OC_NATIVE|%s|internal8_free=%u|internal8_largest=%u|default_free=%u|default_largest=%u\n",
@@ -137,7 +161,7 @@ static int valid_snapshot(const char *value, usize size) {
     if (size == 5 && value[0] == 'P') return valid_plate(value + 1);
     if (size == 5 && equal(value, "E----", 5)) return 1;
     return size == 2 && value[0] == 'H' &&
-           (value[1] == 'B' || value[1] == 'R' || value[1] == 'M' || value[1] == 'X' ||
+           (value[1] == 'B' || value[1] == 'R' || value[1] == 'D' || value[1] == 'M' || value[1] == 'X' ||
             value[1] == 'Q' || value[1] == 'L' || value[1] == 'K' || value[1] == 'C');
 }
 
@@ -157,7 +181,7 @@ static int valid_action(const u8 *value, usize size) {
     if (size == 7 && starts(action, "PL:")) return valid_plate(action + 3);
     if (size == 8 && starts(action, "SUB:")) return valid_plate(action + 4);
     if (size == 6 && starts(action, "CH:D:"))
-        return action[5] == 'M' || action[5] == 'L' || action[5] == 'C';
+        return action[5] == 'D' || action[5] == 'L' || action[5] == 'C';
     if (starts(action, "ST:") && size >= 6 && size <= 15 &&
         (action[3] == 'L' || action[3] == 'R') && action[4] == ':') {
         if (size == 6) return action[5] == 'P' || action[5] == 'T' || action[5] == 'X';
@@ -174,12 +198,12 @@ static void receive(const usize *capture, const u8 **peer, const signed char *rs
     App *self = (App *)capture[0];
     if (!acquire(&self->active) || *size < 14 || *size >= sizeof(self->inbox)) return;
     const u8 *p = *data;
-    int event = *size > 16 && equal(p, "OC1|", 4) && sequence(p + 4) &&
+    int event = *size > 16 && equal(p, "OC2|", 4) && sequence(p + 4) &&
                 equal(p + 10, "|E|P", 4) && p[14] >= '1' && p[14] <= '3' && p[15] == ':' &&
                 valid_action(p + 16, *size - 16);
-    int control = *size == 14 && equal(p, "OC1|", 4) && sequence(p + 4) &&
+    int control = *size == 14 && equal(p, "OC2|", 4) && sequence(p + 4) &&
                   equal(p + 10, "|G|", 3) && (p[13] == 'S' || p[13] == 'E');
-    int ack = *size == ACK_BYTES && equal(p, "OC1|", 4) && sequence(p + 4) &&
+    int ack = *size == ACK_BYTES && equal(p, "OC2|", 4) && sequence(p + 4) &&
               equal(p + 10, "|A|OK", 5);
     if (!event && !control && !ack) return;
     if (acquire(&self->inbox_full)) { ++self->dropped; return; }
@@ -241,6 +265,37 @@ static u8 plate_bit(u8 item) {
     return 0;
 }
 
+static const NativeImage *item_icon(u8 item) {
+    if (item == RAW_MEAT) return &native_icon_raw_meat;
+    if (item == CHOPPED_MEAT) return &native_icon_chopped_meat;
+    if (item == COOKED_MEAT) return &native_icon_cooked_meat;
+    if (item == BURNT_MEAT) return &native_icon_burnt_meat;
+    if (item == BREAD) return &native_icon_bun;
+    if (item == LETTUCE) return &native_icon_lettuce;
+    if (item == CHOPPED_LETTUCE) return &native_icon_chopped_lettuce;
+    if (item == CHEESE) return &native_icon_cheese;
+    if (item == CHOPPED_CHEESE) return &native_icon_chopped_cheese;
+    return 0;
+}
+
+static void render_held_icon(App *self, u8 item, int has_plate) {
+    if (!self->icon_widget) return;
+    const NativeImage *next = has_plate ? &native_icon_plate : item_icon(item);
+    if (self->shown_icon == next) return;
+    self->shown_icon = next;
+    if (!next) OBJECT_HIDE(self->icon_widget, OBJECT_FLAG_HIDDEN);
+    else {
+        IMAGE_SOURCE(self->icon_widget, next);
+        OBJECT_SHOW(self->icon_widget, OBJECT_FLAG_HIDDEN);
+    }
+}
+
+static void info_layout(App *self, int player) {
+    if (!self->info) return;
+    OBJECT_POSITION(self->info, player ? 72 : 12, 68);
+    OBJECT_WIDTH(self->info, player ? 236 : 290);
+}
+
 static void unknown_combo(App *self) {
     if (self->status) LABEL_TEXT(self->status, "UNKNOWN BUTTON COMBO");
     LED_CLEAR();
@@ -252,13 +307,16 @@ static void render_game(App *self) {
     if (!self->info) return;
     char text[190];
     if (self->role == ROLE_NONE) {
+        info_layout(self, 0); render_held_icon(self, EMPTY, 0);
         LABEL_TEXT(self->info, "A: PLAYER\nSTART: HOST"); return;
     }
     if (self->role == ROLE_PLAYER_SETUP) {
+        info_layout(self, 0); render_held_icon(self, EMPTY, 0);
         FORMAT(text, sizeof(text), "CHOOSE PLAYER %u\nLEFT/RIGHT, A CONFIRM", (u32)self->player);
         LABEL_TEXT(self->info, text); return;
     }
     if (self->role == ROLE_HOST) {
+        info_layout(self, 0); render_held_icon(self, EMPTY, 0);
         if (!self->game_active) LABEL_TEXT(self->info, "HOST\nPRESS START TO BEGIN");
         else {
             u32 seconds = (self->game_ticks + 49) / 50;
@@ -268,14 +326,17 @@ static void render_game(App *self) {
         }
         return;
     }
+    info_layout(self, 1);
+    u8 displayed = self->process_ticks ? self->process_from : self->held;
+    render_held_icon(self, displayed, self->has_plate);
     if (!self->game_active) {
-        FORMAT(text, sizeof(text), "PLAYER %u\nWAITING FOR GAME START", (u32)self->player);
+        FORMAT(text, sizeof(text), "PLAYER %u\nHELD: EMPTY\nWAITING FOR GAME START", (u32)self->player);
         LABEL_TEXT(self->info, text); return;
     }
     FORMAT(text, sizeof(text),
-           "PLAYER %u  HELD: %s\nPLATE: %s B%c M%c L%c C%c\nSELECT: %s\nSTOVES: L %s  R %s",
-           (u32)self->player, item_name(self->held), self->has_plate ? "YES" : "NO",
-           self->plate & PLATE_BREAD ? '+' : '-',
+           "PLAYER %u\nHELD: %s%s\nPLATE: %s B%c M%c L%c C%c\nSELECT: %s\nSTOVES: L %s  R %s",
+           (u32)self->player, item_name(displayed), self->process_ticks ? " (CUTTING)" : "",
+           self->has_plate ? "YES" : "NO", self->plate & PLATE_BREAD ? '+' : '-',
            self->plate & PLATE_MEAT ? '+' : '-', self->plate & PLATE_LETTUCE ? '+' : '-',
            self->plate & PLATE_CHEESE ? '+' : '-', selection_name(self->selected),
            stove_name(self->stove_state[0]), stove_name(self->stove_state[1]));
@@ -304,6 +365,7 @@ static void take_item(App *self, u8 item) {
 
 static u8 short_item(char code) {
     if (code == 'R') return RAW_MEAT;
+    if (code == 'D') return CHOPPED_MEAT;
     if (code == 'M') return COOKED_MEAT;
     if (code == 'X') return BURNT_MEAT;
     if (code == 'B') return BREAD;
@@ -316,7 +378,8 @@ static u8 short_item(char code) {
 
 static char item_short(u8 item) {
     if (item == RAW_MEAT) return 'R';
-    if (item == CHOPPED_MEAT || item == COOKED_MEAT) return 'M';
+    if (item == CHOPPED_MEAT) return 'D';
+    if (item == COOKED_MEAT) return 'M';
     if (item == BURNT_MEAT) return 'X';
     if (item == BREAD) return 'B';
     if (item == LETTUCE) return 'Q';
@@ -400,7 +463,7 @@ static void apply_action(App *self, const char *action, int local) {
         if (self->status) LABEL_TEXT(self->status, "ITEM DROPPED");
     } else if (starts(action, "SUB:") && local) {
         self->plate = self->has_plate = 0;
-        if (self->status) LABEL_TEXT(self->status, "PLATE SUBMITTED TO PI");
+        if (self->status) LABEL_TEXT(self->status, "PLATE SUBMITTED");
     } else if (starts(action, "X:") && !local) apply_bump(self, action + 2);
     render_game(self);
 }
@@ -410,7 +473,7 @@ static void start_action(App *self, const char *action) {
     u32 current = self->sequence++;
     if (self->sequence > 999999) self->sequence = 1;
     int written = FORMAT(self->pending, sizeof(self->pending),
-                         "OC1|%06u|E|P%u:%s", current, (u32)self->player, action);
+                         "OC2|%06u|E|P%u:%s", current, (u32)self->player, action);
     if (written < 17 || written >= (int)sizeof(self->pending)) return;
     self->pending_size = (u32)written; self->advertise_ticks = 0;
     self->attempts = 1; self->wait_ticks = WAIT_TICKS;
@@ -422,7 +485,7 @@ static void start_action(App *self, const char *action) {
 
 static void broadcast_control(App *self, char code) {
     u32 current = ++self->sequence;
-    int written = FORMAT(self->pending, sizeof(self->pending), "OC1|%06u|G|%c", current, code);
+    int written = FORMAT(self->pending, sizeof(self->pending), "OC2|%06u|G|%c", current, code);
     if (written != 14) return;
     self->pending_size = (u32)written; self->wait_ticks = 0;
     if (!transmit(self, self->pending, self->pending_size)) self->advertise_ticks = WAIT_TICKS;
@@ -581,9 +644,10 @@ static void poll_motion(App *self) {
             char summary[5], action[9]; plate_summary(summary, self->plate);
             mark_ready(self, self->player);
             self->plate = self->has_plate = 0;
+            render_game(self);
             FORMAT(action, sizeof(action), "SUB:%s", summary); start_action(self, action);
         } else {
-            mark_ready(self, self->player); start_action(self, "READY");
+            mark_ready(self, self->player); render_game(self); start_action(self, "READY");
         }
     } else if (!self->tap_cooldown && value > TAP_ABS_BITS) {
         char state[6], action[10]; snapshot(self, state);
@@ -663,8 +727,8 @@ static void *label(void *screen, const char *text, int y) {
     void *object = FN(0x420ce062, void *, void *)(screen);
     if (!object) return 0;
     LABEL_TEXT(object, text);
-    FN(0x420a908c, void, void *, int, int)(object, 12, y);
-    FN(0x420a90b2, void, void *, int)(object, 290);
+    OBJECT_POSITION(object, 12, y);
+    OBJECT_WIDTH(object, 290);
     FN(0x420ae15c, void, void *, const void *, u32)(object, (void *)0x3c24bffc, 0);
     u32 color = FN(0x420bd958, u32, u32)(0xf4f4ef);
     FN(0x420ae11a, void, void *, u32, u32)(object, color, 0); return object;
@@ -689,10 +753,16 @@ static void enter(App *self, void *screen) {
     self->ready_ticks[0] = self->ready_ticks[1] = self->ready_ticks[2] = 0;
     self->process_ticks = self->stove_ticks[0] = self->stove_ticks[1] = self->stove_view_ticks = 0;
     self->game_ticks = self->control_sequence = self->tap_cooldown = 0;
+    self->icon_widget = 0; self->shown_icon = (const NativeImage *)1;
     LED_CLEAR(); LED_SHOW();
     label(screen, "OVERCOOKED CONTROLLER", 7);
     self->status = label(screen, "Choose role to start radio", 34);
     self->info = label(screen, "HELD: EMPTY", 68);
+    self->icon_widget = IMAGE_CREATE(screen);
+    if (self->icon_widget) {
+        OBJECT_POSITION(self->icon_widget, 16, 102);
+        OBJECT_HIDE(self->icon_widget, OBJECT_FLAG_HIDDEN);
+    }
     label(screen, "A player   START host   HOME exit", 214);
     render_game(self);
 }
@@ -769,10 +839,10 @@ static void consume_radio(App *self) {
         }
     }
     /* Only the gateway acknowledges player events so a peer cannot stop a
-       retry before the single Pi's host badge has observed and logged it. */
+       retry before the laptop-connected host has observed and logged it. */
     if (self->role == ROLE_HOST && event &&
         (!duplicate || !self->advertise_ticks)) {
-        char reply[16]; FORMAT(reply, sizeof(reply), "OC1|%.6s|A|OK", packet + 4);
+        char reply[16]; FORMAT(reply, sizeof(reply), "OC2|%.6s|A|OK", packet + 4);
         int error = transmit(self, reply, ACK_BYTES);
         if (!error) self->advertise_ticks = ACK_TICKS;
     }
@@ -848,7 +918,8 @@ static void leave(App *self) {
     release(&self->active, 0);
     if (self->nfc_enabled) NFC_STOP();
     RADIO_STOP(); LED_CLEAR(); LED_SHOW(); heap("exit");
-    self->status = 0; self->phase = 0; self->ticks = 0; self->info = 0;
+    self->status = 0; self->phase = 0; self->ticks = 0; self->info = self->icon_widget = 0;
+    self->shown_icon = 0;
     self->inbox_full = self->wait_ticks = self->advertise_ticks = self->pulse_ticks = 0;
     self->process_ticks = self->attempts = 0;
 }
@@ -870,5 +941,5 @@ void register_overcooked(void) {
     App *app = FN(0x40397474, void *, usize, usize)(1, sizeof(App));
     if (!app) { PRINT("OC_NATIVE|registration_failed=no_memory\n"); return; }
     app->vtable = vtable; FN(0x4203aace, void, void *)(app);
-    PRINT("OC_NATIVE|registered|build=update1.1|object_bytes=%u\n", (u32)sizeof(App));
+    PRINT("OC_NATIVE|registered|build=update1.1-icons|object_bytes=%u\n", (u32)sizeof(App));
 }

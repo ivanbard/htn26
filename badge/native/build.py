@@ -6,6 +6,7 @@ from pathlib import Path
 import shutil
 import struct
 import subprocess
+import sys
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent.parent
@@ -18,6 +19,8 @@ HOOK = 0x4200A81C
 HOOK_BYTES = bytes.fromhex("efd05258ef00e32a")
 TEXT = 0x4212C720
 RODATA = 0x3C268760
+ICON_GENERATOR = ROOT / "badge/assets/icons/generate_native_icons.py"
+GENERATED_ICONS = HERE / "generated_icons.h"
 
 
 def require(condition, message):
@@ -139,6 +142,7 @@ def extend(header, segments, text, rodata):
 
 
 def build(dump, zig, output):
+    subprocess.run([sys.executable, str(ICON_GENERATOR), "--check"], check=True)
     compiler = subprocess.check_output([str(zig), "version"], text=True).strip()
     require(compiler == "0.14.1", "Native payload requires Zig 0.14.1, got " + compiler)
     header, segments, stock = load_stock(dump)
@@ -162,7 +166,9 @@ def build(dump, zig, output):
         "stock_bytes": len(stock), "candidate_bytes": len(candidate),
         "factory_capacity": CAPACITY, "remaining_bytes": CAPACITY - len(candidate),
         "payload_code_bytes": len(text), "payload_rodata_bytes": len(rodata),
-        "drom_growth_bytes": 0x10000, "permanent_app_object_bytes": 300,
+        "drom_growth_bytes": 0x10000, "permanent_app_object_bytes": 308,
+        "native_icon_count": 10, "generated_icons_sha256": sha(GENERATED_ICONS.read_bytes()),
+        "icon_generator_sha256": sha(ICON_GENERATOR.read_bytes()),
         "hook_virtual_address": hex(HOOK), "hook_old": HOOK_BYTES.hex(),
         "hook_new": hook_bytes().hex(), "stock_round_trip": "byte-identical",
         "stock_loaded_segments": "identical except eight-byte registration hook",
