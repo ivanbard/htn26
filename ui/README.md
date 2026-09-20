@@ -16,8 +16,8 @@ npm run dev
 
 `npm run build` creates the production bundle in `dist/`.
 
-Open <http://127.0.0.1:4173>. The default development page uses its mock
-transport. Use `?transport=http` for the live root server; Vite proxies
+Open <http://127.0.0.1:4173>. The browser defaults to the live HTTP/SSE
+transport; use `?transport=mock` for the offline fixture. Vite proxies
 same-origin `/api` requests to `http://127.0.0.1:8787` by default. Override that
 target with `HTN26_API_PROXY_TARGET` when necessary.
 
@@ -65,8 +65,8 @@ A burger uses buns, meat, cheese, and lettuce. Cheese, lettuce, and meat can be 
 
 - `src/mock-transport.js` is the required offline development transport. It owns a fixture state and applies host commands as a stand-in for an authoritative server. While a round runs it also ticks every second (`advanceMockState`, mirroring `pi/server/src/projection.mjs`): the four-minute (240 s) round clock, order patience, order spawning (one order at round start, then a random 8-35 s gap, at most three open, never zero; the mock's own patience is 60 s plus 15 s per topping), chop progress, and the stove cooking -> done -> warning -> burnt timeline. This is the only place timers advance; the renderer only displays the snapshot values.
 - Station progress bars appear only on stoves and chopping boards that hold an item or are cooking/chopping/done/burnt. Runtime stations are paired with plan stations by id first, then by kind, because the Pi's plan has one `stove` while its runtime stations are `stove-left`/`stove-right`.
-- `src/transport.js` includes a local HTTP/SSE transport for integration with an authoritative server. It expects `GET /api/state`, `POST /api/command`, and `GET /api/events`; those endpoints remain outside this UI task.
-- Use `http://127.0.0.1:4173/?transport=http` to select the HTTP seam. It uses same-origin `/api` routes so the Vite proxy also works for LAN clients; an explicit `api`/`apiBase` query value can override it. A supplied `window.__HTN26_TRANSPORT__` takes precedence for integration tests.
+- `src/transport.js` includes a local HTTP/SSE transport for integration with an authoritative server. It expects `GET /api/state`, `POST /api/command`, and `GET /api/events`.
+- The browser defaults to the HTTP seam so the deployed desktop and phone share the root server; use `?transport=mock` only for the offline fixture. It uses same-origin `/api` routes so the Vite proxy also works for LAN clients; an explicit `api`/`apiBase` query value can override it. A supplied `window.__HTN26_TRANSPORT__` takes precedence for integration tests.
 - `src/PhotosPage.js` owns the isolated `/photos` upload surface and posts each 4-5 image selection directly to the server layout-generation route.
 - `src/App.js` contains the React component tree for the staged setup flow, framed room board, order HUD, player/station overlays, and live notifications.
 - `src/render.js` renders the same React tree to static markup for contract tests. It does not create timers, move players, score deliveries, or infer station/order state.

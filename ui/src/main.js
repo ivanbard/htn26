@@ -70,9 +70,11 @@ export function createApp({ root, transport, now = () => Date.now() }) {
     const stateAtCommandStart = state;
     try {
       const nextState = await operation();
-      if (state !== stateAtCommandStart) return;
       uploadStatus = successMessage;
-      render(nextState);
+      // HTTP layout generation publishes the authoritative proposal over SSE;
+      // its POST response is the sanitized layout document, not a full state.
+      if (state === stateAtCommandStart && nextState?.setup) render(nextState);
+      else render(state);
     } catch (error) {
       connectionError = `ROOM LAYOUT FAILED — ${error.message}`;
       render(state);

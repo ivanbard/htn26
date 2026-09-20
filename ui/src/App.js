@@ -248,6 +248,13 @@ function HostPanel({ state, onCommand }) {
       ),
     ),
     h(StageTracker, { state, onCommand }),
+    phase === SETUP_PHASES.LAYOUT_PROPOSED && h("button", {
+      type: "button",
+      className: "onboarding-button setup-approve-layout",
+      disabled: !canRunAction(state, GAME_ACTIONS.APPROVE_LAYOUT),
+      "data-command": GAME_ACTIONS.APPROVE_LAYOUT,
+      onClick: () => onCommand?.(GAME_ACTIONS.APPROVE_LAYOUT),
+    }, "Approve room layout"),
   );
 }
 
@@ -883,8 +890,12 @@ function playersForSlots(state) {
 }
 
 function roomPhotoCount(state) {
-  const photoCount = Array.isArray(state?.photos) ? state.photos.length : Number(state?.photoCount ?? state?.setup?.photoCount);
-  return Number.isFinite(photoCount) ? Math.max(0, Math.floor(photoCount)) : 0;
+  const floorPlanCount = Number(state?.floorPlan?.photoCount);
+  if (Number.isFinite(floorPlanCount) && floorPlanCount > 0) return Math.floor(floorPlanCount);
+  const photosCount = Array.isArray(state?.photos) ? state.photos.length : Number.NaN;
+  if (Number.isFinite(photosCount) && photosCount > 0) return photosCount;
+  const setupCount = Number(state?.setup?.photoCount);
+  return Number.isFinite(setupCount) && setupCount > 0 ? Math.floor(setupCount) : 0;
 }
 
 function PlayerReadinessCard({ slot, player }) {
@@ -938,13 +949,21 @@ function PlayerSetupView({ state, onCommand, onGenerateLayout, onUseDefaultLayou
         h("div", { className: "player-readiness-list" }, players.map((player, index) => h(PlayerReadinessCard, { key: index, slot: index + 1, player }))),
       ),
       h(RoomPhotoUpload, { state, uploadStatus }),
-      h("button", {
-        type: "button",
-        className: "onboarding-button player-setup-continue",
-        disabled: !canContinue,
-        "data-command": GAME_ACTIONS.SCAN_ROOM,
-        onClick: () => personalizedReady && !serverUnavailable ? personalizedAction() : defaultAction(),
-      }, personalizedReady && !serverUnavailable ? "Continue with Personalized Room Layout" : "Continue with Normal Room Layout"),
+      h("div", { className: "player-setup-layout-actions" },
+        h("button", {
+          type: "button",
+          className: "onboarding-button player-setup-continue",
+          disabled: !canContinue,
+          "data-command": GAME_ACTIONS.SCAN_ROOM,
+          onClick: () => personalizedReady && !serverUnavailable ? personalizedAction() : defaultAction(),
+        }, personalizedReady && !serverUnavailable ? "Continue with Personalized Room Layout" : "Continue with Normal Room Layout"),
+        personalizedReady && !serverUnavailable && h("button", {
+          type: "button",
+          className: "onboarding-button onboarding-button-secondary player-setup-default-layout",
+          disabled: !canContinue,
+          onClick: () => defaultAction(),
+        }, "Use Normal Room Layout"),
+      ),
     ),
   );
 }

@@ -74,6 +74,44 @@ async function slowMultipartPhotos(base, { count = 3, delayMs = 20, preprocessMs
   });
 }
 
+function connectSse(base) {
+  let buffer = "";
+  const states = [];
+  const waiters = [];
+  let resolveConnected;
+  let rejectConnected;
+  const connected = new Promise((resolve, reject) => { resolveConnected = resolve; rejectConnected = reject; });
+  const request = httpRequest(new URL("/api/events", base), { headers: { accept: "text/event-stream" } }, (response) => {
+    if (response.statusCode !== 200) {
+      rejectConnected(new Error(`SSE connection failed (${response.statusCode})`));
+      return;
+    }
+    resolveConnected();
+    response.setEncoding("utf8");
+    response.on("data", (chunk) => {
+      buffer += chunk;
+      let separator;
+      while ((separator = buffer.match(/\r?\n\r?\n/))) {
+        const frame = buffer.slice(0, separator.index);
+        buffer = buffer.slice(separator.index + separator[0].length);
+        const data = frame.split(/\r?\n/).find((line) => line.startsWith("data: "));
+        if (!data) continue;
+        const state = JSON.parse(data.slice(6));
+        const waiter = waiters.shift();
+        if (waiter) waiter(state);
+        else states.push(state);
+      }
+    });
+  });
+  request.on("error", (error) => rejectConnected(error));
+  request.end();
+  return {
+    connected,
+    nextState() { return states.length ? Promise.resolve(states.shift()) : new Promise((resolve) => waiters.push(resolve)); },
+    close() { request.destroy(); },
+  };
+}
+
 test("keeps schema version stable and revision monotonic across reset and snapshots", async () => {
   await withRuntime(async () => responseFor({ output_text: JSON.stringify(candidate()) }), async (_base, runtime) => {
     const initial = runtime.projection.snapshot();
@@ -87,6 +125,46 @@ test("keeps schema version stable and revision monotonic across reset and snapsh
     assert.ok(started.revision < reset.revision);
     assert.ok(reset.revision < adopted.revision);
     assert.ok([initial, started, reset, adopted].every((snapshot) => snapshot.version === 2));
+  });
+});
+
+test("successful phone generation publishes the canonical proposal and photos over SSE", async () => {
+  await withRuntime(async () => responseFor({ output_text: JSON.stringify(candidate()) }), async (base) => {
+    const stream = connectSse(base);
+    try {
+      await stream.connected;
+      const initial = await stream.nextState();
+      assert.equal(initial.setup.phase, "idle");
+      const response = await formPhotos(base, 4);
+      assert.equal(response.status, 200);
+      const update = await stream.nextState();
+      assert.equal(update.setup.phase, "layout-proposed");
+      assert.equal(update.setup.photoCount, 4);
+      assert.equal(update.photos.length, 4);
+      assert.equal(update.floorPlan.photoCount, 4);
+      assert.equal(update.floorPlan.layoutFromImage, true);
+      assert.equal(update.proposedRoomLayout.stations.length, 4);
+    } finally {
+      stream.close();
+    }
+  });
+});
+
+test("desktop generation reuses stored photos without duplicating the canonical batch", async () => {
+  await withRuntime(async () => responseFor({ output_text: JSON.stringify(candidate()) }), async (base, runtime) => {
+    for (let index = 0; index < 4; index += 1) {
+      const upload = await fetch(`${base}/api/photos`, {
+        method: "POST",
+        headers: { "content-type": "image/jpeg", "x-photo-name": `room-${index}.jpg` },
+        body: Buffer.from(`photo-${index}`),
+      });
+      assert.equal(upload.status, 201);
+    }
+    const response = await fetch(`${base}/api/layout/generate`, { method: "POST", headers: { accept: "application/json" } });
+    assert.equal(response.status, 200);
+    const state = runtime.projection.snapshot();
+    assert.equal(state.photos.length, 4);
+    assert.equal((await fetch(`${base}/api/photos`).then((value) => value.json())).count, 4);
   });
 });
 
@@ -171,6 +249,8 @@ test("sends all photos in one Responses request and returns the exact layout con
     assert.equal(request.text.format.type, "json_schema");
     assert.equal(request.text.format.strict, true);
     const proposedState = runtime.projection.snapshot();
+    assert.equal(proposedState.photos.length, 5);
+    assert.equal(proposedState.setup.photoCount, 5);
     assert.equal(proposedState.roomLayout, null);
     assert.equal(proposedState.proposedRoomLayout.stations.length, 4);
     assert.equal(proposedState.proposedRoomLayout.stations[0].rotationDeg, 90);
@@ -180,10 +260,19 @@ test("sends all photos in one Responses request and returns the exact layout con
     assert.equal(proposedState.burgerLevel.status, "not-generated");
     assert.deepEqual(proposedState.stations, previousStations);
     assert.throws(() => runtime.projection.command("START_GAME"), /approve the floorplan/);
+    const scan = await fetch(`${base}/api/command`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ type: "SCAN_ROOM" }),
+    });
+    assert.equal(scan.status, 400);
+    assert.match((await scan.json()).error, /layout\/generate/);
+    assert.equal(runtime.projection.snapshot().proposedRoomLayout.stations.length, 4);
     assert.equal(await fetch(`${base}/api/layout`).then((active) => active.json()), null);
     const floorPlan = proposedState.floorPlan;
     assert.equal(floorPlan.accepted, false);
     assert.equal(floorPlan.photoCount, 5);
+    assert.equal(floorPlan.layoutFromImage, true);
     assert.equal(floorPlan.coordinateSpace, "normalized-percent");
     assert.equal(floorPlan.units, "percent");
     assert.equal(floorPlan.width, 100);
@@ -224,6 +313,8 @@ test("retains isolated audit submissions across failure and retry", async () => 
     assert.equal(failedResponse.status, 503);
     assert.deepEqual(failedBody, { error: "Room layout generation is unavailable. Try again." });
     assert.doesNotMatch(JSON.stringify(failedBody), /secret|OpenAI|upstream/i);
+    assert.deepEqual(runtime.projection.snapshot().photos, []);
+    assert.equal(runtime.projection.snapshot().floorPlan.photoCount, 0);
 
     const successfulResponse = await formPhotos(base, 5, { "x-htn26-photo-preprocess-ms": "21" });
     assert.equal(successfulResponse.status, 200);
@@ -232,7 +323,7 @@ test("retains isolated audit submissions across failure and retry", async () => 
     const legacyResponse = await fetch(`${base}/api/photos`);
     const legacyPhotos = await legacyResponse.json();
     assert.equal(legacyResponse.headers.get("deprecation"), "true");
-    assert.equal(legacyPhotos.count, 0);
+    assert.equal(legacyPhotos.count, 5);
     const audit = await fetch(`${base}/api/layout/submissions`).then((response) => response.json());
     assert.equal(audit.submissions.length, 2);
     assert.deepEqual(audit.submissions.map(({ status }) => status), ["failure", "success"]);

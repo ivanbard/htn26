@@ -139,7 +139,7 @@ remains separate.
 
 | Method and route | Input | Successful output | Expected errors |
 | --- | --- | --- | --- |
-| `POST /api/layout/generate` | one `multipart/form-data` request with 3-5 `photos`; optional `X-HTN26-Photo-Preprocess-Ms` | sanitized layout proposal; request/audit IDs in headers | `400` wrong count/malformed multipart; `413` too large; `503` missing key, timeout, provider, body, or validation failure |
+| `POST /api/layout/generate` | one `multipart/form-data` request with 3-5 `photos`; optional `X-HTN26-Photo-Preprocess-Ms` | sanitized layout proposal; commits public photo metadata, `floorPlan`, and `setup.phase = layout-proposed`, then publishes one SSE snapshot; request/audit IDs in headers | `400` wrong count/malformed multipart; `413` too large; `503` missing key, timeout, provider, body, or validation failure |
 | `GET /api/layout` | none | approved `roomLayout`, or `null` before approval | `500` generic server error |
 | `GET /api/layout/submissions` | none | `{ "submissions": [...] }` audit summaries | `500` generic server error |
 | `POST /api/floorplan/review` | JSON `{ "allowEmpty": true }` for the no-photo fixture, otherwise previously uploaded compatibility photos | unaccepted deterministic `floorPlan` proposal | `400` no photos/invalid JSON; `500` provider failure |

@@ -103,7 +103,10 @@ export class PhotoStore {
     try {
       const saved = JSON.parse(await fs.readFile(this.metadataPath, "utf8"));
       if (Array.isArray(saved)) this.photos = saved.filter((photo) => photo && photo.file);
-      this.sequence = this.photos.length;
+      this.sequence = this.photos.reduce((highest, photo) => {
+        const number = Number(String(photo.id || "").match(/(\d+)$/)?.[1]);
+        return Number.isFinite(number) ? Math.max(highest, number) : highest;
+      }, this.photos.length);
     } catch (error) {
       if (error.code !== "ENOENT") throw error;
     }
@@ -125,6 +128,20 @@ export class PhotoStore {
     this.photos.push(photo);
     await fs.writeFile(this.metadataPath, JSON.stringify(this.photos.map((value) => ({ ...value })), null, 2));
     return photo;
+  }
+
+  async replace(uploads) {
+    const previous = this.photos;
+    const saved = [];
+    this.photos = [];
+    try {
+      for (const upload of uploads) saved.push(await this.save(upload.bytes, upload));
+      return saved;
+    } catch (error) {
+      this.photos = previous;
+      await fs.writeFile(this.metadataPath, JSON.stringify(previous.map((value) => ({ ...value })), null, 2));
+      throw error;
+    }
   }
 
   list() { return this.photos.map((photo) => this.publicPhoto(photo)); }
@@ -253,7 +270,7 @@ export function createHttpServer({ projection, photoStore, layoutSubmissionStore
       ? parseMultipart(body, type)
       : [{ filename: req.headers["x-photo-name"] || "room-photo", mime: mime || "application/octet-stream", bytes: body }];
     if (!uploads.length) throw Object.assign(new Error("no photo parts found"), { statusCode: 400 });
-    if (photoStore.photos.length + uploads.length > 4) throw Object.assign(new Error("at most four room photos are supported"), { statusCode: 409 });
+    if (photoStore.photos.length + uploads.length > 5) throw Object.assign(new Error("at most five room photos are supported"), { statusCode: 409 });
     const saved = [];
     for (const upload of uploads) saved.push(await photoStore.save(upload.bytes, upload));
     projection.setPhotos(photoStore.photos, Date.now());
@@ -281,9 +298,11 @@ export function createHttpServer({ projection, photoStore, layoutSubmissionStore
       : body.length
         ? [{ filename: req.headers["x-photo-name"] || "room-photo", mime: mime || "application/octet-stream", bytes: body }]
         : [];
-    // The phone upload path stores the images first, then the laptop UI starts
-    // generation with a lightweight request. Reuse those server-side files so
-    // the browser never has to download and re-upload the room photos.
+    const directUploads = uploads.length > 0;
+    // The desktop may start generation with a lightweight request after a
+    // compatibility upload. Reuse those server-side files so it never has to
+    // download and re-upload the room photos; direct phone uploads are
+    // committed only after generation succeeds.
     if (!uploads.length && photoStore.photos.length >= 3 && photoStore.photos.length <= 5) {
       uploads = await Promise.all(photoStore.photos.map(async (photo) => ({
         filename: photo.filename,
@@ -305,7 +324,14 @@ export function createHttpServer({ projection, photoStore, layoutSubmissionStore
         metrics: result.metrics,
         finalizeMetrics: () => ({ totalMs: (preprocessMs ?? 0) + elapsedMs(totalStart) }),
       });
-      projection.proposeRoomLayout(result.layout, Date.now(), { photoCount: submission.photoCount });
+      const committedPhotos = directUploads
+        ? await photoStore.replace(uploads)
+        : photoStore.photos;
+      projection.commitGeneratedRoomLayout({
+        layout: result.layout,
+        photos: committedPhotos,
+        photoCount: submission.photoCount,
+      }, Date.now());
       if (process.env.NODE_ENV !== "production") console.debug("[htn26] room layout generation", { requestId: submission.requestId, ...completed.metrics });
       send(res, 200, result.layout, { ...headers, ...auditHeaders, ...timingHeader(completed.metrics) });
     } catch (error) {
@@ -353,6 +379,7 @@ export function createHttpServer({ projection, photoStore, layoutSubmissionStore
       if (req.method === "GET" && url.pathname === "/api/health") { send(res, 200, { ok: true, state: projection.snapshot().health }, headers); return; }
       if (req.method === "GET" && url.pathname === "/api/events") {
         res.writeHead(200, { ...headers, "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-cache", connection: "keep-alive" });
+        res.flushHeaders?.();
         res.write(`event: state\ndata: ${json(projection.snapshot())}\n\n`);
         clients.add(res);
         req.on("close", () => clients.delete(res));
@@ -378,8 +405,7 @@ export function createHttpServer({ projection, photoStore, layoutSubmissionStore
         const payload = parseJsonBody(await readBody(req));
         const type = commandType(payload);
         if (type === "SCAN_ROOM") {
-          const snapshot = await projection.proposeFloorplan({ photos: [] });
-          send(res, 200, snapshot, headers); return;
+          throw Object.assign(new Error("HTTP room scanning is completed by POST /api/layout/generate; use /api/floorplan/review only for the explicit deterministic fallback"), { statusCode: 400 });
         }
         send(res, 200, projection.command(type, payload), headers); return;
       }

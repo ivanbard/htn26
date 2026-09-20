@@ -95,7 +95,7 @@ async function approveAndStart(base) {
   }
   const host = await post(base, "/api/command", { type: "START_HOST" });
   assert.equal(host.response.status, 200);
-  const scan = await post(base, "/api/command", { type: "SCAN_ROOM" });
+  const scan = await post(base, "/api/floorplan/review", {});
   assert.equal(scan.response.status, 200);
   assert.equal(scan.data.setup.phase, "layout-proposed");
   const review = await post(base, "/api/floorplan/review", {});

@@ -73,14 +73,7 @@ export function createHttpTransport({ baseUrl = "", fetchImpl = globalThis.fetch
         headers: { accept: "application/json" },
       });
       if (!generated.ok) throw new Error(`Room layout generation failed (${generated.status})`);
-      await generated.json();
-      const approved = await fetchImpl(apiUrl(baseUrl, "/api/floorplan/approve"), {
-        method: "POST",
-        headers: { "content-type": "application/json", accept: "application/json" },
-        body: JSON.stringify({ approved: true }),
-      });
-      if (!approved.ok) throw new Error(`Room layout activation failed (${approved.status})`);
-      return normalizeSnapshot(await approved.json());
+      return generated.json();
     },
     async useDefaultLayout() {
       const proposed = await fetchImpl(apiUrl(baseUrl, "/api/floorplan/review"), {
@@ -111,5 +104,5 @@ export function createBrowserTransport({
   const params = new URLSearchParams(search);
   const mode = params.get("transport");
   const baseUrl = params.get("api") || params.get("apiBase") || globalThis.__HTN26_API_BASE__ || "";
-  return mode === "http" ? createHttpTransport({ baseUrl, fetchImpl, eventSourceFactory }) : createMockTransport();
+  return mode === "mock" ? createMockTransport() : createHttpTransport({ baseUrl, fetchImpl, eventSourceFactory });
 }

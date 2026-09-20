@@ -161,7 +161,7 @@ export function createInitialProjectionState(now = Date.now(), roundSeconds = RO
     version: 2,
     revision: 1,
     source: "root-server-simulator",
-    setup: { phase: "idle", message: "Upload 3-4 room photos for setup, or start the local simulator with a host serial record.", updatedAt: iso(now) },
+    setup: { phase: "idle", message: "Upload 3-4 room photos for setup, or start the local simulator with a host serial record.", photoCount: 0, updatedAt: iso(now) },
     floorPlan: plan,
     roomLayout: null,
     proposedRoomLayout: null,
@@ -603,12 +603,17 @@ export class ServerProjection {
 
   setPhotos(photos, now = this.now()) {
     this._state.photos = photos.map(({ absolutePath, ...photo }) => ({ ...photo }));
+    this._state.floorPlan = { ...this._state.floorPlan, photoCount: this._state.photos.length };
+    this._state.setup.photoCount = this._state.photos.length;
     this._touch(now);
   }
 
-  proposeRoomLayout(candidate, now = this.now(), { photoCount = this._state.photos.length } = {}) {
+  commitGeneratedRoomLayout({ layout: candidate, photos = this._state.photos, photoCount = photos.length } = {}, now = this.now()) {
     const layout = sanitizeRoomLayout(candidate);
     if (this._state.setup.phase === "running") throw new Error("cannot replace the room layout while a game is running");
+    this._state.photos = photos.map(({ absolutePath, ...photo }) => ({ ...photo }));
+    const committedPhotoCount = Math.max(0, Math.floor(Number(photoCount) || this._state.photos.length));
+    this._state.setup.photoCount = committedPhotoCount;
     this._state.proposedRoomLayout = clone(layout);
     const stations = layout.stations.map((station) => ({
       id: station.type,
@@ -632,7 +637,8 @@ export class ServerProjection {
       walls: [],
       stations: clone(stations),
       placementInstructions: stations.map(({ id, label, instruction, x, y }) => ({ id, label, instruction, x, y })),
-      photoCount,
+      photoCount: committedPhotoCount,
+      layoutFromImage: true,
       generatedAt: iso(now),
     };
     this._state.burgerLevel = { status: "not-generated", recipe: "BURGER", placementInstructions: clone(this._state.floorPlan.placementInstructions) };
@@ -643,12 +649,21 @@ export class ServerProjection {
     return this.snapshot(now);
   }
 
+  proposeRoomLayout(candidate, now = this.now(), options = {}) {
+    return this.commitGeneratedRoomLayout({
+      layout: candidate,
+      photos: options.photos ?? this._state.photos,
+      photoCount: options.photoCount ?? this._state.photos.length,
+    }, now);
+  }
+
   async proposeFloorplan({ photos = [], readPhoto } = {}, now = this.now()) {
     const result = await this.provider.propose({ photos, readPhoto });
     this._state.roomLayout = null;
     this._state.proposedRoomLayout = null;
     this._state.floorPlan = clone(result);
     this._state.floorPlan.accepted = false;
+    this._state.setup.photoCount = Number(result.photoCount) || photos.length;
     this._state.burgerLevel = { status: "not-generated", recipe: "BURGER", placementInstructions: clone(result.placementInstructions) };
     this._state.setup.phase = "layout-proposed";
     this._state.setup.message = result.reviewMessage || "Review the proposed floorplan before approving it.";

@@ -126,6 +126,16 @@ test("Vite proxies same-origin API requests to the laptop server", async () => {
   assert.deepEqual(calls, ["/api/command"]);
 });
 
+test("browser transport defaults to HTTP and mock is explicit", async () => {
+  const fetchImpl = async () => ({ ok: true, json: async () => createInitialProjectionState(1_000) });
+  const live = createBrowserTransport({ search: "", injected: null, eventSourceFactory: null, fetchImpl });
+  assert.equal(live.kind, "http");
+  const mock = createBrowserTransport({ search: "?transport=mock", injected: null, fetchImpl });
+  assert.equal(mock.kind, "mock");
+  live.close?.();
+  mock.close?.();
+});
+
 test("renders the UnderCooked onboarding start screen before host setup", async () => {
   const transport = createMockTransport({ now: () => 1_000 });
   const onboarding = renderApp(transport.snapshot(), 1_000);
@@ -170,8 +180,24 @@ test("renders room upload and server-driven player readiness during scanning", (
   state.photos = [{ id: "room-1" }, { id: "room-2" }, { id: "room-3" }];
   const readyHtml = renderApp(state, 1_000, "", "http");
   assert.match(readyHtml, /data-command="SCAN_ROOM">Continue with Personalized Room Layout/);
+  assert.match(readyHtml, /Use Normal Room Layout/);
   const failedHtml = renderApp(state, 1_000, "ROOM LAYOUT FAILED — offline", "http");
   assert.match(failedHtml, /data-command="SCAN_ROOM">Continue with Normal Room Layout/);
+});
+
+test("renders generated phone layout and photo count from the canonical floor plan", () => {
+  const state = createInitialProjectionState(1_000);
+  state.setup = { ...state.setup, phase: SETUP_PHASES.SCANNING, photoCount: 4 };
+  state.photos = [];
+  state.floorPlan = { ...state.floorPlan, photoCount: 4, layoutFromImage: true, accepted: false };
+  const scanningHtml = renderApp(state, 1_000, "", "http");
+
+  assert.match(scanningHtml, /4 photos received/);
+
+  state.setup = { ...state.setup, phase: SETUP_PHASES.LAYOUT_PROPOSED };
+  const html = renderApp(state, 1_000, "", "http");
+  assert.match(html, /data-layout-source="image"/);
+  assert.match(html, /data-command="APPROVE_LAYOUT">Approve room layout/);
 });
 
 test("renders the approved setup flow with the aligned physical layout", async () => {
