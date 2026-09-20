@@ -84,14 +84,16 @@ The host emits `HTN26|GW|UP|<forwarded>|<drops>` every 250 ticks and emits
 emits `HTN26|GAME|START_GAME|240|3` and `OC1|000001|G|S`; timeout emits
 `HTN26|GAME|GAME_END|3` and `OC1|000002|G|E`. Events are ignored before start.
 The laptop server remains authoritative for the game countdown, inventory,
-orders, score, and submission results.
+orders, score, and submission results. QNX is only a possible future target,
+not a current deployment requirement or validation claim.
 
 Overcooked uses 30 ms minimum/maximum advertising intervals, matching Share's
 existing send setup. Scanning timing stays at the stock HAL default. The receive
 callback validates and copies into one fixed slot and never calls LVGL or
 transmits. The app tick consumes that slot. Aligned 32-bit accesses plus RISC-V
 fences publish it without an atomic runtime. A full slot increments the drop
-counter. The app object remains 300 bytes.
+counter. The app object is 308 bytes with the held-item image handles;
+generated pixel data remains const flash-mapped DROM.
 
 LED 0: green ready. LED 1: blue send. LED 2: yellow receive. LED 5: red error.
 Normal pulses last 25 ticks; invalid-combination red lasts 50 ticks. Inputs

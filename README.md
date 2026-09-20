@@ -4,8 +4,8 @@
 
 HTN26 is a local cooperative cooking game inspired by Overcooked.
 
-The first playable server runs on the captain's laptop and accepts setup photos
-from an Apple phone.
+The current production/live deployment runs on the captain's laptop and accepts
+setup photos from an Apple phone.
 
 The current setup path uploads Apple-phone room photographs to the laptop server.
 

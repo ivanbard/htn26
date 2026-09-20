@@ -1,14 +1,14 @@
 # HTN26 fixed player badge
 
-`badge/slave/main.lua` is the self-contained Lua player profile. It uses only
-APIs in [`../badge-app-guide.md`](../badge-app-guide.md); it has no `require`,
-network, camera, Pi-response, or multi-Pi dependency.
+`badge/slave/main.lua` is the self-contained rollback-only Lua player profile.
+It uses only APIs in [`../badge-app-guide.md`](../badge-app-guide.md); it has no
+`require`, network, camera, or server-response dependency.
 
 ## Supported deployment profiles
 
 The supplied player also reproduces a Lua allocation failure (`used 40497 /
-limit 49152, peak 42713`). The v1 low-memory deployment is therefore the pinned
-native factory extension in [`../native/README.md`](../native/README.md) on all
+limit 49152, peak 42713`). The production/live deployment is therefore the
+pinned native factory extension in [`../native/README.md`](../native/README.md) on all
 three players and the host. Open **Overcooked**, press A, choose one unique fixed
 number 1–3 with LEFT/RIGHT, and press A again; native radio and NFC start only
 after confirmation.
@@ -23,9 +23,8 @@ rollback, and remaining physical gates are owned by the native guide.
 The gameplay controls and compact OC1 application payloads below are shared by
 both profiles. Native event sequences are six digits and monotonic for one app
 boot, randomized at boot; unlike the Lua store-backed sequence, they are not
-persisted across a reboot. Starting a fresh round resets gateway/Pi session
-state, but repeated reboot/collision behavior remains a hardware integration
-gate.
+persisted across a reboot. Starting a fresh round resets gateway/laptop-server
+session state.
 
 ## Lua rollback install files
 
@@ -81,8 +80,8 @@ stoves.
 - Hold **A** and shake while holding a plate to submit. The submitting plate is
   consumed immediately. Every fixed player broadcasts either `READY` or
   `SUB:<BMLC>` in the 0.5-second window; when all three are observed, every
-  badge discards any remaining held item/plate. The app never asks the Pi for an
-  order or response, so it only reports the local submission transition.
+  badge discards any remaining held item/plate. The app never asks the laptop
+  server for an order or response, so it only reports the local submission transition.
 
 Invalid button/station combinations show `UNKNOWN BUTTON COMBO` in red and
 are not sent. The screen always labels feedback as local capture; a successful
@@ -100,9 +99,9 @@ OC1|000044|E|P2:SUB:BMLC
 
 The sequence is persistent per badge and increases for every event. The
 player number and action are included so the stationary gateway can forward
-the event stream unchanged to the single Pi. All payloads are bounded to the
+the event stream unchanged to the production laptop server. All payloads are bounded to the
 documented 44-byte radio limit. Duplicate peer sequences are ignored locally.
-The player app does not implement acknowledgements or pretend to receive Pi
+The player app does not implement acknowledgements or pretend to receive server
 responses.
 
 The gateway's fixed-session control broadcasts are:
@@ -134,7 +133,7 @@ production Lua file rather than a second protocol model.
 Host tests cannot validate NFC field coupling, tap or shake thresholds, BLE
 radio range/loss/queueing, LED appearance, cooking timing on real hardware, or
 USB gateway forwarding. The Lua profile requires the Badge IDE and exactly
-`manifest.cfg` plus `main.lua`. The current native role/payload changes have
-separate build/emulator coverage but still require the four-badge and Pi gate in
-`../native/README.md`; neither offline suite proves the player OOM resolved on
+`manifest.cfg` plus `main.lua`. The native guide owns the production hardware boundary. The captain reports the
+native binary working except that physical two-badge bumping remains unverified;
+neither offline suite proves bump behavior or the generated-icon display on
 hardware.

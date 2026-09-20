@@ -2,6 +2,12 @@
 
 The Hacker Badges are the physical player-controller layer for the game.
 
+The pinned native extension in [`native/README.md`](native/README.md) is the
+**production/live profile** on the host and all three players. The Lua apps in
+`master/` and `slave/` are whole-fleet rollback assets only. Never mix profiles.
+The current production host is a laptop connected to the gateway badge over
+USB; QNX is only a possible future target, not a current requirement or claim.
+
 Before making any changes under `badge/`, read:
 
 `./badge-app-guide.md`
@@ -10,7 +16,12 @@ That document is the authoritative source of truth for the Hacker Badge API and 
 
 Do not invent badge functionality that is not documented there.
 
-In particular, badge applications do not have arbitrary BLE/GATT access or Wi-Fi/HTTP. Communication between game badges uses the restricted `badge.radio` channel documented in the guide. Radio payloads are limited to 1–44 bytes.
+In particular, badge applications do not have arbitrary BLE/GATT access or
+Wi-Fi/HTTP. The Lua rollback uses the restricted `badge.radio` channel
+documented in the guide. The version-pinned native profile uses only the
+recovered stock advertising HAL documented in `native/RADIO_PROTOCOL.md`; it
+does not add arbitrary BLE/GATT. Application payloads remain limited to 1–44
+bytes.
 
 The badge API also supports NFC reading and serial logging through `badge.sys.log()`.
 
@@ -25,8 +36,8 @@ There are two types of badges.
 Each player wears a badge.
 
 The fixed-player behavior is documented in [`slave/README.md`](slave/README.md).
-The current low-memory deployment runs that behavior through the pinned native
-extension; the self-contained Lua player remains the stock-firmware rollback.
+The production/live deployment runs that behavior through the pinned native
+extension; the self-contained Lua player is rollback-only for stock firmware.
 The player path is responsible for:
 
 * reading NFC interactions
@@ -35,11 +46,11 @@ The player path is responsible for:
 * showing immediate local feedback
 * optionally using LEDs or motion sensors for interactions
 
-Player badges are **not authoritative**.
+Player badges are **not authoritative** for orders or scoring.
 
-They keep local interaction state for immediate feedback and report the
-resulting intent; the laptop server remains authoritative for orders and
-scoring.
+They keep authoritative local held/controller state for immediate feedback and
+report the resulting intent; the laptop server remains authoritative for
+orders, scoring, and the shared game projection.
 
 ---
 
@@ -186,30 +197,21 @@ marker instead of assuming the serial line starts with it.
 
 ## Player Feedback
 
-The badge is a controller, not the main game screen.
+The badge is a controller, not the main game screen. The production native
+player nevertheless keeps its screen continuously synchronized with its local
+held state: empty, bun, raw/prepared lettuce, raw/prepared cheese, raw/chopped/
+cooked/burnt meat, or plate plus fixed `B/M/L/C` contents. It rerenders that
+same model after pickup, chopping success/failure, stove put/take, drop,
+transfer, submission, game end/start, and reset.
 
-Keep information on the player badge concise.
+The native image widget uses the deterministic representation generated from
+`assets/icons/`; details and flash/RAM limits are owned by `native/README.md`.
+Labels remain present so empty hands, plate contents, and action state are not
+communicated by artwork alone.
 
-Examples:
-
-```text
-TOMATO
-PICKED UP
-```
-
-```text
-CHOPPING
-3 / 5
-```
-
-```text
-POT INTERACTION
-SENT
-```
-
-The badge may optimistically indicate that an interaction was captured.
-
-Do not claim that the authoritative server accepted an action unless a return communication path has actually been implemented.
+The badge may optimistically indicate that an interaction was captured. Do not
+claim that the authoritative laptop server accepted an action unless a return
+communication path has actually been implemented.
 
 ---
 

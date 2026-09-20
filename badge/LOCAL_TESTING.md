@@ -1,9 +1,11 @@
 # Local badge testing
 
-The current fixed player app is tested by the focused production-helper suite
-documented in [`slave/README.md`](slave/README.md). The older local gameplay
-runner below remains a legacy compatibility slice; it is not the current
-player-badge contract.
+The production/live fixed-player app is the native role tested as documented in
+[`native/README.md`](native/README.md). The Lua helper suite in
+[`slave/README.md`](slave/README.md) validates rollback compatibility. The older
+local gameplay runner below remains a legacy slice; it is not the current
+player-badge contract. The current server host is a laptop; QNX is only a
+possible future target.
 
 Run from the repository root:
 

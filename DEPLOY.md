@@ -14,7 +14,7 @@ fallback.
   host-badge USB-serial boundary.
 - `ui/`: separate styled UI prototype; it is not the current plain simulator
   page.
-- `badge/native/`: pinned low-memory firmware extension used by all four badges.
+- `badge/native/`: production/live pinned firmware extension used by all four badges.
 - `badge/master/`: retained stationary-host Lua rollback profile.
 - `badge/slave/`: retained fixed-player Lua rollback profile.
 
@@ -55,9 +55,10 @@ restricted radio API uses a private `LUA1` carrier wrapper and native mode uses
 the recovered HAL directly. The `badge/master/` and `badge/slave/` Lua apps are
 retained as a whole-fleet rollback for restored stock factory firmware.
 
-The current native role/payload changes have offline build/emulator coverage,
-not physical acceptance. Complete the four-badge hardware gate before calling
-the OOM resolved.
+The captain reports the native game binary working on physical badges except
+that bumping two badges together remains unverified. The generated-icon display
+revision has offline build/emulator coverage only and still needs a physical
+visual check; offline tests do not establish bump or display acceptance.
 
 For NixOS-WSL, use the interactive backup-first deploy helper from the repository
 root:
@@ -228,8 +229,7 @@ python badge/native/ble_receiver.py --self-test
 ```
 
 The native build requires the pinned Zig 0.14.1 compiler and the payload test's
-Unicorn dependency as documented in its README. These tests do not prove the
-OOM fixed on-device, physical NFC, four-badge radio and ACK behavior, LED
-appearance, timing, stock-app regressions, phone capture, OpenAI connectivity,
-or any future QNX deployment. Perform the native physical acceptance gate and
-then the first playable run.
+Unicorn dependency as documented in its README. These tests do not prove
+physical NFC, badge-to-badge bump behavior, generated-icon appearance,
+four-badge radio and ACK behavior, LED appearance, timing, stock-app
+regressions, phone capture, OpenAI connectivity, or any future QNX deployment.

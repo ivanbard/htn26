@@ -1,22 +1,22 @@
 # HTN26 host badge
 
-This is the self-contained Lua app for the stationary host badge connected to
-the captain's laptop. It initiates the physical round lifecycle and is the radio
-gateway; it is not a camera controller, a multi-Pi coordinator, or a second
-source of authoritative order and score state.
+This is the rollback-only Lua app for the stationary host badge connected to
+the production laptop. It initiates the physical round lifecycle and is the
+radio gateway; it is not a camera controller or a second source of
+authoritative order and score state. QNX is only a possible future target.
 
 ## Supported deployment profiles
 
 For the observed host OOM (`free heap 26124`, largest block `15360`, followed
-by NimBLE `ESP_ERR_NO_MEM`), the v1 low-memory deployment is the pinned native
+by NimBLE `ESP_ERR_NO_MEM`), the production/live deployment is the pinned native
 factory extension in [`../native/README.md`](../native/README.md). Flash that
 same candidate to the host and all three players using its backup/factory-only
 write gate. Open **Overcooked** on the USB-connected badge and press START to
 select host mode; radio starts through the proven clean-reboot native runtime
 without enabling host NFC.
 
-`manifest.cfg` plus `main.lua` remain the supported Lua compatibility/rollback
-profile for unmodified stock firmware. They are intentionally retained and
+`manifest.cfg` plus `main.lua` remain the Lua rollback profile for unmodified
+stock firmware. They are intentionally retained and
 tested, but the supplied host has not started BLE successfully with that
 profile. Do not mix a Lua host with native players or a native host with Lua
 players: Lua radio uses a private `LUA1` carrier wrapper while native mode calls
@@ -132,5 +132,6 @@ These checks cover payload validation, sender/RSSI framing, lifecycle records,
 44-byte bounds, the bounded FIFO, and the three-player reset shape. Native
 build/emulator checks are separate in `../native/README.md`. Neither suite
 proves USB serial, radio range, timer accuracy, LED appearance, or badge
-firmware behavior. The current native contract changes and the Lua OOM both
-still require a real four-badge, USB-connected laptop run.
+firmware behavior. Offline suites do not prove physical behavior. The captain
+reports the native binary working except that physical two-badge bumping
+remains unverified; see the native guide for the exact boundary.
