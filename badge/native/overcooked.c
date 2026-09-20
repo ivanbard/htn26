@@ -48,6 +48,7 @@ typedef struct App {
     u8 last_peer[6];
     u8 held, plate, has_plate, selected, a_held, b_held, nfc_enabled;
     u8 role, game_active, player;
+    u8 player_count;
     u8 nfc_seen[10], nfc_seen_size, nfc_rearm;
     u32 nfc_poll_ticks, nfc_clear_ticks, shake_cooldown;
     u8 process_from, process_to;
@@ -55,10 +56,11 @@ typedef struct App {
     u8 ready_ticks[3];
     u32 process_ticks, stove_ticks[2], stove_view_ticks;
     u32 game_ticks, control_sequence, tap_cooldown;
+    u32 transfer_ticks;
     void *icon_widget;
     const NativeImage *shown_icon;
 } App;
-_Static_assert(sizeof(App) == 308, "Update heap report when app size changes");
+_Static_assert(sizeof(App) == 312, "Update heap report when app size changes");
 
 #define ACK_BYTES 15
 #define WAIT_TICKS 150
@@ -74,6 +76,7 @@ _Static_assert(sizeof(App) == 308, "Update heap report when app size changes");
 #define SHAKE_ABS_BITS 0x44c80000u /* 1600 mg; hardware calibration knob. */
 #define DROP_SHAKE_ABS_BITS 0x44af0000u /* 1400 mg while B disambiguates the gesture. */
 #define TAP_ABS_BITS 0x44960000u /* 1200 mg; hardware calibration knob. */
+#define TRANSFER_WAIT_TICKS 40 /* 800 ms peer-transfer handshake window. */
 #define SHAKE_COOLDOWN_TICKS 25
 
 #define FN(address, result, ...) ((result (*)(__VA_ARGS__))(address))
@@ -203,8 +206,9 @@ static void receive(const usize *capture, const u8 **peer, const signed char *rs
     int event = *size > 16 && equal(p, "OC2|", 4) && sequence(p + 4) &&
                 equal(p + 10, "|E|P", 4) && p[14] >= '1' && p[14] <= '3' && p[15] == ':' &&
                 valid_action(p + 16, *size - 16);
-    int control = *size == 14 && equal(p, "OC2|", 4) && sequence(p + 4) &&
-                  equal(p + 10, "|G|", 3) && (p[13] == 'S' || p[13] == 'E');
+    int control = (*size == 14 || *size == 16) && equal(p, "OC2|", 4) && sequence(p + 4) &&
+                  equal(p + 10, "|G|", 3) && (p[13] == 'S' || p[13] == 'E') &&
+                  (*size == 14 || (p[14] == '|' && p[15] >= '1' && p[15] <= '3'));
     int ack = *size == ACK_BYTES && equal(p, "OC2|", 4) && sequence(p + 4) &&
               equal(p + 10, "|A|OK", 5);
     if (!event && !control && !ack) return;
@@ -319,7 +323,10 @@ static void render_game(App *self) {
     }
     if (self->role == ROLE_HOST) {
         info_layout(self, 0); render_held_icon(self, EMPTY, 0);
-        if (!self->game_active) LABEL_TEXT(self->info, "HOST\nPRESS START TO BEGIN");
+        if (!self->game_active) {
+            FORMAT(text, sizeof(text), "HOST\nPLAYERS: %u\nLEFT/RIGHT, START", (u32)self->player_count);
+            LABEL_TEXT(self->info, text);
+        }
         else {
             u32 seconds = (self->game_ticks + 49) / 50;
             FORMAT(text, sizeof(text), "HOST\nTIME: %u:%02u\nRECEIVED: %u",
@@ -353,7 +360,7 @@ static void set_stove(App *self, int stove, u8 state) {
 static void reset_round(App *self) {
     self->held = self->plate = self->has_plate = self->selected = 0;
     self->a_held = self->b_held = self->process_from = self->process_to = 0;
-    self->process_ticks = self->stove_view = self->stove_view_ticks = 0;
+    self->process_ticks = self->stove_view = self->stove_view_ticks = self->transfer_ticks = 0;
     self->shake_cooldown = self->tap_cooldown = 0;
     self->ready_ticks[0] = self->ready_ticks[1] = self->ready_ticks[2] = 0;
     set_stove(self, 0, STOVE_EMPTY); set_stove(self, 1, STOVE_EMPTY);
@@ -400,14 +407,14 @@ static void read_plate(u8 *plate, const char *summary) {
     if (summary[3] == 'C') *plate |= PLATE_CHEESE;
 }
 
-static void apply_bump(App *self, const char *state) {
+static int apply_bump(App *self, const char *state) {
     int peer_plate = state[0] == 'P';
     u8 remote_plate = 0, remote_item = EMPTY;
     if (peer_plate) read_plate(&remote_plate, state + 1);
     else if (state[0] == 'H') remote_item = short_item(state[1]);
     if (self->has_plate != peer_plate) {
         if ((self->has_plate && remote_item == EMPTY) ||
-            (peer_plate && self->held == EMPTY)) return;
+            (peer_plate && self->held == EMPTY)) return 0;
         if (self->has_plate && platable(remote_item) && !(self->plate & plate_bit(remote_item)))
             self->plate |= plate_bit(remote_item);
         else if (peer_plate && platable(self->held) && !(remote_plate & plate_bit(self->held)))
@@ -419,6 +426,7 @@ static void apply_bump(App *self, const char *state) {
         }
     } else if (peer_plate) self->plate = remote_plate;
     else self->held = remote_item;
+    return 1;
 }
 
 static void apply_peer_bump(App *self, const char *state) {
@@ -433,7 +441,11 @@ static void apply_peer_bump(App *self, const char *state) {
 
 static void mark_ready(App *self, int player) {
     if (player >= 1 && player <= 3) self->ready_ticks[player - 1] = 25;
-    if (self->ready_ticks[0] && self->ready_ticks[1] && self->ready_ticks[2]) {
+    int all_ready = 1;
+    for (int index = 0; index < self->player_count; ++index) {
+        if (!self->ready_ticks[index]) all_ready = 0;
+    }
+    if (all_ready) {
         self->held = self->plate = self->has_plate = 0;
         self->process_from = self->process_to = 0; self->process_ticks = 0;
         if (self->status) LABEL_TEXT(self->status, "THREE READY - HELD STATE CLEARED");
@@ -442,7 +454,9 @@ static void mark_ready(App *self, int player) {
 
 static void apply_action(App *self, const char *action, int local) {
     if (same(action, "GAME:START") && (!local || !self->game_active)) {
-        reset_round(self); self->game_active = 1;
+        reset_round(self);
+        self->game_active = self->role == ROLE_HOST ||
+                            (self->role == ROLE_PLAYER && self->player <= self->player_count);
         if (self->role == ROLE_HOST) self->game_ticks = GAME_TICKS;
         if (self->status) LABEL_TEXT(self->status, "GAME STARTED");
     } else if (same(action, "GAME:END") && (!local || self->game_active)) {
@@ -480,12 +494,17 @@ static void apply_action(App *self, const char *action, int local) {
     } else if (starts(action, "SUB:") && local) {
         self->plate = self->has_plate = 0;
         if (self->status) LABEL_TEXT(self->status, "PLATE SUBMITTED");
+    } else if (starts(action, "X:") && !local) {
+        if (apply_bump(self, action + 2)) {
+            self->transfer_ticks = 0;
+            if (self->status) LABEL_TEXT(self->status, "TRANSFER COMPLETE");
+        }
     }
     render_game(self);
 }
 
 static int start_action(App *self, const char *action) {
-    if (self->wait_ticks || self->process_ticks) return 0;
+    if (self->wait_ticks || self->process_ticks || self->transfer_ticks) return 0;
     u32 current = self->sequence++;
     if (self->sequence > 999999) self->sequence = 1;
     int written = FORMAT(self->pending, sizeof(self->pending),
@@ -502,10 +521,10 @@ static int start_action(App *self, const char *action) {
     return 1;
 }
 
-static void broadcast_control(App *self, char code) {
+static void broadcast_control(App *self, char code, u8 player_count) {
     u32 current = ++self->sequence;
-    int written = FORMAT(self->pending, sizeof(self->pending), "OC2|%06u|G|%c", current, code);
-    if (written != 14) return;
+    int written = FORMAT(self->pending, sizeof(self->pending), "OC2|%06u|G|%c|%u", current, code, (u32)player_count);
+    if (written != 16) return;
     self->pending_size = (u32)written; self->wait_ticks = 0;
     if (!transmit(self, self->pending, self->pending_size)) self->advertise_ticks = WAIT_TICKS;
 }
@@ -692,7 +711,10 @@ static void poll_motion(App *self) {
     } else if (!self->tap_cooldown && value > TAP_ABS_BITS) {
         char state[6], action[10]; snapshot(self, state);
         FORMAT(action, sizeof(action), "X:%s", state);
-        if (start_action(self, action)) self->tap_cooldown = 25;
+        if (start_action(self, action)) {
+            self->tap_cooldown = 25;
+            self->transfer_ticks = TRANSFER_WAIT_TICKS;
+        }
     }
 }
 
@@ -747,9 +769,15 @@ static void button(App *self, u32 event) {
         render_game(self); return;
     }
     if (self->phase != 2) return;
+    if (self->role == ROLE_HOST && kind == 0 && !self->game_active && !self->wait_ticks && (key == 4 || key == 5)) {
+        if (key == 4 && self->player_count > 1) --self->player_count;
+        if (key == 5 && self->player_count < 3) ++self->player_count;
+        render_game(self);
+        return;
+    }
     if (self->role == ROLE_HOST && kind == 0 && key == 8 && !self->game_active && !self->wait_ticks) {
-        PRINT("HTN26|GAME|START_GAME|240|3\n");
-        apply_action(self, "GAME:START", 1); broadcast_control(self, 'S'); return;
+        PRINT("HTN26|GAME|START_GAME|240|%u\n", (u32)self->player_count);
+        apply_action(self, "GAME:START", 1); broadcast_control(self, 'S', self->player_count); return;
     }
     if (kind == 1 && key == 0 && self->process_ticks) {
         self->held = self->process_from; self->process_ticks = 0; self->process_to = EMPTY;
@@ -789,6 +817,7 @@ static void enter(App *self, void *screen) {
     self->pending_size = self->last_size = 0; self->last[0] = 0;
     self->held = self->plate = self->has_plate = self->selected = self->a_held = self->b_held = 0;
     self->role = self->game_active = self->player = 0;
+    self->player_count = 3;
     self->nfc_enabled = self->nfc_seen_size = self->nfc_rearm = 0;
     self->nfc_retries = 0;
     self->nfc_poll_ticks = self->nfc_clear_ticks = self->shake_cooldown = 0;
@@ -796,7 +825,7 @@ static void enter(App *self, void *screen) {
     self->stove_state[0] = self->stove_state[1] = 0;
     self->ready_ticks[0] = self->ready_ticks[1] = self->ready_ticks[2] = 0;
     self->process_ticks = self->stove_ticks[0] = self->stove_ticks[1] = self->stove_view_ticks = 0;
-    self->game_ticks = self->control_sequence = self->tap_cooldown = 0;
+    self->game_ticks = self->control_sequence = self->tap_cooldown = self->transfer_ticks = 0;
     self->icon_widget = 0; self->shown_icon = (const NativeImage *)1;
     LED_CLEAR(); LED_SHOW();
     label(screen, "OVERCOOKED CONTROLLER", 7);
@@ -862,6 +891,7 @@ static void consume_radio(App *self) {
             u32 received_sequence = sequence_value(packet + 4);
             if (received_sequence > self->control_sequence) {
                 self->control_sequence = received_sequence;
+                if (packet[13] == 'S') self->player_count = size == 16 ? (u8)(packet[15] - '0') : 3;
                 apply_action(self, packet[13] == 'S' ? "GAME:START" : "GAME:END", 0);
             }
         }
@@ -943,14 +973,18 @@ static void tick(App *self) {
         }
     }
     if (self->advertise_ticks && --self->advertise_ticks == 0) RADIO_PAUSE();
+    if (self->transfer_ticks) {
+        --self->transfer_ticks;
+        if (!self->transfer_ticks && self->status) LABEL_TEXT(self->status, "TRANSFER TIMEOUT - TRY AGAIN");
+    }
     if (self->pulse_ticks && --self->pulse_ticks == 0 && !self->process_ticks && !self->stove_view_ticks) {
         LED_CLEAR(); LED_SHOW();
     }
     if (self->role == ROLE_HOST && self->game_active && self->game_ticks) {
         --self->game_ticks;
         if (!self->game_ticks) {
-            PRINT("HTN26|GAME|GAME_END|3\n");
-            apply_action(self, "GAME:END", 1); broadcast_control(self, 'E');
+            PRINT("HTN26|GAME|GAME_END|%u\n", (u32)self->player_count);
+            apply_action(self, "GAME:END", 1); broadcast_control(self, 'E', self->player_count);
         } else if (!(self->game_ticks % 50)) render_game(self);
     }
     if (++self->ticks == 250) {

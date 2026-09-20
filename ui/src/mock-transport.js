@@ -154,7 +154,7 @@ export function createInitialMockState(now = Date.now()) {
     order: cloneState(orders[0]),
     orders,
     stations: [
-      { id: "stove1", label: "STOVE 1", kind: "stove", status: "cooking", progress: 0.86, remainingSeconds: 3, totalSeconds: 22, item: "MEAT PATTY", warning: true, warningMessage: "MEAT IS NEARLY BURNT" },
+      { id: "stove1", label: "STOVE 1", kind: "stove", status: "ready", progress: 0, remainingSeconds: 0, item: "EMPTY" },
       { id: "stove2", label: "STOVE 2", kind: "stove", status: "ready", progress: 0, remainingSeconds: 0, item: "EMPTY" },
       { id: "assembly", label: "ASSEMBLY", kind: "assembly", status: "ready", progress: 1, remainingSeconds: 0, item: "PLATE" },
       { id: "chop1", label: "CHOP 1", kind: "chop", status: "ready", progress: 1, remainingSeconds: 0, item: "LETTUCE" },

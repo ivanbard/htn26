@@ -583,7 +583,9 @@ function RoomSurface({ state, now, gameplay = false, tourFocus = [] }) {
     }, h(StationContents, { station, runtimeStation: runtimeStations.get(station.id), serving: state.serving }));
   });
   const playersAreTourTarget = tourFocus.includes("players") || tourFocus.includes("player");
-  const positionedPlayers = separatePlayerPositions(state.players || [], movementWalls);
+  const activePlayerCount = Math.max(1, Math.min(3, Math.floor(Number(state.playerCount) || 3)));
+  const displayedPlayers = gameplay ? (state.players || []).slice(0, activePlayerCount) : (state.players || []);
+  const positionedPlayers = separatePlayerPositions(displayedPlayers, movementWalls);
   const planningPlayers = positionedPlayers
     .filter((player) => player?.position)
     .map((player) => ({
@@ -947,111 +949,226 @@ function PlayerSetupView({ state, onCommand, onGenerateLayout, onUseDefaultLayou
   );
 }
 
-const TOUR_STEPS = Object.freeze([
-  {
-    key: "orders",
-    title: "Read the order",
-    detail: "Start with the leftmost card. Its icons show what to collect.",
-    control: "No button yet — use the order as your recipe.",
-    focus: [],
-  },
-  {
-    key: "sources",
-    title: "Collect ingredients",
-    detail: "Pantry: buns + lettuce. Fridge: cheese + meat.",
-    control: "Press Left or Right to choose an ingredient.",
-    focus: ["ingredient", "pantry", "fridge"],
-  },
-  {
-    key: "chop",
-    title: "Chop ingredients",
-    detail: "Bring ingredients to a cutting board.",
-    control: "Hold A while scanning the board.",
-    focus: ["chop", "cutting_board"],
-  },
-  {
-    key: "stove",
-    title: "Cook the meat",
-    detail: "Chopped meat cooks for 15 seconds.",
-    control: "Press Left or Right, then scan a stove.",
-    focus: ["stove", "pot"],
-  },
-  {
-    key: "assembly",
-    title: "Build the burger",
-    detail: "Match the plate to the leftmost order.",
-    control: "Scan the plate to add ingredients.",
-    focus: ["assembly", "delivery", "serving"],
-  },
-  {
-    key: "submit",
-    title: "Submit together",
-    detail: "All three players shake at once.",
-    control: "Plate-holder: hold A + shake.",
-    focus: [],
-  },
-]);
+const TOUR_SOURCE_IDS = Object.freeze({
+  BUN: "buns-source",
+  LETTUCE: "lettuce-source",
+  CHEESE: "cheese-source",
+  MEAT: "meat-source",
+});
 
-function stationMatchesTourFocus(station, focus) {
-  return focus.some((target) => target === station.id || target === station.kind || target === station.assetKey?.toLowerCase());
+const TOUR_INGREDIENT_LABELS = Object.freeze({ BUN: "bun", LETTUCE: "lettuce", CHEESE: "cheese", MEAT: "meat" });
+
+function tourIngredients(order) {
+  const components = Array.isArray(order?.components) && order.components.length ? order.components : TOUR_PREVIEW_ORDER.components;
+  return [...new Set(components.map(ingredientKey).filter((key) => TOUR_INGREDIENT_LABELS[key]))];
 }
 
-function tourFocusWindow(state, step) {
-  if (step.key === "orders") return { left: 3, top: 1, right: 36, bottom: 19 };
-  const stations = (state.floorPlan?.stations || [])
-    .filter((station) => stationMatchesTourFocus(station, step.focus))
-    .map((station) => station.display || station);
-  if (!stations.length) return null;
-  const bounds = stations.reduce((result, station) => ({
-    left: Math.min(result.left, Number(station.x) || 0),
-    top: Math.min(result.top, Number(station.y) || 0),
-    right: Math.max(result.right, (Number(station.x) || 0) + (Number(station.width) || 0)),
-    bottom: Math.max(result.bottom, (Number(station.y) || 0) + (Number(station.height) || 0)),
-  }), { left: 100, top: 100, right: 0, bottom: 0 });
-  const padding = 2;
-  return {
-    left: 15 + Math.max(0, bounds.left - padding) * .7,
-    top: 19 + Math.max(0, bounds.top - padding) * .62,
-    right: 15 + Math.min(100, bounds.right + padding) * .7,
-    bottom: 19 + Math.min(100, bounds.bottom + padding) * .62,
-  };
+function stationIdsForTour(plan, kind, fallback) {
+  const ids = (plan?.stations || []).filter((station) => station.kind === kind).map((station) => station.id);
+  return ids.length ? ids : fallback;
 }
 
-function tourPlacement(focusWindow) {
-  if (!focusWindow) return { side: "center", region: "center" };
-  const focusCenterX = (focusWindow.left + focusWindow.right) / 2;
-  const focusCenterY = (focusWindow.top + focusWindow.bottom) / 2;
-  return {
-    side: focusCenterX < 50 ? "right" : "left",
-    region: focusCenterY < 50 ? "lower" : "upper",
-  };
+function sourceIdsForTour(plan, ingredients) {
+  const stations = Array.isArray(plan?.stations) ? plan.stations : [];
+  const resolved = ingredients.flatMap((ingredient) => {
+    const exactId = TOUR_SOURCE_IDS[ingredient];
+    if (stations.some((station) => station.id === exactId)) return [exactId];
+    const assetKey = ["BUN", "LETTUCE"].includes(ingredient) ? "PANTRY" : "FRIDGE";
+    return stations
+      .filter((station) => station.kind === "ingredient"
+        && (String(station.assetKey || "").toUpperCase() === assetKey
+          || String(station.id || "").toLowerCase() === assetKey.toLowerCase()))
+      .map((station) => station.id);
+  });
+  return [...new Set(resolved)];
 }
 
-function TourWalkthrough({ step, placement, focusWindow, onStepChange, onCommand, onClose }) {
-  const current = TOUR_STEPS[step];
-  const finalStep = step === TOUR_STEPS.length - 1;
-  const washStyle = focusWindow ? {
-    "--tour-wash-top": `${focusWindow.top}%`,
-    "--tour-wash-bottom": `${focusWindow.bottom}%`,
-    "--tour-wash-left": `${focusWindow.left}%`,
-    "--tour-wash-right": `${focusWindow.right}%`,
-  } : undefined;
-  return h("div", { className: "tour-guide-layer", role: "dialog", "aria-labelledby": "tour-step-title" },
-    h("div", { className: "tour-guide-wash", style: washStyle, "aria-hidden": true },
-      focusWindow
-        ? [
-          h("div", { key: "top", className: "tour-wash-region tour-wash-top" }),
-          h("div", { key: "bottom", className: "tour-wash-region tour-wash-bottom" }),
-          h("div", { key: "left", className: "tour-wash-region tour-wash-left" }),
-          h("div", { key: "right", className: "tour-wash-region tour-wash-right" }),
-        ]
-        : h("div", { className: "tour-wash-region tour-wash-full" }),
+function tourStepsForOrder(order, plan) {
+  const ingredients = tourIngredients(order);
+  const pantry = ingredients.filter((item) => ["BUN", "LETTUCE"].includes(item)).map((item) => TOUR_INGREDIENT_LABELS[item]);
+  const fridge = ingredients.filter((item) => ["CHEESE", "MEAT"].includes(item)).map((item) => TOUR_INGREDIENT_LABELS[item]);
+  const sourceFocus = sourceIdsForTour(plan, ingredients);
+  const fallbackSources = (plan?.stations || []).filter((station) => station.kind === "ingredient").map((station) => station.id);
+  return [
+    {
+      key: "orders",
+      title: "Read the order",
+      detail: "The leftmost card is your recipe. Its icons show what to grab.",
+      control: "Start with the first card at the top.",
+      focus: [],
+      target: "order",
+    },
+    {
+      key: "sources",
+      title: "Grab ingredients",
+      detail: `${pantry.length ? `Pantry: ${pantry.join(" + ")}` : ""}${pantry.length && fridge.length ? " · " : ""}${fridge.length ? `Fridge: ${fridge.join(" + ")}` : ""}` || "Use the sources named by the order.",
+      control: "In game: choose with Left / Right, then scan the source.",
+      focus: sourceFocus.length ? sourceFocus : fallbackSources.length ? fallbackSources : ["pantry", "fridge"],
+      target: "station",
+    },
+    {
+      key: "chop",
+      title: "Chop what needs chopping",
+      detail: "Bring the raw ingredient to a cutting board.",
+      control: "In game: hold A while scanning the board.",
+      focus: stationIdsForTour(plan, "chop", ["cutting-board"]),
+      target: "station",
+    },
+    {
+      key: "stove",
+      title: "Cook the meat",
+      detail: "Only chopped meat goes on a stove.",
+      control: "In game: choose a burner, scan it, and cook for 15 seconds.",
+      focus: stationIdsForTour(plan, "stove", ["stove-left", "stove-right", "stove"]),
+      target: "station",
+    },
+    {
+      key: "assembly",
+      title: "Build the order",
+      detail: "Use a plate and match the leftmost card.",
+      control: "In game: scan the plate to add the order's ingredients.",
+      focus: stationIdsForTour(plan, "assembly", ["assembly"]),
+      target: "station",
+    },
+    {
+      key: "submit",
+      title: "Submit together",
+      detail: "The plate-holder holds A and shakes. Everyone else shakes too.",
+      control: "In game: all connected players shake at the same time.",
+      focus: ["players"],
+      target: "players",
+    },
+  ];
+}
+
+function measureTourTargets(board, step) {
+  if (!board || typeof board.getBoundingClientRect !== "function") return null;
+  const boardRect = board.getBoundingClientRect();
+  if (!(boardRect.width > 0) || !(boardRect.height > 0)) return null;
+  const selector = step.target === "order"
+    ? '[data-tour-target="order"]'
+    : step.target === "players"
+      ? '[data-tour-target="player"]'
+      : '[data-tour-target="station"]';
+  const padding = step.target === "order" ? 8 : 10;
+  const rects = [...board.querySelectorAll(selector)]
+    .map((element) => {
+      const rect = element.getBoundingClientRect();
+      return {
+        left: Math.max(0, rect.left - boardRect.left - padding),
+        top: Math.max(0, rect.top - boardRect.top - padding),
+        right: Math.min(boardRect.width, rect.right - boardRect.left + padding),
+        bottom: Math.min(boardRect.height, rect.bottom - boardRect.top + padding),
+      };
+    })
+    .filter((rect) => rect.right > rect.left && rect.bottom > rect.top);
+  if (!rects.length) return { stepKey: step.key, width: boardRect.width, height: boardRect.height, rects: [], bounds: null, signature: "empty" };
+  const bounds = rects.reduce((result, rect) => ({
+    left: Math.min(result.left, rect.left),
+    top: Math.min(result.top, rect.top),
+    right: Math.max(result.right, rect.right),
+    bottom: Math.max(result.bottom, rect.bottom),
+  }), { left: boardRect.width, top: boardRect.height, right: 0, bottom: 0 });
+  const signature = `${Math.round(boardRect.width)}:${Math.round(boardRect.height)}:${rects.map((rect) => Object.values(rect).map((value) => Math.round(value)).join(",")).join("|")}`;
+  return { stepKey: step.key, width: boardRect.width, height: boardRect.height, rects, bounds, signature };
+}
+
+function rectanglesOverlap(left, right) {
+  return left.left < right.right && left.right > right.left && left.top < right.bottom && left.bottom > right.top;
+}
+
+function nearestTourRect(rects, point) {
+  return rects.reduce((best, rect) => {
+    const center = { x: (rect.left + rect.right) / 2, y: (rect.top + rect.bottom) / 2 };
+    const distance = Math.hypot(center.x - point.x, center.y - point.y);
+    return !best || distance < best.distance ? { rect, distance } : best;
+  }, null)?.rect || rects[0];
+}
+
+function placeTourCard(targetInfo, cardWidth, cardHeight) {
+  if (!targetInfo?.bounds || !targetInfo.rects?.length) return null;
+  const { width: boardWidth, height: boardHeight, bounds } = targetInfo;
+  const gap = 16;
+  const margin = 16;
+  const targetCenter = { x: (bounds.left + bounds.right) / 2, y: (bounds.top + bounds.bottom) / 2 };
+  const preferred = targetCenter.x < boardWidth * .45 ? "right" : targetCenter.x > boardWidth * .55 ? "left" : targetCenter.y < boardHeight * .5 ? "bottom" : "top";
+  const candidates = [
+    { side: "right", x: bounds.right + gap, y: targetCenter.y - cardHeight / 2 },
+    { side: "left", x: bounds.left - gap - cardWidth, y: targetCenter.y - cardHeight / 2 },
+    { side: "bottom", x: targetCenter.x - cardWidth / 2, y: bounds.bottom + gap },
+    { side: "top", x: targetCenter.x - cardWidth / 2, y: bounds.top - gap - cardHeight },
+  ].map((candidate) => {
+    const x = Math.max(margin, Math.min(boardWidth - cardWidth - margin, candidate.x));
+    const y = Math.max(margin, Math.min(boardHeight - cardHeight - margin, candidate.y));
+    const cardRect = { left: x, top: y, right: x + cardWidth, bottom: y + cardHeight };
+    const overflow = Math.max(0, margin - candidate.x) + Math.max(0, candidate.x + cardWidth - boardWidth + margin)
+      + Math.max(0, margin - candidate.y) + Math.max(0, candidate.y + cardHeight - boardHeight + margin);
+    const overlap = rectanglesOverlap(cardRect, bounds) ? 10_000 : 0;
+    const preference = candidate.side === preferred ? 0 : 160;
+    return { ...candidate, x, y, score: overflow * 40 + overlap + preference };
+  }).sort((left, right) => left.score - right.score)[0];
+  if (!candidates) return null;
+  const anchorRect = nearestTourRect(targetInfo.rects, { x: candidates.x + cardWidth / 2, y: candidates.y + cardHeight / 2 });
+  const anchor = { x: (anchorRect.left + anchorRect.right) / 2, y: (anchorRect.top + anchorRect.bottom) / 2 };
+  const pointerOffset = candidates.side === "right" || candidates.side === "left"
+    ? Math.max(28, Math.min(cardHeight - 28, anchor.y - candidates.y))
+    : Math.max(28, Math.min(cardWidth - 28, anchor.x - candidates.x));
+  const pointerSide = candidates.side === "right" ? "left" : candidates.side === "left" ? "right" : candidates.side === "bottom" ? "top" : "bottom";
+  return { ...candidates, pointerSide, pointerOffset };
+}
+
+function tourOverlayPath(targetInfo) {
+  const width = targetInfo?.width || 1;
+  const height = targetInfo?.height || 1;
+  const outer = `M0 0H${width}V${height}H0Z`;
+  const holes = (targetInfo?.rects || []).map((rect) => `M${rect.left} ${rect.top}H${rect.right}V${rect.bottom}H${rect.left}Z`).join(" ");
+  return `${outer} ${holes}`;
+}
+
+function TourWalkthrough({ steps, step, targetInfo, onStepChange, onCommand }) {
+  const current = steps[step] || steps[0];
+  const finalStep = step === steps.length - 1;
+  const activeTargetInfo = targetInfo?.stepKey === current.key ? targetInfo : null;
+  const cardRef = React.useRef(null);
+  const [placement, setPlacement] = React.useState(null);
+
+  React.useEffect(() => {
+    const card = cardRef.current;
+    const board = card?.closest(".tour-game-board");
+    if (!card || !board || !activeTargetInfo?.bounds) {
+      setPlacement(null);
+      return undefined;
+    }
+    const cardRect = card.getBoundingClientRect();
+    const next = placeTourCard(activeTargetInfo, cardRect.width, cardRect.height);
+    setPlacement(next);
+    return undefined;
+  }, [step, activeTargetInfo?.signature]);
+
+  const renderPlacement = activeTargetInfo?.bounds ? placement : null;
+  const cardStyle = renderPlacement
+    ? { left: `${renderPlacement.x}px`, top: `${renderPlacement.y}px`, "--tour-pointer-offset": `${renderPlacement.pointerOffset}px` }
+    : undefined;
+  const path = tourOverlayPath(activeTargetInfo);
+  return h("div", { className: "tour-guide-layer", role: "dialog", "aria-modal": "true", "aria-labelledby": "tour-step-title", "aria-describedby": "tour-step-detail" },
+    h("div", { className: "tour-guide-wash", "aria-hidden": true },
+      h("svg", { className: "tour-guide-wash-svg", viewBox: `0 0 ${activeTargetInfo?.width || 1} ${activeTargetInfo?.height || 1}`, preserveAspectRatio: "none" },
+        h("path", { d: path, fill: "#e6f0f4", fillOpacity: activeTargetInfo?.rects?.length ? "0.56" : "0.48", fillRule: "evenodd" }),
+      ),
     ),
-    h("div", { className: "tour-guide-card", "data-tour-step": current.key, "data-tour-placement": placement.side, "data-tour-region": placement.region },
-      h("p", { className: "tour-kicker" }, `Tour ${step + 1} of ${TOUR_STEPS.length}`),
+    h("div", {
+      ref: cardRef,
+      className: "tour-guide-card",
+      style: cardStyle,
+      "data-tour-step": current.key,
+      "data-tour-placement": renderPlacement?.pointerSide || "center",
+      "data-tour-region": "anchored",
+      "data-tour-ready": renderPlacement ? "true" : "false",
+    },
+      h("p", { className: "tour-kicker" }, `Tour ${step + 1} of ${steps.length}`),
       h("h1", { id: "tour-step-title" }, current.title),
-      h("p", { className: "tour-step-detail" }, current.detail),
-      h("p", { className: "tour-step-control" }, h("strong", null, "Press: "), current.control),
+      h("p", { className: "tour-step-detail", id: "tour-step-detail" }, current.detail),
+      h("p", { className: "tour-step-control" }, h("strong", null, "In game: "), current.control.replace(/^In game:\s*/i, "")),
       h("div", { className: "tour-actions tour-guide-actions" },
         h("button", {
           type: "button",
@@ -1059,8 +1176,7 @@ function TourWalkthrough({ step, placement, focusWindow, onStepChange, onCommand
           onClick: () => finalStep ? onCommand?.(GAME_ACTIONS.START_GAME) : onStepChange(step + 1),
         }, finalStep ? "Start Cooking" : "Next"),
         step > 0 && h("button", { type: "button", className: "tour-secondary-button", onClick: () => onStepChange(step - 1) }, "Back"),
-        h("button", { type: "button", className: "tour-skip-button", "data-command": GAME_ACTIONS.START_GAME, onClick: () => onCommand?.(GAME_ACTIONS.START_GAME) }, "Skip to the Game"),
-        h("button", { type: "button", className: "tour-close-button", onClick: onClose }, "Exit tour"),
+        h("button", { type: "button", className: "tour-skip-button", "data-command": GAME_ACTIONS.START_GAME, onClick: () => onCommand?.(GAME_ACTIONS.START_GAME) }, "Skip Tour"),
       ),
     ),
   );
@@ -1069,24 +1185,51 @@ function TourWalkthrough({ step, placement, focusWindow, onStepChange, onCommand
 function TourIntroView({ state, now, onCommand }) {
   const [tourStarted, setTourStarted] = React.useState(false);
   const [tourStep, setTourStep] = React.useState(0);
+  const [targetInfo, setTargetInfo] = React.useState(null);
+  const boardRef = React.useRef(null);
   const preview = tourPreviewState(state);
-  const currentStep = TOUR_STEPS[tourStep];
-  const focusWindow = tourStarted ? tourFocusWindow(preview, currentStep) : null;
-  const placement = tourPlacement(focusWindow);
-  return h("main", { className: "tour-screen", "data-onboarding": "tour", "aria-labelledby": "tour-title" },
-    h("div", { className: cx("tour-game-board", tourStarted && "is-tour-active") },
+  const steps = tourStepsForOrder(preview.order, preview.floorPlan);
+  const currentStep = steps[Math.min(tourStep, steps.length - 1)];
+
+  React.useEffect(() => {
+    if (!tourStarted) {
+      setTargetInfo(null);
+      return undefined;
+    }
+    const measure = () => {
+      const next = measureTourTargets(boardRef.current, currentStep);
+      if (next) setTargetInfo(next);
+    };
+    measure();
+    const observer = typeof ResizeObserver === "function" && boardRef.current
+      ? new ResizeObserver(measure)
+      : null;
+    observer?.observe(boardRef.current);
+    window.addEventListener("resize", measure);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, [tourStarted, tourStep, currentStep.key, currentStep.target]);
+
+  const startTour = () => {
+    setTourStep(0);
+    setTourStarted(true);
+  };
+  return h("main", { className: "tour-screen", "data-onboarding": "tour", "aria-label": "UnderCooked interactive tour" },
+    h("div", { ref: boardRef, className: cx("tour-game-board", tourStarted && "is-tour-active") },
       h(RoomStage, { state: preview, now, gameplay: true, tourFocus: tourStarted ? currentStep.focus : [] }),
-      h(OrdersHud, { state: preview }),
+      h(OrdersHud, { state: preview, tourTarget: tourStarted && currentStep.target === "order" }),
       h("div", { className: "game-board-score" }, h(ScoreCard, { state: preview })),
       h("div", { className: "game-board-timer" }, h(TimerCard, { state: preview, compact: true })),
       tourStarted
-        ? h(TourWalkthrough, { step: tourStep, placement, focusWindow, onStepChange: setTourStep, onCommand, onClose: () => setTourStarted(false) })
-        : h("div", { className: "tour-welcome-layer", role: "dialog", "aria-labelledby": "tour-title" },
+        ? h(TourWalkthrough, { steps, step: tourStep, targetInfo, onStepChange: setTourStep, onCommand })
+        : h("div", { className: "tour-welcome-layer", role: "dialog", "aria-labelledby": "tour-title", "aria-modal": "true" },
           h("div", { className: "tour-welcome-content" },
             h("img", { className: "tour-burger", src: "/assets/order-burger.png", alt: "" }),
             h("h1", { id: "tour-title" }, "Welcome to ", h("strong", null, "UnderCooked Interactive Tour")),
             h("div", { className: "tour-actions" },
-              h("button", { type: "button", className: "tour-primary-button", "data-tour-action": "start", onClick: () => setTourStarted(true) }, "Start Tour"),
+              h("button", { type: "button", className: "tour-primary-button", "data-tour-action": "start", onClick: startTour }, "Start Tour"),
               h("button", { type: "button", className: "tour-skip-button", "data-command": GAME_ACTIONS.START_GAME, onClick: () => onCommand?.(GAME_ACTIONS.START_GAME) }, "Skip to the Game"),
             ),
           ),

@@ -55,6 +55,17 @@ async function approvedTransport(now = 1_000) {
   return transport;
 }
 
+// The mock starts with an empty pan, like the real server. Tests that need meat
+// cooking put it on stove 1 themselves.
+function withCookingMeat(state, patch = {}) {
+  return {
+    ...state,
+    stations: state.stations.map((station) => station.id === "stove1"
+      ? { ...station, status: "cooking", progress: 0, totalSeconds: 15, remainingSeconds: 15, item: "MEAT PATTY", warning: false, ...patch }
+      : station),
+  };
+}
+
 function countStations(stations, kind) {
   return stations.filter((station) => station.kind === kind).length;
 }
@@ -366,7 +377,7 @@ test("resolves plate sprites by ingredient set and ships every sprite file", () 
 test("renders station sprites in the stage the authoritative snapshot implies", async () => {
   const transport = await approvedTransport();
   await transport.command(GAME_ACTIONS.START_GAME);
-  const state = transport.snapshot();
+  const state = withCookingMeat(transport.snapshot(), { progress: 0.4, remainingSeconds: 9 });
   const html = renderApp(state, 1_000);
   const stationHtml = (markup, id) => markup.split('data-station="').find((part) => part.startsWith(`${id}"`)) || "";
 
@@ -649,8 +660,10 @@ test("renders gameplay as a framed room board with state shown on each station",
   assert.match(html, /class="board-score"/);
   assert.doesNotMatch(html, /LIVE ACTIVITY/);
   assert.doesNotMatch(html, /class="board-notification /);
-  assert.match(html, /data-station="stove1"[^>]*>[\s\S]*?data-station-content="MEAT"/);
+  // Nothing is cooking when a round starts: both pans are empty.
+  assert.match(html, /data-station="stove1"[^>]*>[\s\S]*?data-station-content="EMPTY"/);
   assert.match(html, /data-station="stove2"[^>]*>[\s\S]*?data-station-content="EMPTY"/);
+  assert.doesNotMatch(html, /COOKING|station-state-cooking|MEAT IS NEARLY BURNT/);
   assert.match(html, /data-station="chop1"[^>]*>[\s\S]*?data-station-content="LETTUCE"/);
   assert.match(html, /data-station="chop2"[^>]*>[\s\S]*?data-station-content="CHEESE"/);
   assert.match(html, /data-station="buns-source"[^>]*>[\s\S]*?data-station-content="BUN"/);
@@ -1456,8 +1469,8 @@ test("advanceMockState expires an order that runs out, replaces it, and keeps th
 });
 
 test("advanceMockState runs a stove through cooking, done, warning, then burnt like the Pi", async () => {
-  const start = await runningMockState();
-  // The round's first tick restarts the fixture's stove at the Pi's 15 s cook.
+  // Meat goes on the pan at the start of a 15 s cook (the Pi's timeline).
+  const start = withCookingMeat(await runningMockState());
   const stove = (state) => state.stations.find((station) => station.id === "stove1");
   assert.equal(stove(start).status, "cooking");
   assert.equal(stove(start).progress, 0);
@@ -1581,7 +1594,8 @@ test("advanceMockState does nothing unless a round is running and time has passe
 
 test("the mock heartbeat advances a running round by the real elapsed time and ignores a frozen clock", async () => {
   let now = 10_000;
-  const transport = createMockTransport({ now: () => now });
+  // Meat on the pan so there is a stove timer to watch; the round restarts it at 15 s.
+  const transport = createMockTransport({ initialState: withCookingMeat(createInitialMockState(now)), now: () => now });
   const seen = [];
   const stop = transport.connect((snapshot) => seen.push(snapshot));
   try {

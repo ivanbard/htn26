@@ -70,7 +70,7 @@ def scenario(nvs_error=0, radio_error=0, nfc_error=0, allocation_failure=False,
         elif address == 0x4203AACE:
             registrations.append(a0)
         elif address == 0x40397474:
-            assert (a0, a1) == (1, 308)
+            assert (a0, a1) == (1, 312)
             result = 0 if allocation_failure else app
         elif address == 0x4211B726:
             text = string(a0)
@@ -265,7 +265,7 @@ def scenario(nvs_error=0, radio_error=0, nfc_error=0, allocation_failure=False,
         else:
             assert "HTN26|GW|UP|0|0\n" in prints
             invoke(0x60, 8)
-            assert packets[-1] == b'OC2|000001|G|S'
+            assert packets[-1] == b'OC2|000001|G|S|3'
             assert "HTN26|GAME|START_GAME|240|3\n" in prints
             game_ticks, = struct.unpack('<I', cpu.mem_read(app + 288, 4))
             assert game_ticks == 12000
@@ -280,7 +280,7 @@ def scenario(nvs_error=0, radio_error=0, nfc_error=0, allocation_failure=False,
             incoming(b'OC2|876543|E|P2:ST:L:P'); invoke(0x5c)
             assert len(packets) == sent + 1 and prints.count(forwarded) == 1
             cpu.mem_write(app + 288, struct.pack('<I', 1)); invoke(0x5c)
-            assert packets[-1] == b'OC2|000002|G|E'
+            assert packets[-1] == b'OC2|000002|G|E|3'
             assert "HTN26|GAME|GAME_END|3\n" in prints
     elif not nvs_error and not radio_error:
         incoming(b'OC2|000001|G|S'); invoke(0x5c)

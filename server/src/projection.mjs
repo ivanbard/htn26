@@ -63,6 +63,9 @@ function clampInteger(value, minimum, maximum, fallback) {
   const number = Number(value);
   return Number.isFinite(number) ? Math.max(minimum, Math.min(maximum, Math.floor(number))) : fallback;
 }
+function playerCount(value, fallback = 3) {
+  return clampInteger(value, 1, 3, fallback);
+}
 function plateComponent(item) {
   if (item === "BUN") return "BUN";
   if (item === "MEAT" || item === "COOKED_MEAT") return "MEAT";
@@ -164,6 +167,7 @@ export function createInitialProjectionState(now = Date.now(), roundSeconds = RO
     proposedRoomLayout: null,
     burgerLevel: { status: "not-generated", recipe: "BURGER", placementInstructions: clone(plan.placementInstructions) },
     photos: [],
+    playerCount: 3,
     players: DEFAULT_PLAYERS.map((player) => makePlayer(player, now)),
     orders: [],
     activeOrders: [],
@@ -501,7 +505,7 @@ export class ServerProjection {
     }
     if (this._pendingSubmission && now > this._pendingSubmission.deadline) {
       const playerIds = this._pendingSubmission.candidates.map((candidate) => candidate.playerId);
-      this._record("rejected-submission", "Submission consensus window expired before all three players were ready", now, { playerIds });
+      this._record("rejected-submission", `Submission consensus window expired before all ${this._activePlayers().length} active players were ready`, now, { playerIds });
       for (const playerId of playerIds) {
         const submitter = this._player(playerId);
         if (submitter) submitter.actionState = "submission consensus expired";
@@ -677,13 +681,14 @@ export class ServerProjection {
     this._state.score = { value: 0, delivered: 0 };
   }
 
-  _startRound(now, { durationSeconds = this.roundSeconds, allowUnapproved = false, startSource = "development simulator" } = {}) {
+  _startRound(now, { durationSeconds = this.roundSeconds, playerCount: requestedPlayerCount = this._state.playerCount, allowUnapproved = false, startSource = "development simulator" } = {}) {
     if (this._state.floorPlan.accepted !== true) {
       if (!allowUnapproved) throw new Error("approve the floorplan before starting the game");
       this._state.floorPlan.accepted = true;
       this._state.floorPlan.reviewMessage = "Local simulator fixture accepted by the host START record.";
     }
     this._roundDurationSeconds = clampInteger(durationSeconds, 1, 3600, this.roundSeconds);
+    this._state.playerCount = playerCount(requestedPlayerCount, this._state.playerCount);
     this._roundStartedAt = now;
     this._state.setup.phase = "running";
     this._state.setup.message = startSource === "physical host badge"
@@ -708,7 +713,7 @@ export class ServerProjection {
     this._pendingSubmission = null;
     this._clearDifficultyRecommendation();
     this._seenEvents.clear();
-    this._record("round-started", `Round started for ${this._roundDurationSeconds} seconds`, now, { durationSeconds: this._roundDurationSeconds, playerCount: 3, startSource });
+    this._record("round-started", `Round started for ${this._roundDurationSeconds} seconds`, now, { durationSeconds: this._roundDurationSeconds, playerCount: this._state.playerCount, startSource });
     this._issueOrder(now);
     this._nextOrderAt = now + this._randomSeconds() * 1000;
     this._publish(now);
@@ -763,8 +768,9 @@ export class ServerProjection {
       case "START_GAME":
         if (this._state.floorPlan.accepted !== true) throw new Error("approve the floorplan before preparing the game");
         if (this._state.timer.status === "running") throw new Error("round is already running from a host lifecycle event");
+        this._state.playerCount = playerCount(payload.playerCount, this._state.playerCount);
         this._state.setup.phase = "waiting-for-host-start";
-        this._state.setup.message = "Setup is ready. Press START on the physical host badge; the native GAME START record begins the production round.";
+        this._state.setup.message = `Setup is ready for ${this._state.playerCount} player${this._state.playerCount === 1 ? "" : "s"}. Press START on the physical host badge; the native GAME START record begins the production round.`;
         this._state.burgerLevel.status = "placement-ready";
         this._touch(now);
         return this.snapshot(now);
@@ -784,6 +790,7 @@ export class ServerProjection {
       const physicalHost = record.framing === "legacy-game";
       const state = this._startRound(now, {
         durationSeconds: record.durationSeconds || this.roundSeconds,
+        playerCount: record.playerCount,
         allowUnapproved: true,
         startSource: physicalHost ? "physical host badge" : "development simulator",
       });
@@ -824,6 +831,10 @@ export class ServerProjection {
 
   _player(playerId) {
     return this._state.players.find((candidate) => candidate.id === playerId || candidate.id === `p${playerId}`) || null;
+  }
+
+  _activePlayers() {
+    return this._state.players.slice(0, playerCount(this._state.playerCount));
   }
 
   _playerForIntent(intent) {
@@ -1127,7 +1138,7 @@ export class ServerProjection {
     const completion = this._completePendingSubmission(now);
     if (completion) return completion;
 
-    const missingReady = this._state.players.filter((candidate) => {
+    const missingReady = this._activePlayers().filter((candidate) => {
       const readyUntil = candidate.submissionReadyUntil ? Date.parse(candidate.submissionReadyUntil) : 0;
       return readyUntil < now;
     });
@@ -1137,7 +1148,7 @@ export class ServerProjection {
   _completePendingSubmission(now = this.now()) {
     const pending = this._pendingSubmission;
     if (!pending || now > pending.deadline) return null;
-    const allReady = this._state.players.every((candidate) => {
+    const allReady = this._activePlayers().every((candidate) => {
       const readyUntil = candidate.submissionReadyUntil ? Date.parse(candidate.submissionReadyUntil) : 0;
       return readyUntil >= now;
     });
