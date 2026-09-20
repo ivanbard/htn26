@@ -11,7 +11,7 @@ function apiUrl(baseUrl, path) {
   return `${String(baseUrl || "").replace(/\/+$/, "")}${path}`;
 }
 
-export function createHttpTransport({ baseUrl = "", fetchImpl = globalThis.fetch, eventSourceFactory = globalThis.EventSource, normalizeSnapshot: normalizeBase = normalizeServerSnapshot } = {}) {
+export function createHttpTransport({ baseUrl = "", fetchImpl = globalThis.fetch, eventSourceFactory = globalThis.EventSource, normalizeSnapshot: normalizeBase = normalizeServerSnapshot, pollIntervalMs = 1_000 } = {}) {
   if (typeof fetchImpl !== "function") throw new Error("The local HTTP transport requires fetch");
 
   // Every snapshot from the server goes through the same adapter, then the
@@ -24,25 +24,48 @@ export function createHttpTransport({ baseUrl = "", fetchImpl = globalThis.fetch
 
   let source;
   let poll;
+  let pollInFlight = false;
+  let latestRevision = Number.NEGATIVE_INFINITY;
   return {
     kind: "http",
     async connect(listener) {
       const response = await fetchImpl(apiUrl(baseUrl, "/api/state"), { headers: { accept: "application/json" } });
       if (!response.ok) throw new Error(`Master Pi state request failed (${response.status})`);
-      listener(normalizeSnapshot(await response.json()));
+      const deliver = (raw) => {
+        const snapshot = normalizeSnapshot(raw);
+        const revision = Number(snapshot?.revision);
+        // SSE and polling can cross in flight. The server revision makes the
+        // complete snapshot ordering explicit, so a delayed poll can never
+        // roll the laptop back to the initial zero-photo state.
+        if (Number.isFinite(revision) && revision < latestRevision) return;
+        if (Number.isFinite(revision)) latestRevision = revision;
+        listener(snapshot);
+      };
+      const refresh = async () => {
+        if (pollInFlight) return;
+        pollInFlight = true;
+        try {
+          const next = await fetchImpl(apiUrl(baseUrl, "/api/state"), { headers: { accept: "application/json" } });
+          if (next.ok) deliver(await next.json());
+        } catch {
+          // EventSource retries by itself; polling is only a best-effort
+          // recovery path when the shared HTTP endpoint is temporarily down.
+        } finally {
+          pollInFlight = false;
+        }
+      };
+      deliver(await response.json());
 
       if (typeof eventSourceFactory === "function") {
         source = new eventSourceFactory(apiUrl(baseUrl, "/api/events"));
-        const onState = (event) => listener(normalizeSnapshot(JSON.parse(event.data)));
+        const onState = (event) => deliver(JSON.parse(event.data));
         if (typeof source.addEventListener === "function") source.addEventListener("state", onState);
         else source.onmessage = onState;
-      } else {
-        // Polling is only a local fallback for a master implementation without SSE.
-        poll = setInterval(async () => {
-          const next = await fetchImpl(apiUrl(baseUrl, "/api/state"), { headers: { accept: "application/json" } });
-          if (next.ok) listener(normalizeSnapshot(await next.json()));
-        }, 1_000);
       }
+      // Keep a small HTTP safety net even when EventSource is available. A
+      // reverse proxy can accept SSE while buffering its frames, which would
+      // otherwise leave this tab stuck on its initial snapshot forever.
+      poll = setInterval(refresh, Math.max(1, Number(pollIntervalMs) || 1_000));
 
       return () => {
         source?.close();
