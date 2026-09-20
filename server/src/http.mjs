@@ -366,7 +366,8 @@ export function createHttpServer({ projection, photoStore, layoutSubmissionStore
         const payload = parseJsonBody(await readBody(req));
         const type = commandType(payload);
         if (type === "SCAN_ROOM") {
-          send(res, 400, publicError("upload 3-5 photos to POST /api/layout/generate; deterministic review remains at POST /api/floorplan/review"), headers); return;
+          const snapshot = await projection.proposeFloorplan({ photos: [] });
+          send(res, 200, snapshot, headers); return;
         }
         send(res, 200, projection.command(type, payload), headers); return;
       }
