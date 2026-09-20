@@ -13,6 +13,8 @@ sidecar remains future-only.
 
 ## Run locally
 
+At startup, `server.mjs` automatically loads `server/.env` without overriding variables already supplied by the shell. Copy `example.env` to `.env`, set `OPENAI_API_KEY` and the serial device when needed, and keep the real `.env` out of Git.
+
 ```sh
 cd server
 OPENAI_API_KEY=sk-... node server.mjs --host 127.0.0.1 --port 8787
