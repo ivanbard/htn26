@@ -1356,7 +1356,7 @@ function ResultsView({ state, onCommand }) {
   const penalties = state.penalties?.total;
   return h("main", { className: "onboarding-screen results-screen", "data-onboarding": "results", "aria-labelledby": "results-title" },
     h("div", { className: "results-content" },
-      h("div", { className: "onboarding-copy" },
+      h("div", { className: "onboarding-copy player-setup-heading results-heading" },
         h("h1", { id: "results-title" }, "Round complete"),
         h("p", null, state.serving?.lastEvent?.message ? `Last order: ${state.serving.lastEvent.message}` : "Great teamwork!"),
       ),
@@ -1376,7 +1376,7 @@ function ResultsView({ state, onCommand }) {
       ),
       h("button", {
         type: "button",
-        className: "onboarding-button",
+        className: "onboarding-button player-setup-continue",
         disabled: !canRunAction(state, GAME_ACTIONS.RESET_GAME),
         "data-command": GAME_ACTIONS.RESET_GAME,
         onClick: () => onCommand?.(GAME_ACTIONS.RESET_GAME),

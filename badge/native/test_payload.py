@@ -31,7 +31,7 @@ def scenario(nvs_error=0, radio_error=0, nfc_error=0, allocation_failure=False,
     calls, registrations, texts, stages, prints = [], [], [], [], []
     app, old_app = 0x3FCC0000, 0x3FC9AB00
     app_guard = b'HTN26-APP-GUARD' * 4
-    cpu.mem_write(app + 308, app_guard)
+    cpu.mem_write(app + 312, app_guard)
     label_count = 0
     handler, packets = [], []
     image_object = 0x3FCC2800
@@ -74,6 +74,8 @@ def scenario(nvs_error=0, radio_error=0, nfc_error=0, allocation_failure=False,
             result = 0 if allocation_failure else app
         elif address == 0x4211B726:
             text = string(a0)
+            if text.startswith("HTN26|") and "%u" in text:
+                text = text.replace("%u", str(a1), 1)
             prints.append(text)
             if "internal8_free" in text:
                 stages.append(string(a1))
@@ -169,7 +171,7 @@ def scenario(nvs_error=0, radio_error=0, nfc_error=0, allocation_failure=False,
     assert cpu.reg_read(UC_RISCV_REG_PC) == HOOK + 8
     assert registrations == ([old_app] if allocation_failure else [old_app, app])
     if allocation_failure:
-        assert bytes(cpu.mem_read(app + 308, len(app_guard))) == app_guard
+        assert bytes(cpu.mem_read(app + 312, len(app_guard))) == app_guard
         return
     table, = struct.unpack("<I", cpu.mem_read(app, 4))
 
@@ -256,7 +258,7 @@ def scenario(nvs_error=0, radio_error=0, nfc_error=0, allocation_failure=False,
         assert calls.count(0x420109C6) == 1
         assert not packets and 'NFC READ 62760 - REMOVE AND RETAP' in texts
         invoke(0x58)
-        assert bytes(cpu.mem_read(app + 308, len(app_guard))) == app_guard
+        assert bytes(cpu.mem_read(app + 312, len(app_guard))) == app_guard
         return
     if role == "host":
         assert 0x4200FF2E not in calls  # The stationary gateway does not allocate/enable NFC.
@@ -482,31 +484,31 @@ def scenario(nvs_error=0, radio_error=0, nfc_error=0, allocation_failure=False,
                 incoming(b'OC2|222220|E|P1:X:P----'); invoke(0x5c)
                 assert len(packets) == before
                 assert_icon('cooked_meat')
-                hardware["motion"] = "tap"; invoke(0x5c); hardware["motion"] = "rest"
+                invoke(0x60, 6); hardware["motion"] = "tap"; invoke(0x5c); hardware["motion"] = "rest"
                 assert packets[-1].endswith(b':X:HM')
                 incoming(b'OC2|222225|E|P1:X:P----'); invoke(0x5c)
                 assert_icon(None)
-                acknowledge('X:HM')
+                acknowledge('X:HM'); invoke(0x60, 0x106)
                 for _ in range(25): invoke(0x5c)
 
-                hardware["motion"] = "tap"; invoke(0x5c); hardware["motion"] = "rest"
+                invoke(0x60, 6); hardware["motion"] = "tap"; invoke(0x5c); hardware["motion"] = "rest"
                 incoming(b'OC2|222223|E|P1:X:HD'); invoke(0x5c)
                 assert_icon('chopped_meat')
-                acknowledge('X:E----')
+                acknowledge('X:E----'); invoke(0x60, 0x106)
                 for _ in range(25): invoke(0x5c)
-                hardware["motion"] = "tap"; invoke(0x5c); hardware["motion"] = "rest"
+                invoke(0x60, 6); hardware["motion"] = "tap"; invoke(0x5c); hardware["motion"] = "rest"
                 incoming(b'OC2|222224|E|P1:X:E----'); invoke(0x5c)
                 assert_icon(None)
-                acknowledge('X:HD')
+                acknowledge('X:HD'); invoke(0x60, 0x106)
                 for _ in range(25): invoke(0x5c)
 
                 # An invalid raw-item merge swaps inventories, removing our plate.
                 invoke(0x60, 3); scan('pantry'); acknowledge('PL:NEW')
                 assert_icon('plate')
-                hardware["motion"] = "tap"; invoke(0x5c); hardware["motion"] = "rest"
+                invoke(0x60, 6); hardware["motion"] = "tap"; invoke(0x5c); hardware["motion"] = "rest"
                 incoming(b'OC2|222221|E|P1:X:HR'); invoke(0x5c)
                 assert_icon('raw_meat')
-                acknowledge('X:P----')
+                acknowledge('X:P----'); invoke(0x60, 0x106)
 
                 incoming(b'OC2|000002|G|E'); invoke(0x5c)
                 assert_icon(None)
@@ -552,9 +554,10 @@ def scenario(nvs_error=0, radio_error=0, nfc_error=0, allocation_failure=False,
     assert ("idle" in stages) == (not nvs_error and not radio_error)
     assert calls.count(0x420109C6) == (0 if nvs_error else 1)
     invoke(0x58)
-    assert 0x42011252 in calls and stages[-1] == "exit"
+    assert (0x42011252 in calls) == (not nvs_error and not radio_error)
+    assert stages[-1] == "exit"
     assert cpu.mem_read(app + 4, 24) == bytes(24)
-    assert bytes(cpu.mem_read(app + 308, len(app_guard))) == app_guard
+    assert bytes(cpu.mem_read(app + 312, len(app_guard))) == app_guard
     if handler:
         before = len(packets)
         incoming(b'OC2|000001|E|P1:READY');invoke(0x5c)

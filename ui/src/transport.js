@@ -36,7 +36,7 @@ async function failureMessage(label, response) {
   return `${label} (${response.status})${detail}`;
 }
 
-export function createHttpTransport({ baseUrl = "", fetchImpl = globalThis.fetch, eventSourceFactory = globalThis.EventSource, normalizeSnapshot: normalizeBase = normalizeServerSnapshot } = {}) {
+export function createHttpTransport({ baseUrl = "", fetchImpl = globalThis.fetch, eventSourceFactory = globalThis.EventSource, normalizeSnapshot: normalizeBase = normalizeServerSnapshot, pollIntervalMs = 1_000 } = {}) {
   if (typeof fetchImpl !== "function") throw new Error("The local HTTP transport requires fetch");
 
   // Every snapshot from the server goes through the same adapter, then the
@@ -48,6 +48,8 @@ export function createHttpTransport({ baseUrl = "", fetchImpl = globalThis.fetch
   };
 
   let source;
+  let poll;
+  let pollInFlight = false;
   return {
     kind: "http",
     async connect(listener, hooks = {}) {
@@ -59,7 +61,6 @@ export function createHttpTransport({ baseUrl = "", fetchImpl = globalThis.fetch
       let forceNext = false;
       let stopped = false;
       let reopenTimer;
-      let heartbeat;
 
       const markLost = () => {
         if (lost || stopped) return;
@@ -73,8 +74,7 @@ export function createHttpTransport({ baseUrl = "", fetchImpl = globalThis.fetch
         hooks.onConnectionRestored?.();
       };
       // A slow heartbeat reply must not overwrite a newer stream event, so a snapshot
-      // that is older than what is already showing is dropped (equal ones are just
-      // duplicates and are harmless).
+      // that is older than what is already showing is dropped (equal ones are harmless).
       const apply = (raw) => {
         if (stopped) return;
         const revision = Number(raw?.revision);
@@ -86,6 +86,23 @@ export function createHttpTransport({ baseUrl = "", fetchImpl = globalThis.fetch
       };
 
       apply(initial);
+
+      const checkServer = async () => {
+        if (stopped || pollInFlight) return;
+        pollInFlight = true;
+        try {
+          const next = await fetchImpl(apiUrl(baseUrl, "/api/state"), { headers: { accept: "application/json" } });
+          if (!next.ok) throw new Error(String(next.status));
+          const raw = await next.json();
+          if (lost) forceNext = true;
+          apply(raw);
+          markRestored();
+        } catch {
+          markLost();
+        } finally {
+          pollInFlight = false;
+        }
+      };
 
       if (typeof eventSourceFactory === "function") {
         const open = () => {
@@ -115,28 +132,14 @@ export function createHttpTransport({ baseUrl = "", fetchImpl = globalThis.fetch
       }
       // The stream is silent while nothing changes, so a quiet stream proves nothing.
       // Ask the server directly now and then: it notices a dead server, and it picks
-      // up anything the stream missed.
-      async function checkServer() {
-        try {
-          const next = await fetchImpl(apiUrl(baseUrl, "/api/state"), { headers: { accept: "application/json" } });
-          if (!next.ok) throw new Error(String(next.status));
-          const raw = await next.json();
-          if (lost) forceNext = true;
-          apply(raw);
-          markRestored();
-        } catch {
-          markLost();
-        }
-      }
-      // Without an event stream this poll is the only source of updates, so it runs fast.
-      const everyMs = typeof eventSourceFactory === "function" ? HEARTBEAT_MS : 1_000;
-      heartbeat = setInterval(checkServer, everyMs);
-      heartbeat.unref?.();
+      // up anything the stream missed. Without an event stream this poll is the only
+      // source of updates, so the default is one second.
+      poll = setInterval(checkServer, Math.max(1, Number(pollIntervalMs) || 1_000));
 
       return () => {
         stopped = true;
         clearTimeout(reopenTimer);
-        clearInterval(heartbeat);
+        clearInterval(poll);
         source?.close();
       };
     },

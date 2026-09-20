@@ -1968,16 +1968,49 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--yellow); ou
 
 
 /* Results card */
+.results-screen {
+  background-color: #8f7d5d;
+  background-image:
+    linear-gradient(rgba(18, 25, 34, .38), rgba(18, 25, 34, .38)),
+    url("/assets/game-room-background.png");
+}
+
 .results-content {
+  position: relative;
   display: flex;
-  width: min(92vw, 520px);
-  max-height: 100%;
+  width: clamp(560px, 66vw, 760px);
+  max-width: 92vw;
+  max-height: calc(100dvh - 24px);
   flex-direction: column;
   align-items: center;
-  gap: 1.5rem;
+  gap: clamp(1rem, 2vh, 1.4rem);
   overflow: auto;
-  padding: 1.5rem 1rem;
+  border: 1px solid rgba(60, 54, 45, .18);
+  border-radius: 12px 12px 8px 8px;
+  background:
+    radial-gradient(circle at 9px 18px, #c8c7c0 0 4px, transparent 4.5px) 0 0 / 18px 23px repeat-y,
+    #faf9f3;
+  padding: clamp(1.5rem, 3vh, 2.5rem) clamp(1.5rem, 3.2vw, 2.5rem);
+  padding-left: clamp(2.5rem, 4.4vw, 3.8rem);
+  padding-bottom: clamp(2rem, 4vh, 2.5rem);
+  box-shadow: 0 16px 16px rgba(26, 26, 19, .34);
   text-align: center;
+  transform: rotate(-.6deg);
+}
+
+.results-heading {
+  width: 100%;
+}
+
+.results-heading h1 {
+  color: #314988;
+}
+
+.results-heading p {
+  margin-top: .5rem;
+  color: #696864;
+  font-size: clamp(.9rem, 1.3vw, 1.05rem);
+  font-style: normal;
 }
 
 .results-stars {
@@ -1999,7 +2032,14 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--yellow); ou
 .results-score {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: .75rem;
+  width: 100%;
+  border: 1px solid #dedbd2;
+  border-radius: 10px;
+  background: #fffefa;
+  padding: .8rem 1rem;
+  box-shadow: 0 3px 0 rgba(49, 73, 136, .14);
 }
 
 .results-score img {
@@ -2025,7 +2065,7 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--yellow); ou
 .results-stats {
   display: grid;
   width: 100%;
-  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: .75rem;
 }
 
@@ -2033,9 +2073,11 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--yellow); ou
   display: flex;
   flex-direction: column;
   gap: .25rem;
+  border: 1px solid #dedbd2;
   border-radius: 10px;
-  background: rgba(241, 246, 249, .82);
+  background: #fffefa;
   padding: .75rem .5rem;
+  box-shadow: 0 3px 0 rgba(49, 73, 136, .14);
 }
 
 .results-stat strong {
@@ -2054,6 +2096,22 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--yellow); ou
 
 .results-stat.is-good strong { color: #1d7a45; }
 .results-stat.is-bad strong { color: #b3312f; }
+
+.results-content > .player-setup-continue {
+  margin-top: 0;
+}
+
+@media (max-width: 720px) {
+  .results-content {
+    width: min(92vw, 520px);
+    padding-right: 1.25rem;
+    padding-left: 2.5rem;
+  }
+
+  .results-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
 
 
 /* Short-lived callouts for notable player actions (failed cut, rejected plate...). */
