@@ -12,9 +12,9 @@ import { openSerialDevice } from "../src/serial-device.mjs";
 
 const MAC = "AA:BB:CC:DD:EE:01";
 
-async function withRuntime(callback, { now = () => Date.now() } = {}) {
+async function withRuntime(callback, { now = () => Date.now(), env = {} } = {}) {
   const dataDir = await mkdtemp(path.join(tmpdir(), "htn26-server-"));
-  const runtime = await createRuntime({ dataDir, env: {}, now });
+  const runtime = await createRuntime({ dataDir, env, now });
   await new Promise((resolve) => runtime.server.listen(0, "127.0.0.1", resolve));
   const address = runtime.server.address();
   try { return await callback(`http://127.0.0.1:${address.port}`, runtime); }
@@ -517,7 +517,14 @@ test("native GAME and complete E event path is parsed and projected by the lapto
     state = ingest("native HTN26|GAME|GAME_END|3");
     assert.equal(state.timer.status, "ended");
     assert.ok(state.players.every((player) => player.heldItem === "EMPTY"));
-  }, { now: () => now });
+  }, {
+    now: () => now,
+    env: {
+      HTN26_ORDER_INTERVAL_MIN_SECONDS: "30",
+      HTN26_ORDER_INTERVAL_MAX_SECONDS: "30",
+      HTN26_ORDER_PATIENCE_SECONDS: "30",
+    },
+  });
 });
 
 test("legacy tip frames remain parseable but cannot change server money", () => {

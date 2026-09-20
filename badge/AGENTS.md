@@ -6,7 +6,8 @@ Read [`badge-app-guide.md`](badge-app-guide.md) before using or describing any H
 
 Use the nearest component README as the owner for gateway, player, NFC display, and native implementation contracts.
 
-Keep badge apps focused on input capture and local feedback; authoritative game state belongs to the Pi.
+Keep badge apps focused on input capture and local feedback; authoritative game
+state belongs to the laptop server or a future authoritative-engine adapter.
 
 Do not invent Wi-Fi, HTTP, arbitrary BLE, serial-input, or radio capabilities that the badge guide does not document.
 

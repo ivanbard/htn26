@@ -4,7 +4,8 @@ The UI contract, transport seam, rendering ownership, and tests are [`README.md`
 
 Read [`../README.md`](../README.md), [`../updates/UPDATE_v1.md`](../updates/UPDATE_v1.md), [`../updates/UPDATE_v1.1.md`](../updates/UPDATE_v1.1.md), and [`../FLOW.md`](../FLOW.md) for product context.
 
-Keep the UI offline-first and local, with the master Pi as the source of authoritative state.
+Keep the UI offline-first and local, with the laptop server or a future
+authoritative-engine adapter as the source of authoritative state.
 
 Render player icons, held items, chopping state, cooking progress, orders, health, and submission results from transport snapshots.
 

@@ -28,8 +28,8 @@ This README records product intent and system ownership, while component READMEs
 
 Use these sources in this order for new work.
 
-- [`updates/UPDATE_v1.1.md`](updates/UPDATE_v1.1.md) contains the accepted v1 clarifications and supersedes conflicting v1 planning details.
-- [`updates/UPDATE_v1.md`](updates/UPDATE_v1.md) contains the four-zone, one-Pi, phone-camera v1 plan.
+- [`updates/UPDATE_v1.1.md`](updates/UPDATE_v1.1.md) contains the accepted v1 gameplay clarifications and supersedes conflicting v1 planning details.
+- [`updates/UPDATE_v1.md`](updates/UPDATE_v1.md) contains the four-zone, phone-photo v1 plan as updated for the laptop-hosted launch.
 - [`README.md`](README.md) defines the current product intent, architecture, and ownership boundaries.
 - [`badge/badge-app-guide.md`](badge/badge-app-guide.md) is authoritative for Hacker Badge capabilities and APIs.
 - Component READMEs define implementation responsibilities and local validation.
@@ -75,9 +75,11 @@ player badge 1      player badge 2      player badge 3
 
 The host badge is the gateway between the player badges and the laptop server.
 
-The host badge owns the four-minute round lifecycle, START_GAME/GAME_END records,
-and reset of the three fixed-player session. The laptop server owns authoritative game
-state, cooking and order timers, orders, score, and submission results.
+The host badge initiates the physical round, shows its local four-minute
+countdown, and emits the `START_GAME`/`GAME_END` lifecycle records. The laptop
+server applies those records as authoritative start/end transitions and owns
+the game countdown, reset, cooking and order timers, orders, score, and
+submission results.
 
 Player badges read NFC and motion input, provide local feedback, and report player intent.
 
@@ -156,10 +158,9 @@ When neither badge has a plate, their held items are swapped.
 A player holding a plate and an empty-handed player both keep their inventories
 when they touch.
 
-A badge-to-badge transfer returns both players to the simulator's inferred
-center/default location immediately.
-
-The owning badge component README defines the event representation for these interactions.
+The owning badge component README defines the event representation for these
+interactions. Simulator-only inferred-location behavior belongs to
+[`pi/server/README.md`](pi/server/README.md).
 
 ## Host start and end lifecycle
 
@@ -172,7 +173,8 @@ laptop server and UI through the gateway serial path.
 
 Starting a round clears prior badge and game state before play begins.
 
-The host badge shows a countdown timer during the round.
+The host badge shows a local countdown during the round; the laptop server's
+countdown remains authoritative for game state and UI snapshots.
 
 A round lasts approximately four minutes.
 
@@ -218,6 +220,9 @@ The actual radio and serial contracts remain owned by [`badge/badge-app-guide.md
 The first playable acceptance test should therefore validate the full path before adding more recovery behavior.
 
 ## Validation boundaries
+
+Use the laptop simulator validation documented in
+[`pi/server/README.md`](pi/server/README.md) for the current server path.
 
 Run the badge tests from the repository root as documented by the badge component READMEs.
 

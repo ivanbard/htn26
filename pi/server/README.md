@@ -124,6 +124,7 @@ HTN26|1|PLAYER|1|READY
 
 Accepted item names are `BUN`, `RAW_MEAT`, `CHOPPED_MEAT`, `COOKED_MEAT`,
 `RAW_LETTUCE`, `LETTUCE`, `RAW_CHEESE`, `CHEESE`, and `BURNT_MEAT`.
+`CHOP|DONE` may omit the final item or include the matching chopped item.
 `STATUS` accepts `EMPTY`, `COOKING`, `DONE`, `WARNING`, or `BURNT`, but it is a
 reported diagnostic only: it cannot overwrite the server's stove timer.
 `CHECK` likewise reads the authoritative station phase.
@@ -154,19 +155,22 @@ The simulator does not claim live camera tracking. It exposes each player's
 `currentStation` and `simulatedLocation` as a temporary inference from accepted
 serial actions:
 
-- bun/lettuce source actions infer Pantry; meat/cheese source actions infer
-  Fridge;
+- bun/lettuce pickup and plate actions infer Pantry; raw meat and cheese pickup
+  actions infer Fridge; direct chopped/cooked/burnt meat pickup diagnostics
+  infer Stove 1;
 - chop actions infer Cutting Board;
 - left/right stove actions infer Stove 1/Stove 2; and
 - a submission infers Serving.
 
-Every instant action and every finished/failed timed action remains under that
-station for 2 seconds by default, then the server returns the player to
-`center` / `CENTER / DEFAULT`. `simulatedLocation.returnAt` makes that deadline
-inspectable, and `HTN26_PLAYER_LOCATION_HOLD_SECONDS` changes it. Chopping stays
-at Cutting Board through its three-second operation and then uses the return
-delay. A later action moves the player immediately to its newly inferred
-station. A transfer/bump moves both participants to center/default immediately.
+An inferred source, plate, stove, serving, or finished/failed chop visit remains
+under that station for 2 seconds by default, then the server returns the player
+to `center` / `CENTER / DEFAULT`. `simulatedLocation.returnAt` makes that
+deadline inspectable, and `HTN26_PLAYER_LOCATION_HOLD_SECONDS` changes it.
+Chopping stays at Cutting Board through its three-second operation and then uses
+the return delay. `LEAVE` restarts the return delay for the current station. A
+later station action moves the player immediately to its newly inferred
+station. Drop and transfer/bump actions move the affected players to
+center/default immediately, while `READY` does not infer a new station.
 Occupancy is stored per player, so any station can list multiple players at
 once. The plain page has no separate global player-card list: each player
 appears only under Pantry, Fridge, Cutting Board, Stove 1, Stove 2, Serving, or
@@ -215,6 +219,7 @@ HTN26|RX|AA:BB:CC:DD:EE:FF|-48|OC1|000044|E|P2:PU:R
 HTN26|GW|UP|12|0
 HTN26|GAME|START_GAME|240|3
 HTN26|GAME|GAME_END|3
+HTN26|GAME|RESET_GAME|3
 ```
 
 `RX` validation preserves the 44-byte `OC1` payload bound, MAC/RSSI checks,
@@ -236,8 +241,9 @@ and `H` fixture intents remain parse-compatible. Legacy
 `B|TIP:<amount>` claims are recorded diagnostically and ignored; only a
 successful authoritative submission can award a tip. `GW` records update
 health. Native `GAME|START_GAME` and `GAME|GAME_END` records from the physical
-host are parsed and processed as the authoritative production lifecycle. USB
-chunks can split records at any byte boundary.
+host are parsed and processed as the authoritative production lifecycle. The
+parser also accepts the legacy-compatible `GAME|RESET_GAME` record, with or
+without `|3`. USB chunks can split records at any byte boundary.
 
 The host and player badge profiles themselves are owned by
 [`../../badge/master/README.md`](../../badge/master/README.md),
