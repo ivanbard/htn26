@@ -77,7 +77,7 @@ export function createInitialMockState(now = Date.now()) {
     ],
     score: { value: 0, delivered: 0, gold: 0, tips: 0, penalties: 0 },
     submission: { status: "idle", message: "No submission yet", detail: "All three players shake together to submit a plate." },
-    clock: { status: "ready", remainingSeconds: 112, totalSeconds: 120 },
+    clock: { status: "ready", remainingSeconds: 232, totalSeconds: 240 },
     serving: { lastEvent: null, gooseQueue: 4, location: "SERVING" },
     health: health(now),
   };

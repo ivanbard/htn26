@@ -65,8 +65,8 @@ which is the memory-critical difference from launching either Lua app.
    to choose host mode. Host mode starts radio without NFC and emits
    `HTN26|GW|UP|0|0` on success or `HTN26|GW|DOWN|0|0` on failure.
 3. After all players show waiting state, press **START** again on the host. It
-   logs `HTN26|GAME|START_GAME|120|3`, broadcasts `OC1|000001|G|S`, counts down
-   two minutes, then logs `HTN26|GAME|GAME_END|3` and broadcasts the matching
+   logs `HTN26|GAME|START_GAME|240|3`, broadcasts `OC1|000001|G|S`, counts down
+   four minutes, then logs `HTN26|GAME|GAME_END|3` and broadcasts the matching
    end control. Events before start are ignored.
 
 The app draws held state, plate contents, selection, stoves, radio status, and

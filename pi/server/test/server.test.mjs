@@ -85,6 +85,8 @@ test("projection keeps four recipes, validates submissions, and computes gold/ti
   await projection.proposeFloorplan({ photos: [{ id: "fixture" }] }, now);
   projection.approveFloorplan(true, now);
   projection.command("START_GAME", {}, now);
+  assert.equal(projection.snapshot(now).timer.totalSeconds, 240);
+  assert.equal(projection.snapshot(now).timer.remainingSeconds, 240);
   const wrong = projection.ingestBadgeEvent({ senderMac: MAC, sequence: 1, type: "B", value: "SUBMIT:CHEESEBURGER" }, now);
   assert.equal(wrong.accepted, true);
   assert.equal(projection.snapshot(now).submissions[0].status, "failure");
@@ -103,6 +105,7 @@ test("HTTP upload, review, approval, serial projection, and browser reads work",
   await withRuntime(async (base) => {
     const initial = await fetch(`${base}/api/state`).then((response) => response.json());
     assert.equal(initial.players.length, 3);
+    assert.equal(initial.timer.totalSeconds, 240);
     const state = await approveAndStart(base);
     assert.equal(state.setup.phase, "running");
     assert.equal(state.floorPlan.room.widthMeters, 10);

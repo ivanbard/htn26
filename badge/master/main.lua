@@ -4,7 +4,8 @@
 -- player radio payloads are forwarded to the Pi over USB serial, while the Pi
 -- remains authoritative for player intent, orders, scoring, and game state.
 
-local GAME_DURATION_MS = 120000
+local GAME_DURATION_SECONDS = 240
+local GAME_DURATION_MS = GAME_DURATION_SECONDS * 1000
 local PLAYER_COUNT = 3
 local MAX_RADIO_PAYLOAD = 44
 local MAX_PACKET_SEQUENCE = 4294967295
@@ -171,7 +172,7 @@ local function serial_rx_frame(mac, rssi, payload)
 end
 
 local function serial_start_frame()
-  return "HTN26|GAME|START_GAME|120|3"
+  return "HTN26|GAME|START_GAME|" .. tostring(GAME_DURATION_SECONDS) .. "|3"
 end
 
 local function serial_end_frame()
@@ -333,7 +334,8 @@ local function render_leds(now)
     if math.floor(now / 350) % 2 == 0 then badge.led.set_all(180, 0, 0) end
   elseif game_active then
     local seconds = remaining_seconds
-    local lit = math.max(1, math.min(6, math.ceil(seconds / 20)))
+    local seconds_per_led = GAME_DURATION_SECONDS / 6
+    local lit = math.max(1, math.min(6, math.ceil(seconds / seconds_per_led)))
     for index = 1, lit do badge.led.set(index, 0, 130, 35) end
     if last_event_ms > 0 and now - last_event_ms < 300 then
       badge.led.set_all(0, 70, 220)
@@ -374,7 +376,7 @@ local function start_game(now)
   session_number = increment_counter(session_number)
   game_active = true
   game_ends_at = now + GAME_DURATION_MS
-  remaining_seconds = 120
+  remaining_seconds = GAME_DURATION_SECONDS
   emit_lifecycle("START_GAME")
   return true
 end

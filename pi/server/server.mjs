@@ -31,7 +31,7 @@ export async function createRuntime({ env = process.env, now = () => Date.now(),
   const projection = new ServerProjection({
     provider,
     now,
-    roundSeconds: Number(env.HTN26_ROUND_SECONDS) || 120,
+    roundSeconds: Number(env.HTN26_ROUND_SECONDS) || 240,
     orderIntervalMinSeconds: Number(env.HTN26_ORDER_INTERVAL_MIN_SECONDS) || 8,
     orderIntervalMaxSeconds: Number(env.HTN26_ORDER_INTERVAL_MAX_SECONDS) || 35,
     maxActiveOrders: Number(env.HTN26_MAX_ACTIVE_ORDERS) || 3,

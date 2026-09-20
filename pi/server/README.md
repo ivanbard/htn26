@@ -22,7 +22,7 @@ Useful environment variables:
 - `HTN26_DATA_DIR`: persistent photo/metadata directory.
 - `HTN26_SERIAL_DEVICE`: USB serial device, for example a QNX `/dev/ser*`
   path. `--serial DEVICE` is equivalent.
-- `HTN26_ROUND_SECONDS`: round length, default 120.
+- `HTN26_ROUND_SECONDS`: round length, default 240.
 - `HTN26_ORDER_INTERVAL_MIN_SECONDS` and
   `HTN26_ORDER_INTERVAL_MAX_SECONDS`: randomized order-spawn interval,
   default 8-35 seconds.

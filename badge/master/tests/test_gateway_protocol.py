@@ -94,7 +94,7 @@ class GatewayProtocolTests(LuaTestMixin, unittest.TestCase):
         self.run_lua(
             'local start = gateway_test.serial_start_frame()\n'
             'local finish = gateway_test.serial_end_frame()\n'
-            'assert(start == "HTN26|GAME|START_GAME|120|3")\n'
+            'assert(start == "HTN26|GAME|START_GAME|240|3")\n'
             'assert(finish == "HTN26|GAME|GAME_END|3")\n'
             'assert(gateway_test.lifecycle_radio_frame("START_GAME") == "OC1|000001|G|S")\n'
             'assert(gateway_test.lifecycle_radio_frame("GAME_END") == "OC1|000002|G|E")\n'
@@ -166,13 +166,16 @@ class HostLifecycleTests(LuaTestMixin, unittest.TestCase):
             "}\n"
             "on_enter({})\n"
             "on_button(8, 1)\n"
-            'assert(logs[2] == "HTN26|GAME|START_GAME|120|3")\n'
+            'assert(logs[2] == "HTN26|GAME|START_GAME|240|3")\n'
             'assert(logs[3] == "HTN26|HOST|CONTROL|OC1|000001|G|S")\n'
             'assert(broadcasts[1] == "OC1|000001|G|S")\n'
-            "now = 120000\n"
+            "now = 239999\n"
             "on_tick()\n"
-            'assert(logs[4] == "HTN26|GAME|GAME_END|3")\n'
-            'assert(logs[5] == "HTN26|HOST|CONTROL|OC1|000002|G|E")\n'
+            'assert(logs[4] ~= "HTN26|GAME|GAME_END|3")\n'
+            "now = 240000\n"
+            "on_tick()\n"
+            'assert(logs[5] == "HTN26|GAME|GAME_END|3")\n'
+            'assert(logs[6] == "HTN26|HOST|CONTROL|OC1|000002|G|E")\n'
             'assert(broadcasts[2] == "OC1|000002|G|E")'
         )
 

@@ -6,7 +6,7 @@ The badge API boundary is [`../badge-app-guide.md`](../badge-app-guide.md), and
 product decisions are in [`../../README.md`](../../README.md) and
 [`../../updates/UPDATE_v1.1.md`](../../updates/UPDATE_v1.1.md).
 
-Keep this subtree responsible for the stationary host's 120-second lifecycle,
+Keep this subtree responsible for the stationary host's 240-second lifecycle,
 three-player session reset, restricted-radio receive gateway, bounded queue,
 serial framing, and local status UI. The Pi remains authoritative for player
 intent, inventory, orders, scoring, and resulting game state.

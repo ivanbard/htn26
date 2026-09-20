@@ -12,7 +12,7 @@ The first playable setup uses the deterministic static floorplan. Phone photos a
 - `badge/master/`: retained stationary-host Lua rollback profile.
 - `badge/slave/`: retained fixed-player Lua rollback profile.
 
-The Pi is authoritative for orders, cooking, scoring, gold, tips, and submissions. The host badge owns the two-minute round lifecycle. Player badges own local interaction feedback and send intent through the host.
+The Pi is authoritative for orders, cooking, scoring, gold, tips, and submissions. The host badge owns the four-minute round lifecycle. Player badges own local interaction feedback and send intent through the host.
 
 ## Hardware
 
@@ -100,7 +100,7 @@ curl -sS -X POST http://127.0.0.1:8787/api/serial \
 
 Useful settings:
 
-- `HTN26_ROUND_SECONDS=120`
+- `HTN26_ROUND_SECONDS=240`
 - `HTN26_ORDER_INTERVAL_MIN_SECONDS=8`
 - `HTN26_ORDER_INTERVAL_MAX_SECONDS=35`
 - `HTN26_MAX_ACTIVE_ORDERS=3`
@@ -155,7 +155,7 @@ starting a round.
 The host badge logs:
 
 ```text
-HTN26|GAME|START_GAME|120|3
+HTN26|GAME|START_GAME|240|3
 HTN26|GAME|GAME_END|3
 ```
 

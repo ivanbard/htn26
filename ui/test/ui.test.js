@@ -104,7 +104,7 @@ test("host commands follow start, scan, approval, burger placement, and round li
   await transport.command(GAME_ACTIONS.START_GAME);
   assert.equal(transport.snapshot().setup.phase, SETUP_PHASES.RUNNING);
   assert.equal(transport.snapshot().clock.status, "running");
-  assert.equal(transport.snapshot().clock.remainingSeconds, 120);
+  assert.equal(transport.snapshot().clock.remainingSeconds, 240);
 
   await transport.command(GAME_ACTIONS.END_GAME);
   assert.equal(transport.snapshot().setup.phase, SETUP_PHASES.ENDED);

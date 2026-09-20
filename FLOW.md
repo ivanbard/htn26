@@ -11,7 +11,7 @@ level has four NFC zones: pantry, fridge, cutting board, and stove.
 1. Connect the phone camera to the Raspberry Pi and photograph the play area.
 2. Connect the stationary host badge to the Pi and open its host app; open the player app on the three badges.
 3. Generate and approve the floor plan on the local UI, then place the four NFC zones as instructed.
-4. Press START on the host badge. It owns the two-minute countdown, resets the fixed-player session, and emits `HTN26|GAME|START_GAME|120|3` to serial and as a best-effort radio lifecycle hint.
+4. Press START on the host badge. It owns the four-minute countdown, resets the fixed-player session, and emits `HTN26|GAME|START_GAME|240|3` to serial and as a best-effort radio lifecycle hint.
 5. When the countdown ends, the host emits `HTN26|GAME|GAME_END|3` and resets the host session.
 
 btw we're doing the burger level

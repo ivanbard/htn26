@@ -71,7 +71,7 @@ main QNX Raspberry Pi
 ```
 
 The host badge owns only the host lifecycle: its START action resets the three
-fixed-player session, starts the two-minute countdown, and emits START_GAME;
+fixed-player session, starts the four-minute countdown, and emits START_GAME;
 timeout emits GAME_END and resets the session. It does not own player intent,
 inventory, orders, scoring, or resulting game state. Player events are still
 forwarded to the Pi.

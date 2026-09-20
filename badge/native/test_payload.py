@@ -227,7 +227,9 @@ def scenario(nvs_error=0, radio_error=0, nfc_error=0, allocation_failure=False,
             assert "HTN26|GW|UP|0|0\n" in prints
             invoke(0x60, 8)
             assert packets[-1] == b'OC1|000001|G|S'
-            assert "HTN26|GAME|START_GAME|120|3\n" in prints
+            assert "HTN26|GAME|START_GAME|240|3\n" in prints
+            game_ticks, = struct.unpack('<I', cpu.mem_read(app + 288, 4))
+            assert game_ticks == 12000
             forwarded = 'HTN26|RX|%02x:%02x:%02x:%02x:%02x:%02x|%d|%s\n'
             incoming(b'OC1|876543|E|P2:ST:L:P'); invoke(0x5c)
             assert packets[-1] == b'OC1|876543|A|OK'

@@ -33,8 +33,8 @@ The host app stays in the foreground and shows status plus a `MM:SS` countdown.
 Press **START** to:
 
 1. clear the bounded radio queue and reset all three fixed-player session slots;
-2. start a 120-second countdown; and
-3. log `HTN26|GAME|START_GAME|120|3` and make the same lifecycle hint available
+2. start a 240-second countdown; and
+3. log `HTN26|GAME|START_GAME|240|3` and make the same lifecycle hint available
    to nearby player badges through the documented restricted radio channel.
 
 When the countdown reaches zero, the app clears the queue and all three player

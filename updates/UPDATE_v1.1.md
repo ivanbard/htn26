@@ -34,7 +34,7 @@ If all players are shaking at the same time we submit
 
 I don't care how players join so long as they get unique player numbers
 Ignore events sent before game starts. Actually, revision to v1, we should click game start on the host badge, and it broadcasts that to all badges, telling them to wipe their memory etc, and also the ui hears it on the serial and starts the game
-After two minutes the host badge should broadcast game end which also wipes everything
+After four minutes the host badge should broadcast game end which also wipes everything
 There's no retry, a failed order causes a penalty and the plate still gets consumed
 hopefully that shouldn't happen but it should keep trying to reconnect
 that shouldn't happen but assume it doesn't we can fix later

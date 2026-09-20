@@ -33,7 +33,7 @@ Owns:
 * phone-camera setup inference
 * station-zone evaluation
 * orders
-* cooking and order timers (the host badge owns the two-minute round lifecycle)
+* cooking and order timers (the host badge owns the four-minute round lifecycle)
 * scoring
 * health monitoring
 * UI API
@@ -467,7 +467,7 @@ Do not bury game rules inside camera code.
 ## Timers
 
 Cooking and order timers belong on the master Pi. The stationary host badge
-owns only the two-minute host round countdown and its START_GAME/GAME_END
+owns only the four-minute host round countdown and its START_GAME/GAME_END
 lifecycle records; the Pi must not invent a Pi-to-badge control path.
 
 Use a monotonic clock.

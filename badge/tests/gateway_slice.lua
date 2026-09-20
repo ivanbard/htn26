@@ -34,7 +34,7 @@ assert(#world.logs == before)
 
 -- Host end is likewise emitted by the host path, not injected by the smoke test.
 gateway.env.on_button(3, 1) -- START is ignored while the round is active
-world.tick(120000)
+world.tick(240000)
 world.settle()
 assert(player.shows("GAME ENDED"))
 assert(world.count("HTN26|HOST|CONTROL|OC1|000002|G|E") == 1)

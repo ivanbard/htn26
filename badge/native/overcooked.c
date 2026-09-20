@@ -51,7 +51,8 @@ _Static_assert(sizeof(App) == 300, "Update heap report when app size changes");
 #define STOVE_COOK_TICKS (STOVE_STEP_TICKS * 6)
 #define STOVE_DONE_TICKS (STOVE_COOK_TICKS + 100)
 #define STOVE_BURN_TICKS (STOVE_DONE_TICKS + 150)
-#define GAME_TICKS 6000
+#define GAME_SECONDS 240
+#define GAME_TICKS (GAME_SECONDS * 50)
 #define MAX_ATTEMPTS 3
 #define SHAKE_ABS_BITS 0x44c80000u /* 1600 mg; hardware calibration knob. */
 #define TAP_ABS_BITS 0x44960000u /* 1200 mg; hardware calibration knob. */
@@ -637,7 +638,7 @@ static void button(App *self, u32 event) {
     }
     if (self->phase != 2) return;
     if (self->role == ROLE_HOST && kind == 0 && key == 8 && !self->game_active && !self->wait_ticks) {
-        PRINT("HTN26|GAME|START_GAME|120|3\n");
+        PRINT("HTN26|GAME|START_GAME|240|3\n");
         apply_action(self, "GAME:START", 1); broadcast_control(self, 'S'); return;
     }
     if (key == 0) self->a_held = kind == 0;

@@ -1,6 +1,6 @@
 import { LocalFloorplanProvider, localPlan } from "./provider.mjs";
 
-const ROUND_SECONDS = 120;
+const ROUND_SECONDS = 240;
 const DEFAULT_ORDER_INTERVAL_SECONDS = 30;
 export const BURGER_RECIPES = Object.freeze([
   { id: "PLAIN_MEAT", name: "PLAIN MEAT BURGER", toppings: [], components: ["BUN", "MEAT"], gold: 100 },

@@ -73,7 +73,7 @@ player badge 1      player badge 2      player badge 3
 
 The host badge is the gateway between the player badges and the Pi.
 
-The host badge owns the two-minute round lifecycle, START_GAME/GAME_END records,
+The host badge owns the four-minute round lifecycle, START_GAME/GAME_END records,
 and reset of the three fixed-player session. The Pi owns authoritative game
 state, cooking and order timers, orders, score, and submission results.
 
@@ -165,7 +165,7 @@ Starting a round clears prior badge and game state before play begins.
 
 The host badge shows a countdown timer during the round.
 
-A round lasts approximately two minutes.
+A round lasts approximately four minutes.
 
 After the round duration, the host badge broadcasts game end to all badges and the Pi and UI.
 
@@ -226,7 +226,7 @@ These commands validate host-side behavior and do not claim physical badge, phon
 5. Cooking follows the 15-second, done, warning, and burnt timeline.
 6. All three players can perform the simultaneous shake submission.
 7. The Pi accepts or rejects the submission once and the UI shows the result.
-8. The host badge ends the round after approximately two minutes and all round state is wiped.
+8. The host badge ends the round after approximately four minutes and all round state is wiped.
 9. The first playable run completes using the reliable-enough radio assumption without cloud services.
 
 ## Repository layout
