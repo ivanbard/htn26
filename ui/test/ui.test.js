@@ -895,6 +895,26 @@ test("host commands move from scan directly to burger placement and round lifecy
   assert.equal(transport.snapshot().floorPlan.accepted, false);
 });
 
+test("the placement tour can return to the true opening screen before a round begins", async () => {
+  const transport = await approvedTransport(10_000);
+  const placementHtml = renderApp(transport.snapshot(), 10_000);
+
+  assert.match(placementHtml, /data-command="RESET_TO_OPENING">Back to start</);
+  await transport.command(GAME_ACTIONS.RESET_TO_OPENING);
+
+  const opening = transport.snapshot();
+  assert.equal(opening.setup.phase, SETUP_PHASES.IDLE);
+  assert.equal(opening.floorPlan.accepted, false);
+  assert.match(renderApp(opening, 10_000), /data-onboarding="welcome"/);
+
+  await transport.command(GAME_ACTIONS.START_HOST);
+  await transport.command(GAME_ACTIONS.SCAN_ROOM);
+  await transport.command(GAME_ACTIONS.START_GAME);
+  const before = transport.snapshot();
+  await transport.command(GAME_ACTIONS.RESET_TO_OPENING);
+  assert.deepEqual(transport.snapshot(), before, "the mock mirrors the server by never resetting a running round");
+});
+
 test("rejects setup commands in invalid phases without changing authoritative state", async () => {
   const transport = createMockTransport({ now: () => 10_000 });
 

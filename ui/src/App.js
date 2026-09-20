@@ -1326,6 +1326,7 @@ function TourIntroView({ state, now, onCommand }) {
             h("div", { className: "tour-actions" },
               h("button", { type: "button", className: "tour-primary-button", "data-tour-action": "start", autoFocus: true, onClick: startTour }, "Start Tour"),
               h("button", { type: "button", className: "tour-skip-button", "data-command": GAME_ACTIONS.START_GAME, onClick: () => onCommand?.(GAME_ACTIONS.START_GAME) }, "Skip to the Game"),
+              h("button", { type: "button", className: "tour-skip-button", "data-command": GAME_ACTIONS.RESET_TO_OPENING, onClick: () => onCommand?.(GAME_ACTIONS.RESET_TO_OPENING) }, "Back to start"),
             ),
           ),
         ),

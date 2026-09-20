@@ -186,6 +186,7 @@ snapshot. It also accepts a bare command string or `{ "action": "COMMAND" }`.
 | `START_GAME` | Prepares the round -> `waiting-for-host-start`; does not start timer. It is idempotent if the host has already started the round, so a browser/serial race does not fail the setup flow. |
 | `END_GAME` | Ends active round -> `ended`. |
 | `RESET_GAME` | Clears round; returns to `burger-placement` if layout remains accepted, otherwise `idle`. |
+| `RESET_TO_OPENING` | Clears an unstarted setup and returns to `idle`; rejects a running round with `409` rather than interrupting it. |
 
 `POST /api/floorplan/review` accepts `{ "allowEmpty": true }` for a local
 no-photo fixture and returns a `layout-proposed` snapshot.

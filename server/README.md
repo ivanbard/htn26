@@ -138,11 +138,11 @@ and `POST /api/layout/generate`.
 | `GET /api/health` | none | `{ "ok": true, "state": health }` | `500` generic server error |
 | `POST /api/serial` | JSON `{ "line": "HTN26|..." }` | parser result plus current `state`; invalid protocol records remain parser results | `400` missing/non-string line or invalid JSON |
 | `POST /api/players/assign` | JSON `{ "mac": "AA:BB:CC:DD:EE:FF", "playerId": "p1" }` | updated snapshot | `400` invalid MAC/player or JSON |
-| `POST /api/command` | JSON command described below | updated snapshot | `400` invalid JSON or HTTP `SCAN_ROOM`; `409` valid request that does not fit the current state (for example `START_GAME` before approval), with the reason in `error`; `500` unsupported command |
+| `POST /api/command` | JSON command described below | updated snapshot | `400` invalid JSON or HTTP `SCAN_ROOM`; `409` valid request that does not fit the current state (for example `START_GAME` before approval), with the reason in `error`; `400` unsupported command (the command is named in `error`) |
 
 The command body is `{ "type": "COMMAND" }`. Supported server commands are
 `START_HOST`, `SCAN_ROOM`, `APPROVE_LAYOUT` (alias `ACCEPT_LAYOUT`),
-`START_GAME`, `END_GAME`, and `RESET_GAME`. `START_GAME` requires an explicitly
+`START_GAME`, `END_GAME`, `RESET_GAME`, and `RESET_TO_OPENING`. `START_GAME` requires an explicitly
 approved proposal. On this root server, `SCAN_ROOM` creates the deterministic
 local proposal; the photo-backed path uses `POST /api/layout/generate` and
 then approval. See [`API.md`](API.md) for the complete lifecycle.

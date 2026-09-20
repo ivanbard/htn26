@@ -380,6 +380,33 @@ test("host and browser starts are safe when either one arrives first", async () 
   assert.equal(recovered.snapshot(now + 1_001).setup.phase, "running");
 });
 
+test("returning to the opening screen clears a pre-game placement without interrupting a live round", async () => {
+  let now = 90_000;
+  const options = { provider: new LocalFloorplanProvider({ now: () => now }), now: () => now };
+  const setup = new ServerProjection(options);
+  await setup.proposeFloorplan({ photos: [{ id: "fixture" }] }, now);
+  setup.approveFloorplan(true, now);
+  assert.equal(setup.snapshot(now).setup.phase, "burger-placement");
+
+  const opening = setup.command("RESET_TO_OPENING", {}, now);
+  assert.equal(opening.setup.phase, "idle");
+  assert.equal(opening.floorPlan.accepted, false);
+  assert.equal(opening.burgerLevel.status, "not-generated");
+  assert.equal(opening.timer.status, "ready");
+  assert.equal(opening.timer.remainingSeconds, 240);
+
+  const running = new ServerProjection(options);
+  await running.proposeFloorplan({ photos: [{ id: "fixture" }] }, now);
+  running.approveFloorplan(true, now);
+  running.ingestHostControl({ control: "START", durationSeconds: 240, framing: "legacy-game" }, now);
+  assert.equal(running.snapshot(now).setup.phase, "running");
+  assert.throws(
+    () => running.command("RESET_TO_OPENING", {}, now),
+    (error) => error?.statusCode === 409 && /end the live round before returning to the opening screen/i.test(error.message),
+  );
+  assert.equal(running.snapshot(now).setup.phase, "running");
+});
+
 test("round timer ends cleanly and resets held, order, and station state", () => {
   let now = 10_000;
   const projection = new ServerProjection({ now: () => now, roundSeconds: 3, orderIntervalSeconds: 20, orderPatienceSeconds: 20, random: () => 0 });
@@ -983,9 +1010,10 @@ test("a request that does not fit the game's state gets a 409 with the real reas
     assert.equal(start.status, 409);
     assert.match((await start.json()).error, /approve the floorplan before preparing the game/);
 
-    // A genuine failure is still a generic 500 (nothing internal leaks).
+    // An unknown command is a client error and names the command (this is what a
+    // browser newer than the server sees, e.g. RESET_TO_OPENING on an old server).
     const unknown = await post("/api/command", { type: "NOT_A_COMMAND" });
-    assert.equal(unknown.status, 500);
-    assert.deepEqual(await unknown.json(), { error: "server error" });
+    assert.equal(unknown.status, 400);
+    assert.deepEqual(await unknown.json(), { error: "unsupported command: NOT_A_COMMAND" });
   });
 });

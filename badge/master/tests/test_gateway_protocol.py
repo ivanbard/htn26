@@ -36,6 +36,7 @@ class GatewayProtocolTests(LuaTestMixin, unittest.TestCase):
             'assert(gateway_test.valid_player_packet("OC2|1|N|ING:TOM"))\n'
             'assert(gateway_test.valid_player_packet("OC2|0042|M|CHOP"))\n'
             'assert(gateway_test.valid_player_packet("OC2|000043|E|P2:PU:R"))\n'
+            'assert(gateway_test.valid_player_packet("OC2|000044|P|P2"))\n'
             'assert(gateway_test.valid_player_packet("OC2|4294967295|H|READY"))'
         )
 

@@ -748,7 +748,15 @@ export class ServerProjection {
     return this.snapshot(now);
   }
 
-  resetGame(now = this.now()) {
+  resetGame(now = this.now(), { returnToOpening = false } = {}) {
+    if (returnToOpening) {
+      // A setup may have been left at the placement/tour screen by an earlier
+      // fixture run. Clear its acceptance atomically so the next browser view
+      // is the real opening screen, not the old prepared kitchen.
+      this._state.floorPlan.accepted = false;
+      this._state.roomLayout = null;
+      this._state.proposedRoomLayout = null;
+    }
     this._roundStartedAt = null;
     this._roundDurationSeconds = this.roundSeconds;
     for (const player of this._state.players) this._clearPlayer(player, now);
@@ -761,12 +769,14 @@ export class ServerProjection {
     this._resetEconomy();
     this._state.timer = { status: "ready", remainingSeconds: this.roundSeconds, totalSeconds: this.roundSeconds };
     this._state.clock = { ...this._state.timer };
-    this._state.setup.phase = this._state.floorPlan.accepted ? "burger-placement" : "idle";
-    this._state.setup.message = `Round reset. Send a host START record when ${this._state.playerCount === 1 ? "the active player is" : "the active players are"} ready.`;
-    this._state.burgerLevel.status = this._state.floorPlan.accepted ? "placement-ready" : "not-generated";
+    this._state.setup.phase = returnToOpening ? "idle" : (this._state.floorPlan.accepted ? "burger-placement" : "idle");
+    this._state.setup.message = returnToOpening
+      ? "Ready to start a new game."
+      : `Round reset. Send a host START record when ${this._state.playerCount === 1 ? "the active player is" : "the active players are"} ready.`;
+    this._state.burgerLevel.status = returnToOpening || !this._state.floorPlan.accepted ? "not-generated" : "placement-ready";
     this._state.eventHistory = [];
     this._historySequence = 0;
-    this._record("round-reset", "Round state reset", now);
+    this._record("round-reset", returnToOpening ? "Returned to the opening screen" : "Round state reset", now);
     this._nextOrderAt = null;
     this._pendingTransfer = null;
     this._pendingSubmission = null;
@@ -812,9 +822,16 @@ export class ServerProjection {
         return this.snapshot(now);
       case "RESET_GAME":
         return this.resetGame(now);
+      case "RESET_TO_OPENING":
+        if (this._state.setup.phase === "running" || this._state.timer.status === "running") {
+          throw conflict("end the live round before returning to the opening screen");
+        }
+        return this.resetGame(now, { returnToOpening: true });
 
       default:
-        throw new Error(`unsupported command: ${type}`);
+        // A client mistake (or a browser newer than this server), not a server fault:
+        // say which command, so it is not hidden behind a bare "server error".
+        throw Object.assign(new Error(`unsupported command: ${type}`), { statusCode: 400 });
     }
   }
 

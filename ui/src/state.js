@@ -47,6 +47,7 @@ export const GAME_ACTIONS = Object.freeze({
   START_GAME: "START_GAME",
   END_GAME: "END_GAME",
   RESET_GAME: "RESET_GAME",
+  RESET_TO_OPENING: "RESET_TO_OPENING",
   DELIVERY_SUCCESS: "DELIVERY_SUCCESS",
   DELIVERY_FAILURE: "DELIVERY_FAILURE",
 });
@@ -189,6 +190,8 @@ export function canRunAction(state, action) {
       return phase === SETUP_PHASES.RUNNING;
     case GAME_ACTIONS.RESET_GAME:
       return true;
+    case GAME_ACTIONS.RESET_TO_OPENING:
+      return phase !== SETUP_PHASES.RUNNING;
     default:
       return false;
   }
