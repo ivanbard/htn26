@@ -58,10 +58,10 @@ orders, scoring, and the shared game projection.
 
 One badge is connected by USB to the captain's laptop for the current launch.
 
-This badge is the radio gateway between the three player badges and the laptop
+This badge is the radio gateway between one to three player badges and the laptop
 server. A QNX/Pi server remains only a possible future target.
 
-V1 submission is a simultaneous-shake action between the three fixed players.
+V1 submission is a simultaneous-shake action between the active fixed players.
 There is no delivery-zone or serving-plate NFC contract in the current product.
 
 The gateway badge runs its app continuously while a game is being hosted.

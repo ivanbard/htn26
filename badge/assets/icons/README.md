@@ -65,7 +65,7 @@ them to 36×20 and 36×12, then stack them at `(3,5)` and `(3,25)` in a transpar
 The ten images contain 52,920 bytes of RGB565A8 pixels. `verification.json`
 records the generated-header hash, total payload DROM, and remaining factory
 capacity for each build. The pixels are flash-mapped const data, not 52,920
-bytes in the 308-byte persistent app object. Build/emulator checks validate the
+bytes in the 312-byte persistent app object. Build/emulator checks validate the
 selected descriptors and capacity; they do not prove physical pixel rendering.
 
 ## Lua display-test representation

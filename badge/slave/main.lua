@@ -417,17 +417,21 @@ local function parse_control(payload)
 	if type(payload) ~= "string" or #payload > RADIO_BYTES then
 		return nil
 	end
-	local sequence, code = string.match(payload, "^OC2|(%d+)|G|([SE])$")
+	local sequence, code, count = string.match(payload, "^OC2|(%d+)|G|([SE])|([1-3])$")
 	if sequence then
-		return tonumber(sequence), code
+		return tonumber(sequence), code, tonumber(count)
+	end
+	sequence, code = string.match(payload, "^OC2|(%d+)|G|([SE])$")
+	if sequence then
+		return tonumber(sequence), code, 3
 	end
 	sequence, code = string.match(payload, "^OC2|(%d+)|G|(START)$")
 	if sequence then
-		return tonumber(sequence), "S"
+		return tonumber(sequence), "S", 3
 	end
 	sequence = string.match(payload, "^OC2|(%d+)|G|(END)$")
 	if sequence then
-		return tonumber(sequence), "E"
+		return tonumber(sequence), "E", 3
 	end
 	return nil
 end
@@ -479,6 +483,7 @@ end
 local player_no = 0
 local sequence = 0
 local active = false
+local active_player_count = 3
 local setup_mode = false
 local state = new_state()
 local a_down, b_down, left_down, right_down, down_down, up_down = false, false, false, false, false, false
@@ -652,7 +657,7 @@ local function show_invalid(reason)
 	end
 end
 
-local function start_game(control_sequence, code)
+local function start_game(control_sequence, code, player_count)
 	if setup_mode then
 		set_status("PLAYER NOT SAVED", "Choose 1, 2, or 3 and press A before start", 0xffcc66)
 		return
@@ -660,10 +665,15 @@ local function start_game(control_sequence, code)
 	if not accept_control_sequence(control_sequence) then
 		return
 	end
-	active = true
+	active_player_count = math.max(1, math.min(3, math.floor(player_count or 3)))
+	active = player_no <= active_player_count
 	reset_local_state()
-	set_status("GAME STARTED", "State cleared; waiting for pantry or fridge", 0x8ed8ff)
-	emit("READY")
+	if active then
+		set_status("GAME STARTED", "State cleared; waiting for pantry or fridge", 0x8ed8ff)
+		emit("READY")
+	else
+		set_status("SPECTATOR", "This round is using " .. tostring(active_player_count) .. " player" .. (active_player_count == 1 and "" or "s"), 0x8ed8ff)
+	end
 end
 
 local function end_game(control_sequence, code)
@@ -676,13 +686,13 @@ local function end_game(control_sequence, code)
 end
 
 local function mark_ready(number, now)
-	if number >= 1 and number <= 3 then
+	if number >= 1 and number <= active_player_count then
 		ready_until[number] = now + READY_MS
 	end
 end
 
 local function all_players_ready(values, now)
-	for i = 1, 3 do
+	for i = 1, active_player_count do
 		if not values[i] or values[i] < now then
 			return false
 		end
@@ -699,11 +709,11 @@ local function maybe_commit_submission(now)
 	end
 	submission_committed = true
 	discard_state(state)
-	set_status("THREE READY - CLEARED", "Every fixed player discarded held state", 0x66ff88)
+	set_status("TEAM READY - CLEARED", "Every active player discarded held state", 0x66ff88)
 end
 
 local function handle_peer_event(sequence_number, number, action, now)
-	if number == player_no or number < 1 or number > 3 then
+	if number == player_no or number < 1 or number > active_player_count then
 		return
 	end
 	if sequence_number <= (last_peer_sequence[number] or 0) then
@@ -724,7 +734,7 @@ local function handle_peer_event(sequence_number, number, action, now)
 				submit_record = { player = number, summary = summary, deadline = now + READY_MS }
 			end
 			mark_ready(number, now)
-			set_status("SUBMIT FROM PLAYER " .. tostring(number), "Waiting for all 3 shakes", 0x8ed8ff)
+				set_status("SUBMIT FROM PLAYER " .. tostring(number), "Waiting for " .. tostring(active_player_count) .. " shakes", 0x8ed8ff)
 		else
 			local transfer_value = string.match(action, "^X:(.+)$")
 			if transfer_value and now <= transfer_until then
@@ -744,10 +754,10 @@ local function handle_peer_event(sequence_number, number, action, now)
 end
 
 local function handle_radio_payload(payload, now)
-	local control_sequence, code = parse_control(payload)
+	local control_sequence, code, player_count = parse_control(payload)
 	if control_sequence and (code == "S" or code == "E") then
 		if code == "S" then
-			start_game(control_sequence, code)
+			start_game(control_sequence, code, player_count)
 		else
 			end_game(control_sequence, code)
 		end

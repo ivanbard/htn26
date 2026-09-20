@@ -749,7 +749,7 @@ export class ServerProjection {
     this._state.timer = { status: "ready", remainingSeconds: this.roundSeconds, totalSeconds: this.roundSeconds };
     this._state.clock = { ...this._state.timer };
     this._state.setup.phase = this._state.floorPlan.accepted ? "burger-placement" : "idle";
-    this._state.setup.message = "Round reset. Send a host START record when the three fixed players are ready.";
+    this._state.setup.message = `Round reset. Send a host START record when ${this._state.playerCount === 1 ? "the active player is" : "the active players are"} ready.`;
     this._state.burgerLevel.status = this._state.floorPlan.accepted ? "placement-ready" : "not-generated";
     this._state.eventHistory = [];
     this._historySequence = 0;

@@ -456,7 +456,7 @@ def scenario(nvs_error=0, radio_error=0, nfc_error=0, allocation_failure=False,
                 hardware["motion"] = "shake"; invoke(0x5c); hardware["motion"] = "rest"
                 assert cpu.mem_read(app + 228, 1) == b'\0'
                 assert_icon(None)
-                assert 'THREE READY - HELD STATE CLEARED' in texts
+                assert 'TEAM READY - HELD STATE CLEARED' in texts
                 acknowledge('READY')
 
                 # Full meat path: raw -> chopped -> stove -> cooked -> transferred.

@@ -171,8 +171,8 @@ starting a round.
 The host badge logs:
 
 ```text
-HTN26|GAME|START_GAME|240|3
-HTN26|GAME|GAME_END|3
+HTN26|GAME|START_GAME|240|<1-3>
+HTN26|GAME|GAME_END|<1-3>
 ```
 
 It forwards player radio events as records beginning with `HTN26|RX|...`. The
@@ -189,7 +189,7 @@ After applying and verifying the same native candidate on each player badge:
 4. Keep Overcooked in the foreground during the round.
 
 Native selection is per app boot; repeat it after reopening. There are exactly
-three fixed players and no late joins. For rollback, restore the pre-write
+one to three fixed players and no late joins. For rollback, restore the pre-write
 factory partition on all four badges, then follow `badge/master/README.md` and
 `badge/slave/README.md` to select the retained Lua apps.
 

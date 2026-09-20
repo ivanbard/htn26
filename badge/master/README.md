@@ -36,18 +36,18 @@ host ACK packets, which the host never forwards to the server.
 ## Host lifecycle
 
 The host app stays in the foreground and shows status plus a `MM:SS` countdown.
-Press **START** to:
+Use **LEFT/RIGHT** to choose one to three active players, then press **START** to:
 
-1. clear the bounded radio queue and reset all three fixed-player session slots;
+1. clear the bounded radio queue and reset the fixed-player session slots;
 2. start a 240-second countdown; and
-3. log `HTN26|GAME|START_GAME|240|3` and make the same lifecycle hint available
+3. log `HTN26|GAME|START_GAME|240|<1-3>` and make the same lifecycle hint available
    to nearby player badges through the documented restricted radio channel.
 
-When the countdown reaches zero, the app clears the queue and all three player
+When the countdown reaches zero, the app clears the queue and all active player
 slots, stops accepting player events, and logs:
 
 ```text
-HTN26|GAME|GAME_END|3
+HTN26|GAME|GAME_END|<1-3>
 ```
 
 Pressing START after the end begins a fresh session. Events received while the

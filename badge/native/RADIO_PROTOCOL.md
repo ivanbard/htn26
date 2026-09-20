@@ -45,7 +45,7 @@ Native mode preserves the current player payload and host-control shapes:
 
 ```text
 OC2|012345|E|P2:PU:R
-OC2|000001|G|S
+OC2|000001|G|S|2
 OC2|012345|A|OK
 ```
 
@@ -94,8 +94,8 @@ HTN26|RX|<sender_mac>|<rssi>|OC2|012345|E|P2:PU:R
 
 The host emits `HTN26|GW|UP|<forwarded>|<drops>` every 250 ticks and emits
 `HTN26|GW|DOWN|0|0` if its NVS preflight or radio initialization fails. START
-emits `HTN26|GAME|START_GAME|240|3` and `OC2|000001|G|S`; timeout emits
-`HTN26|GAME|GAME_END|3` and `OC2|000002|G|E`. Events are ignored before start.
+emits `HTN26|GAME|START_GAME|240|<1-3>` and `OC2|000001|G|S|<1-3>`; timeout emits
+`HTN26|GAME|GAME_END|<1-3>` and `OC2|000002|G|E|<1-3>`. Events are ignored before start.
 The laptop server remains authoritative for the game countdown, inventory,
 orders, score, and submission results. QNX is only a possible future target,
 not a current deployment requirement or validation claim.

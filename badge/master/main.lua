@@ -6,7 +6,7 @@
 
 local GAME_DURATION_SECONDS = 240
 local GAME_DURATION_MS = GAME_DURATION_SECONDS * 1000
-local PLAYER_COUNT = 3
+local MAX_PLAYER_COUNT = 3
 local MAX_RADIO_PAYLOAD = 44
 local MAX_PACKET_SEQUENCE = 4294967295
 local QUEUE_CAPACITY = 8
@@ -25,6 +25,7 @@ local session_number = 0
 local session_received = 0
 local session_forwarded = 0
 local control_sequence = 0
+local player_count = 3
 
 local radio_enabled = false
 local queue_mac = {}
@@ -83,7 +84,7 @@ local function reset_queue()
 end
 
 local function reset_players()
-  for index = 1, PLAYER_COUNT do
+  for index = 1, MAX_PLAYER_COUNT do
     players[index] = {
       sender = nil,
       received = 0,
@@ -171,18 +172,18 @@ local function serial_rx_frame(mac, rssi, payload)
   return "HTN26|RX|" .. mac .. "|" .. tostring(rssi) .. "|" .. payload
 end
 
-local function serial_start_frame()
-  return "HTN26|GAME|START_GAME|" .. tostring(GAME_DURATION_SECONDS) .. "|3"
+local function serial_start_frame(count)
+  return "HTN26|GAME|START_GAME|" .. tostring(GAME_DURATION_SECONDS) .. "|" .. tostring(count or player_count)
 end
 
-local function serial_end_frame()
-  return "HTN26|GAME|GAME_END|3"
+local function serial_end_frame(count)
+  return "HTN26|GAME|GAME_END|" .. tostring(count or player_count)
 end
 
-local function lifecycle_radio_frame(kind)
+local function lifecycle_radio_frame(kind, count)
   control_sequence = control_sequence + 1
   local code = kind == "START_GAME" and "S" or "E"
-  return string.format("OC2|%06d|G|%s", control_sequence, code)
+  return string.format("OC2|%06d|G|%s|%d", control_sequence, code, count or player_count)
 end
 
 local function enqueue_packet(mac, rssi, payload)
@@ -279,7 +280,7 @@ end
 
 local function current_status()
   if game_active then return "GAME ACTIVE" end
-  if session_number == 0 then return "HOST READY - PRESS START" end
+  if session_number == 0 then return "HOST READY - " .. tostring(player_count) .. " PLAYER" .. (player_count == 1 and "" or "S") .. " / PRESS START" end
   return "GAME ENDED - PRESS START"
 end
 
@@ -354,14 +355,14 @@ local function emit_lifecycle(kind)
   -- or acknowledgement path in this app.
   local serial_frame
   if kind == "START_GAME" then
-    serial_frame = serial_start_frame()
+    serial_frame = serial_start_frame(player_count)
   else
-    serial_frame = serial_end_frame()
+    serial_frame = serial_end_frame(player_count)
   end
   badge.sys.log(serial_frame)
   local broadcast_queued = false
   if radio_enabled then
-    local payload = lifecycle_radio_frame(kind)
+    local payload = lifecycle_radio_frame(kind, player_count)
     broadcast_queued = badge.radio.send(payload) == true
     if broadcast_queued then
       badge.sys.log("HTN26|HOST|CONTROL|" .. payload)
@@ -383,7 +384,7 @@ end
 
 local function end_game()
   if not game_active then return false end
-  -- Drop queued player events and clear all three player slots before the end
+  -- Drop queued player events and clear all player slots before the end
   -- record, so no event from the old round can leak into the next one.
   game_active = false
   game_ends_at = 0
@@ -430,7 +431,7 @@ function on_enter(root)
   event_label:style({text_font = 14, text_align = "center"})
   event_label:align("top_mid", 0, EVENT_TOP_Y)
 
-  local hint_label = badge.ui.label(root, "START new round   HOME exits")
+  local hint_label = badge.ui.label(root, "LEFT/RIGHT players   START round   HOME exits")
   hint_label:style({text_font = 14, text_align = "center"})
   hint_label:align("bottom_mid", 0, -12)
 
@@ -467,7 +468,14 @@ end
 
 function on_button(button, kind)
   if kind ~= badge.input.KIND.PRESSED then return end
-  if button == badge.input.BUTTON.START then
+  local B = badge.input.BUTTON
+  if not game_active and button == B.LEFT then
+    player_count = math.max(1, player_count - 1)
+    update_display(true)
+  elseif not game_active and button == B.RIGHT then
+    player_count = math.min(MAX_PLAYER_COUNT, player_count + 1)
+    update_display(true)
+  elseif button == B.START then
     if start_game(badge.sys.ms()) then
       update_display(true)
     end

@@ -450,7 +450,7 @@ static void mark_ready(App *self, int player) {
     if (all_ready) {
         self->held = self->plate = self->has_plate = 0;
         self->process_from = self->process_to = 0; self->process_ticks = 0;
-        if (self->status) LABEL_TEXT(self->status, "THREE READY - HELD STATE CLEARED");
+        if (self->status) LABEL_TEXT(self->status, "TEAM READY - HELD STATE CLEARED");
     }
 }
 

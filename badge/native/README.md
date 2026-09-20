@@ -86,8 +86,9 @@ which is the memory-critical difference from launching either Lua app.
    to choose host mode. Host mode starts radio without NFC and emits
    `HTN26|GW|UP|0|0` on success or `HTN26|GW|DOWN|0|0` on failure.
 3. After all players show waiting state, press **START** again on the host. It
-   logs `HTN26|GAME|START_GAME|240|3`, broadcasts `OC2|000001|G|S`, counts down
-   four minutes, then logs `HTN26|GAME|GAME_END|3` and broadcasts the matching
+   uses LEFT/RIGHT to choose one to three active players, then logs
+   `HTN26|GAME|START_GAME|240|<1-3>` and broadcasts `OC2|000001|G|S|<1-3>`,
+   counts down four minutes, then logs `HTN26|GAME|GAME_END|<1-3>` and broadcasts the matching
    end control. Events before start are ignored.
 
 The app continuously draws the player's authoritative local held state, plate
@@ -105,7 +106,7 @@ bottom assets, while `BURNT_MEAT` consumes the independent named
 documented temporary cooked-meat placeholder until dedicated burnt artwork is
 supplied. The payload uses one reusable image widget rather than ten runtime
 image objects or the Lua display test's 196-box grid. Current build metadata
-records 26,295 bytes of total payload DROM and a 308-byte permanent app object.
+records 26,295 bytes of total payload DROM and a 312-byte permanent app object.
 The linker and builder limit live constants to 30,880 bytes (`0x78A0`), ending
 before `0x3C270000`. The original 42×42 icon build put its registration log at
 `0x3C275EFC` and caused a reproducible MMU-entry boot panic on COM7. The 64 KiB
@@ -179,7 +180,7 @@ A TLSF `block_next` / `!block_is_last` assertion means heap metadata was already
 corrupted. It is not safe to classify that panic as a malformed OC2 record, and
 the compiled-callback emulator cannot reproduce the stock allocator, USB
 console, BLE allocator, or LVGL heap. Its DROP stress coverage does guard the
-308-byte app object and executes the packet, button, motion, retry, render, and
+312-byte app object and executes the packet, button, motion, retry, render, and
 release paths without an out-of-bounds app-object write.
 
 For an affected badge, power it off or disconnect USB and close every IDE,
