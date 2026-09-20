@@ -37,7 +37,7 @@ export const GAME_ACTIONS = Object.freeze({
   START_HOST: "START_HOST",
   SCAN_ROOM: "SCAN_ROOM",
   APPROVE_LAYOUT: "APPROVE_LAYOUT",
-  // Kept as a protocol alias for existing master-Pi adapters.
+  // Kept as a protocol alias for existing laptop-server adapters.
   ACCEPT_LAYOUT: "APPROVE_LAYOUT",
   RESCAN: "RESCAN",
   START_GAME: "START_GAME",

@@ -1,8 +1,7 @@
 import { SETUP_PHASES } from "./state.js";
 
 /**
- * The version emitted by the current master-Pi/mock snapshot shape.
- * Version is checked when supplied, but is not fabricated for legacy snapshots.
+ * The schema version shared by the laptop server and offline mock.
  */
 export const FRONTEND_SNAPSHOT_VERSION = 2;
 export const SNAPSHOT_VERSION = FRONTEND_SNAPSHOT_VERSION;
@@ -38,7 +37,7 @@ export const FRONTEND_SNAPSHOT_FIELD_CONTRACT = Object.freeze({
 });
 
 export const FRONTEND_SNAPSHOT_CONTRACT = Object.freeze({
-  version: FRONTEND_SNAPSHOT_VERSION,
+  schemaVersion: FRONTEND_SNAPSHOT_VERSION,
   requiredTopLevelFields: FRONTEND_SNAPSHOT_FIELDS,
   fields: FRONTEND_SNAPSHOT_FIELD_CONTRACT,
   optionalTopLevelFields: Object.freeze(["orders"]),
@@ -197,7 +196,7 @@ export function validateFloorPlanContract(floorPlan) {
 
 /**
  * Validate only the stable top-level boundary of a snapshot.
- * Nested payloads remain extensible so existing master-Pi data is preserved.
+ * Nested payloads remain extensible so existing laptop-server data is preserved.
  */
 export function validateFrontendSnapshot(snapshot) {
   const missing = [];
@@ -268,15 +267,22 @@ export function validateFrontendSnapshot(snapshot) {
     }
   }
 
-  if (Object.prototype.hasOwnProperty.call(snapshot, "version")
-    && (snapshot.version !== FRONTEND_SNAPSHOT_VERSION
-      || !Number.isInteger(snapshot.version))) {
+  if (Object.prototype.hasOwnProperty.call(snapshot, "schemaVersion")
+    && (snapshot.schemaVersion !== FRONTEND_SNAPSHOT_VERSION
+      || !Number.isInteger(snapshot.schemaVersion))) {
     const error = invalidField(
-      "version",
+      "schemaVersion",
       FRONTEND_SNAPSHOT_VERSION,
-      describeValue(snapshot.version),
+      describeValue(snapshot.schemaVersion),
       `Unsupported snapshot version: expected ${FRONTEND_SNAPSHOT_VERSION}.`,
     );
+    invalid.push(error);
+    errors.push(error);
+  }
+
+  if (Object.prototype.hasOwnProperty.call(snapshot, "version")
+    && (!Number.isInteger(snapshot.version) || snapshot.version < 1)) {
+    const error = invalidField("version", "positive integer revision", describeValue(snapshot.version), "Snapshot revision must be a positive integer.");
     invalid.push(error);
     errors.push(error);
   }

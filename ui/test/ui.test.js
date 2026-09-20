@@ -296,6 +296,15 @@ test("renders gameplay as a framed room board with state shown on each station",
   await transport.command(GAME_ACTIONS.START_GAME);
   const state = transport.snapshot();
   state.floorPlan.stations[0].x = 2;
+  state.players[1] = {
+    ...state.players[1],
+    heldItem: "RAW_MEAT",
+    inventory: ["RAW_MEAT"],
+    actionState: "chopping",
+    location: "cutting-board",
+    position: { x: 23.5, y: 74.25 },
+  };
+  state.submissions = [{ id: "submission-1", playerId: "p1", status: "failure", message: "WRONG BURGER", penalty: -25, points: -25 }];
   const html = renderApp(state, 1_000);
 
   assert.match(html, /data-display-mode="gameplay"/);
@@ -305,7 +314,7 @@ test("renders gameplay as a framed room board with state shown on each station",
   assert.match(html, /STOVE 1/);
   assert.match(html, /STOVE 2/);
   assert.match(html, /CHOP 2/);
-  assert.match(html, /02:00/);
+  assert.match(html, /04:00/);
   assert.match(html, /class="game-board panel\s/);
   assert.match(html, /class="board-score"/);
   assert.doesNotMatch(html, /LIVE ACTIVITY/);
@@ -331,6 +340,12 @@ test("renders gameplay as a framed room board with state shown on each station",
   assert.match(html, /data-player="p2"[\s\S]*?chef-player-blue\.svg/);
   assert.match(html, /data-player="p3"[\s\S]*?<span class="player-tag">P3<\/span>/);
   assert.equal((html.match(/data-player-path="barrier-safe"/g) || []).length, 3);
+  assert.equal((html.match(/data-player-card=/g) || []).length, 3);
+  assert.match(html, /data-player-card="p2"[^>]*data-held-item="RAW_MEAT"[^>]*data-action-state="chopping"/);
+  assert.match(html, /data-player-card="p1"[^>]*data-submission-status="failure"/);
+  assert.match(html, /RAW MEAT/);
+  assert.match(html, /CHOPPING/);
+  assert.match(html, /WRONG BURGER · -25/);
   assert.match(html, /style="left:[^;]+%;top:[^;]+%;width:[^;]+%;height:[^;]+%" data-station="cheese-source"/);
   assert.ok(html.indexOf('class="game-board panel') < html.indexOf('data-node-id="20:2"'));
   assert.ok(html.indexOf('data-node-id="39:26"') < html.indexOf('class="game-board-score"'));
@@ -442,23 +457,23 @@ test("keeps the room mirror geometry aligned to its normalized display bounds", 
   assert.equal(validateFrontendSnapshot(state).valid, true);
 });
 
-test("marks old or missing player tracking and stale worker health", () => {
+test("renders only event-inferred player locations", () => {
   const state = createInitialMockState(1_000);
   state.setup.phase = SETUP_PHASES.RUNNING;
   state.floorPlan.accepted = true;
   state.clock.status = "running";
-  state.players[1].tracking.status = "stale";
-  delete state.players[0].position;
-  state.health.workers[1].lastSeenAt = 0;
+  state.players[0].location = "bottom";
+  state.players[1].location = "cutting-board";
+  state.players[1].position = { x: 23.5, y: 74.25 };
+  state.players[2].location = "bump-middle";
+  state.players[2].position = { x: 50, y: 58 };
 
   const html = renderApp(state, 7_000);
 
-  assert.match(html, /data-player="p1" data-stale="true"/);
-  assert.match(html, /aria-label="PLAYER 1, location unavailable"/);
-  assert.doesNotMatch(html, /data-player="p1"[^>]*style="left:0%;top:0%;/);
-  assert.match(html, /data-player="p2" data-stale="true"/);
-  assert.match(html, /aria-label="PLAYER 2, last scan is stale"/);
-  assert.doesNotMatch(html, />TRACKING (?:LOST|STALE)</);
+  assert.match(html, /data-player="p1" data-location="bottom"[^>]*aria-label="PLAYER 1, event-inferred bottom"/);
+  assert.match(html, /data-player="p2" data-location="cutting-board"[^>]*aria-label="PLAYER 2, event-inferred cutting-board"/);
+  assert.match(html, /data-player="p3" data-location="bump-middle"[^>]*aria-label="PLAYER 3, event-inferred bump-middle"/);
+  assert.doesNotMatch(html, /tracking (?:lost|stale)/i);
   assert.doesNotMatch(html, /TRACKING DEGRADED/);
   assert.doesNotMatch(html, /LOCAL SYSTEM HEALTH/);
 });
@@ -494,7 +509,7 @@ test("host commands follow start, scan, approval, burger placement, and round li
   await transport.command(GAME_ACTIONS.START_GAME);
   assert.equal(transport.snapshot().setup.phase, SETUP_PHASES.RUNNING);
   assert.equal(transport.snapshot().clock.status, "running");
-  assert.equal(transport.snapshot().clock.remainingSeconds, 120);
+  assert.equal(transport.snapshot().clock.remainingSeconds, 240);
 
   await transport.command(GAME_ACTIONS.END_GAME);
   assert.equal(transport.snapshot().setup.phase, SETUP_PHASES.ENDED);
@@ -566,7 +581,7 @@ test("reset returns to the idle authoritative state from every setup phase", asy
     assert.equal(state.score.value, 0);
     assert.equal(state.score.delivered, 0);
     assert.equal(state.clock.status, "ready");
-    assert.equal(state.clock.remainingSeconds, 112);
+    assert.equal(state.clock.remainingSeconds, 240);
     assert.equal(state.order.status, "active");
   }
 });
@@ -647,6 +662,8 @@ test("failed delivery applies the documented penalty and does not complete the o
   assert.equal(state.order.status, "active");
   assert.equal(state.serving.lastEvent.status, "failure");
   assert.equal(state.serving.lastEvent.penalty, 25);
+  assert.equal(state.serving.lastEvent.points, -25);
+  assert.equal(state.submissions.length, 1);
 });
 
 test("unknown commands do not mutate state", async () => {
@@ -713,6 +730,8 @@ test("renders a rejected burger's live penalty and updates the score", async () 
   assert.match(html, /class="delivery-toast is-failure"/);
   assert.match(html, /WRONG BURGER/);
   assert.match(html, /-25 PENALTY/);
+  assert.match(html, /data-player-card="p1"[^>]*data-submission-status="failure"/);
+  assert.match(html, /WRONG BURGER · -25/);
 });
 
 test("renders one, two, and four active orders with unique accessible headings", () => {
@@ -792,15 +811,20 @@ test("allows completed order history alongside at most four active orders", () =
 });
 
 test("shows a connection error while waiting for authoritative state", () => {
-  const html = renderApp(null, 1_000, "MASTER PI UNAVAILABLE — offline");
+  const html = renderApp(null, 1_000, "LAPTOP SERVER UNAVAILABLE — offline");
   assert.match(html, /id="ui-error" class="ui-error" role="alert"/);
-  assert.match(html, /MASTER PI UNAVAILABLE — offline/);
+  assert.match(html, /LAPTOP SERVER UNAVAILABLE — offline/);
 });
 
 test("validates the frontend snapshot and rejects non-normalized room data", () => {
   const state = createInitialMockState(1_000);
+  state.version = 42;
   assert.equal(validateFrontendSnapshot(state).valid, true);
   assert.equal(state.floorPlan.coordinateSpace, ROOM_COORDINATE_SPACE);
+
+  const unsupportedSchema = structuredClone(state);
+  unsupportedSchema.schemaVersion = 3;
+  assert.equal(validateFrontendSnapshot(unsupportedSchema).valid, false);
 
   const invalid = structuredClone(state);
   invalid.floorPlan.coordinateSpace = "world-meters";
@@ -816,6 +840,33 @@ test("validates the frontend snapshot and rejects non-normalized room data", () 
   assert.match(JSON.stringify(validation.errors), /players\[0\]\.position\.x/);
   assert.match(renderApp(invalid, 1_000), /Authoritative state unavailable/);
   assert.doesNotMatch(renderApp(invalid, 1_000), /PLAYER 1/);
+});
+
+test("renders the laptop server snapshot contract with player event state", () => {
+  const state = createInitialProjectionState(1_000);
+  state.version = 17;
+  state.setup.phase = SETUP_PHASES.RUNNING;
+  state.floorPlan.accepted = true;
+  state.clock.status = "running";
+  state.timer.status = "running";
+  state.players[1] = {
+    ...state.players[1],
+    heldItem: "CHOPPED_MEAT",
+    inventory: ["CHOPPED_MEAT"],
+    actionState: "chop complete",
+    location: "cutting-board",
+    position: { x: 25, y: 70 },
+  };
+  state.submissions.push({ id: "submission-1", playerId: "p2", status: "failure", message: "WRONG BURGER", penalty: -25, points: -25 });
+
+  assert.equal(validateFrontendSnapshot(state).valid, true);
+  const html = renderApp(state, 1_000);
+  assert.doesNotMatch(html, /Authoritative state unavailable/);
+  assert.equal((html.match(/data-player-card=/g) || []).length, 3);
+  assert.match(html, /data-player-card="p2"[^>]*data-held-item="CHOPPED_MEAT"[^>]*data-action-state="chop complete"[^>]*data-submission-status="failure"/);
+  assert.match(html, /aria-label="PLAYER 2, event-inferred cutting-board"/);
+  assert.match(html, /CHOPPED MEAT/);
+  assert.match(html, /WRONG BURGER · -25/);
 });
 
 test("cleans up a connection that resolves after app destruction", async () => {

@@ -2,8 +2,8 @@ import { createMockTransport } from "./mock-transport.js";
 import { normalizeServerSnapshot } from "./server-snapshot.js";
 
 /**
- * The browser only talks to this small transport interface. The master Pi can
- * replace the HTTP implementation with its local WebSocket/SSE adapter
+ * The browser only talks to this small transport interface. The laptop server
+ * can replace the HTTP implementation with its local WebSocket/SSE adapter
  * without changing rendering code.
  */
 function apiUrl(baseUrl, path) {
@@ -19,7 +19,7 @@ export function createHttpTransport({ baseUrl = "", fetchImpl = globalThis.fetch
     kind: "http",
     async connect(listener) {
       const response = await fetchImpl(apiUrl(baseUrl, "/api/state"), { headers: { accept: "application/json" } });
-      if (!response.ok) throw new Error(`Master Pi state request failed (${response.status})`);
+      if (!response.ok) throw new Error(`Laptop server state request failed (${response.status})`);
       listener(normalizeSnapshot(await response.json()));
 
       if (typeof eventSourceFactory === "function") {
@@ -28,7 +28,7 @@ export function createHttpTransport({ baseUrl = "", fetchImpl = globalThis.fetch
         if (typeof source.addEventListener === "function") source.addEventListener("state", onState);
         else source.onmessage = onState;
       } else {
-        // Polling is only a local fallback for a master implementation without SSE.
+        // Polling is only a local fallback for a server implementation without SSE.
         poll = setInterval(async () => {
           const next = await fetchImpl(apiUrl(baseUrl, "/api/state"), { headers: { accept: "application/json" } });
           if (next.ok) listener(normalizeSnapshot(await next.json()));
@@ -46,7 +46,7 @@ export function createHttpTransport({ baseUrl = "", fetchImpl = globalThis.fetch
         headers: { "content-type": "application/json", accept: "application/json" },
         body: JSON.stringify(command),
       });
-      if (!response.ok) throw new Error(`Master Pi command failed (${response.status})`);
+      if (!response.ok) throw new Error(`Laptop server command failed (${response.status})`);
       return normalizeSnapshot(await response.json());
     },
     async uploadPhotos(files) {
@@ -55,8 +55,8 @@ export function createHttpTransport({ baseUrl = "", fetchImpl = globalThis.fetch
       const body = new FormData();
       selected.forEach((file) => body.append("photos", file, file.name));
       const response = await fetchImpl(apiUrl(baseUrl, "/api/photos"), { method: "POST", body, headers: { accept: "application/json" } });
-      if (!response.ok) throw new Error(`Master Pi photo upload failed (${response.status})`);
-      return response.json();
+      if (!response.ok) throw new Error(`Laptop server photo upload failed (${response.status})`);
+      return normalizeSnapshot(await response.json());
     },
   };
 }

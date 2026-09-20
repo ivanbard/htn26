@@ -20,13 +20,9 @@ const PLACEMENT_INSTRUCTIONS = STANDARD_ROOM_PLAN.placementInstructions;
 function health(now) {
   return {
     gateway: { id: "gateway", label: "GATEWAY BADGE", status: "healthy", lastSeenAt: now, detail: "Host badge / USB online" },
-    workers: [
-      { id: "camera-1", label: "CAMERA 1", status: "healthy", lastSeenAt: now, detail: "Master Pi camera" },
-      { id: "camera-2", label: "CAMERA 2", status: "healthy", lastSeenAt: now, detail: "Worker Pi 2" },
-      { id: "camera-3", label: "CAMERA 3", status: "healthy", lastSeenAt: now, detail: "Worker Pi 3" },
-    ],
-    inference: { id: "inference", label: "AI INFERENCE", status: "healthy", lastSeenAt: now, detail: "On-device tracking" },
-    trackingCoverage: "healthy",
+    workers: [],
+    inference: { id: "inference", label: "SETUP INFERENCE", status: "healthy", lastSeenAt: now, detail: "Room setup complete" },
+    trackingCoverage: "event-inferred",
   };
 }
 
@@ -105,14 +101,15 @@ export function createInitialMockState(now = Date.now()) {
   const orders = cloneState(MOCK_ORDERS);
   return {
     version: 2,
-    source: "mock-master-pi",
-  setup: { phase: SETUP_PHASES.IDLE, message: "Host is idle. Start to prepare the standard kitchen.", updatedAt: now },
+    schemaVersion: 2,
+    source: "mock-laptop-server",
+    setup: { phase: SETUP_PHASES.IDLE, message: "Host is idle. Start to prepare the standard kitchen.", updatedAt: now },
     floorPlan: cloneState(PROPOSED_PLAN),
     burgerLevel: burgerLevel(),
     players: [
-      { id: "p1", label: "P1", name: "PLAYER 1", color: "red", position: { x: 20, y: 58 }, tracking: { status: "healthy", source: "nfc-scan", lastSeenAt: now, staleAfterMs: 20_000 }, inventory: [], plate: ["BUN", "COOKED MEAT", "SHREDDED LETTUCE"] },
-      { id: "p2", label: "P2", name: "PLAYER 2", color: "blue", position: { x: 68, y: 58 }, tracking: { status: "healthy", source: "nfc-scan", lastSeenAt: now, staleAfterMs: 20_000 }, inventory: ["RAW MEAT"] },
-      { id: "p3", label: "P3", name: "PLAYER 3", color: "green", position: { x: 82, y: 63 }, tracking: { status: "healthy", source: "nfc-scan", lastSeenAt: now, staleAfterMs: 20_000 }, inventory: [], plate: ["BUN", "CHOPPED CHEESE"] },
+      { id: "p1", label: "P1", name: "PLAYER 1", color: "red", position: { x: 20, y: 58 }, location: "center", positionSource: "badge-events", tracking: { status: "inferred", source: "badge-events", lastSeenAt: now, staleAfterMs: null }, heldItem: "PLATE", actionState: "holding plate", inventory: ["BUN", "COOKED MEAT", "SHREDDED LETTUCE"], plate: ["BUN", "COOKED MEAT", "SHREDDED LETTUCE"] },
+      { id: "p2", label: "P2", name: "PLAYER 2", color: "blue", position: { x: 68, y: 58 }, location: "center", positionSource: "badge-events", tracking: { status: "inferred", source: "badge-events", lastSeenAt: now, staleAfterMs: null }, heldItem: "RAW_MEAT", actionState: "holding raw meat", inventory: ["RAW MEAT"] },
+      { id: "p3", label: "P3", name: "PLAYER 3", color: "green", position: { x: 82, y: 63 }, location: "center", positionSource: "badge-events", tracking: { status: "inferred", source: "badge-events", lastSeenAt: now, staleAfterMs: null }, heldItem: "PLATE", actionState: "holding plate", inventory: ["BUN", "CHOPPED CHEESE"], plate: ["BUN", "CHOPPED CHEESE"] },
     ],
     order: cloneState(orders[0]),
     orders,
@@ -126,7 +123,8 @@ export function createInitialMockState(now = Date.now()) {
     score: { value: 0, delivered: 0 },
     gold: { total: 0, earned: 0, lastChange: 0 },
     tips: { total: 0, earned: 0, lastChange: 0 },
-    clock: { status: "ready", remainingSeconds: 112, totalSeconds: 120 },
+    clock: { status: "ready", remainingSeconds: 240, totalSeconds: 240 },
+    submissions: [],
     serving: { lastEvent: null, gooseQueue: 4, location: "SERVING" },
     health: health(now),
   };
@@ -180,7 +178,7 @@ function startGame(state, now) {
   if (!canRunAction(state, GAME_ACTIONS.START_GAME)) return state;
   const orders = normalizedOrders(state).map((order) => ({ ...order, status: "active", remainingSeconds: order.totalSeconds }));
   return withUpdate(state, {
-    setup: { phase: SETUP_PHASES.RUNNING, message: "Burger game running. Live locations and orders come from the master Pi." },
+    setup: { phase: SETUP_PHASES.RUNNING, message: "Burger game running. Badge events drive player state and inferred positions." },
     score: { value: 0, delivered: 0 },
     gold: { total: 0, earned: 0, lastChange: 0 },
     tips: { total: 0, earned: 0, lastChange: 0 },
@@ -188,13 +186,31 @@ function startGame(state, now) {
     order: { ...withPrimaryOrder(orders, state.order) },
     orders,
     serving: { ...state.serving, lastEvent: null },
+    submissions: [],
+    players: state.players.map((player, index) => ({
+      ...player,
+      position: { x: [34, 50, 66][index] ?? 50, y: 88 },
+      location: "bottom",
+      heldItem: "EMPTY",
+      actionState: "idle",
+      inventory: [],
+    })),
     burgerLevel: { ...state.burgerLevel, status: "in-play" },
   }, now);
 }
 
 function endGame(state, now) {
   if (!canRunAction(state, GAME_ACTIONS.END_GAME)) return state;
-  return withUpdate(state, { setup: { phase: SETUP_PHASES.ENDED, message: "Game ended. Reset to host another burger level." }, clock: { ...state.clock, status: "ended" } }, now);
+  const orders = normalizedOrders(state).map((order) => order.status === "active"
+    ? { ...order, status: "expired", remainingSeconds: 0 }
+    : { ...order });
+  return withUpdate(state, {
+    setup: { phase: SETUP_PHASES.ENDED, message: "Game ended. Reset to host another burger level." },
+    clock: { ...state.clock, status: "ended", remainingSeconds: 0 },
+    orders,
+    order: { ...withPrimaryOrder(orders, state.order) },
+    players: state.players.map((player, index) => ({ ...player, position: { x: [34, 50, 66][index] ?? 50, y: 88 }, location: "bottom", heldItem: "EMPTY", actionState: "idle", inventory: [] })),
+  }, now);
 }
 
 function hasActiveRound(state) {
@@ -226,6 +242,8 @@ function recordDelivery(state, success, now, orderId) {
   const penalty = success ? 0 : FAILED_SUBMISSION_PENALTY;
   const event = success
     ? {
+      id: `submission-${(state.submissions || []).length + 1}`,
+      playerId: "p1",
       status: "success",
       message: "BURGER SERVED",
       detail: segments >= 3 ? "Served with a full patience meter — max tip." : segments > 0 ? `Served with ${segments}/3 patience remaining.` : "Served just before the order ran out.",
@@ -236,6 +254,8 @@ function recordDelivery(state, success, now, orderId) {
       at: now,
     }
     : {
+      id: `submission-${(state.submissions || []).length + 1}`,
+      playerId: "p1",
       status: "failure",
       message: "WRONG BURGER",
       detail: `Serving badge rejected the topping combination — penalty applied.`,
@@ -263,6 +283,7 @@ function recordDelivery(state, success, now, orderId) {
     order: { ...withPrimaryOrder(nextOrders, state.order) },
     orders: nextOrders,
     serving: { ...state.serving, lastEvent: event },
+    submissions: [...(state.submissions || []), event],
   }, now);
 }
 

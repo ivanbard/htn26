@@ -2,7 +2,6 @@ import React from "react";
 import {
   canRunAction,
   formatSeconds,
-  isStale,
   playerPosition,
   progressPercent,
   GAME_ACTIONS,
@@ -48,9 +47,12 @@ const HAZARD_ASSET = "/assets/hazard-warning.svg";
 const cx = (...values) => values.filter(Boolean).join(" ");
 const finite = (value, fallback = 0) => Number.isFinite(Number(value)) ? Number(value) : fallback;
 const clamp = (value, min = 0, max = 100) => Math.max(min, Math.min(max, finite(value, min)));
-const upper = (value) => String(value || "").replaceAll("-", " ").toUpperCase();
+const upper = (value) => String(value || "").replaceAll("-", " ").replaceAll("_", " ").toUpperCase();
 const ingredientKey = (value) => String(value || "").trim().toUpperCase().replaceAll(" ", "_");
-const ingredientAsset = (value) => ASSETS[ingredientKey(value)] || null;
+const ingredientAsset = (value) => {
+  const key = ingredientKey(value).replace(/^(?:RAW|CHOPPED|COOKED|BURNT)_/, "");
+  return ASSETS[key === "BREAD" ? "BUN" : key] || null;
+};
 const playerTeam = (value) => Object.prototype.hasOwnProperty.call(PLAYER_ASSETS, String(value || "").toLowerCase())
   ? String(value).toLowerCase()
   : "green";
@@ -114,13 +116,13 @@ function stagesForLayout(layoutFromImage) {
     { key: "scan", label: "Map the room", description: "Use setup photos for the play area", action: GAME_ACTIONS.SCAN_ROOM },
     { key: "approve", label: "Choose the layout", description: "Review the image-based placement", action: GAME_ACTIONS.APPROVE_LAYOUT },
     { key: "place", label: "Place the stations", description: "Match pieces to those spots", action: null },
-    { key: "play", label: "Start cooking", description: "Begin the two-minute round", action: GAME_ACTIONS.START_GAME },
+    { key: "play", label: "Start cooking", description: "Begin the four-minute round", action: GAME_ACTIONS.START_GAME },
   ] : [
     { key: "host", label: "Wake the kitchen", description: "Turn on the host badge and display", action: GAME_ACTIONS.START_HOST },
     { key: "scan", label: "Load the room", description: "Use the standard kitchen layout", action: GAME_ACTIONS.SCAN_ROOM },
     { key: "approve", label: "Confirm the layout", description: "Review the fixed station positions", action: GAME_ACTIONS.APPROVE_LAYOUT },
     { key: "place", label: "Place the stations", description: "Put the NFC zones at the illustrated counters", action: null },
-    { key: "play", label: "Start cooking", description: "Begin the two-minute round", action: GAME_ACTIONS.START_GAME },
+    { key: "play", label: "Start cooking", description: "Begin the four-minute round", action: GAME_ACTIONS.START_GAME },
   ];
 }
 
@@ -300,7 +302,7 @@ function playerPointAlongPath(path, progress) {
   return path.at(-1);
 }
 
-function AnimatedPlayer({ player, position, walls, stale, plannedPath, delayMs = 0, pathStrategy = "single-agent" }) {
+function AnimatedPlayer({ player, position, walls, plannedPath, delayMs = 0, pathStrategy = "single-agent" }) {
   const target = projectPointIntoWalkableRoom(position, walls, position);
   const targetKey = `${target.x.toFixed(3)}:${target.y.toFixed(3)}`;
   const wallKey = (walls || []).map((wall) => `${wall.x}:${wall.y}:${wall.width}:${wall.height}:${wall.blocksMovement}`).join("|");
@@ -355,15 +357,15 @@ function AnimatedPlayer({ player, position, walls, stale, plannedPath, delayMs =
   }, [targetKey, wallKey, plannedPathKey, delayMs]);
 
   const label = player.label || player.id;
-  const locationLabel = !position ? "location unavailable" : stale ? "last scan is stale" : "last scan confirmed";
+  const locationLabel = player.location || (position ? "event position" : "position unavailable");
   return h("div", {
-    className: cx("tracked-player", `player-team-${team}`, hasPlate && "has-plate", moving && "is-moving", stale && "is-stale"),
+    className: cx("tracked-player", `player-team-${team}`, hasPlate && "has-plate", moving && "is-moving"),
     style: { left: `${visualPosition.x}%`, top: `${visualPosition.y}%` },
     "data-player": player.id,
-    "data-stale": stale,
+    "data-location": locationLabel,
     "data-player-path": "barrier-safe",
     "data-path-strategy": pathStrategy,
-    "aria-label": `${player.name || label}, ${locationLabel}`,
+    "aria-label": `${player.name || label}, event-inferred ${locationLabel}`,
   },
   h("div", { className: "player-token" },
     h("div", { className: "player-avatar" },
@@ -421,23 +423,21 @@ function RoomSurface({ state, now, gameplay = false }) {
   });
   const players = positionedPlayers.map((player) => {
     const position = playerPosition(player);
-    const stale = !position || isStale(player, now);
     const pathPlan = pathPlans.get(player.id);
     return position ? h(AnimatedPlayer, {
       key: player.id,
       player,
       position,
       walls: movementWalls,
-      stale,
       plannedPath: pathPlan?.path,
       delayMs: pathPlan?.delayMs,
       pathStrategy: pathPlan?.strategy,
     }) : h("div", {
       key: player.id,
-      className: "tracked-player is-stale",
+      className: "tracked-player",
       "data-player": player.id,
-      "data-stale": true,
-      "aria-label": `${player.name || player.label || player.id}, location unavailable`,
+      "data-location": "position unavailable",
+      "aria-label": `${player.name || player.label || player.id}, event-inferred position unavailable`,
     });
   });
   return h("div", {
@@ -447,7 +447,7 @@ function RoomSurface({ state, now, gameplay = false }) {
     "data-grid-columns": plan.grid?.columns,
     "data-grid-rows": plan.grid?.rows,
     role: "img",
-    "aria-label": `${accepted ? "Accepted burger" : "Proposed room"} top-down kitchen with scan-animated players`,
+    "aria-label": `${accepted ? "Accepted burger" : "Proposed room"} top-down kitchen with event-inferred players`,
   }, !layoutFromImage && h("div", { className: "kitchen-floor", "aria-hidden": true }), !gameplay && h("div", { className: "room-plan-grid", "aria-hidden": true }), walls, stations, players,
   !accepted && h("div", { className: "room-approval-overlay" }, "Approve floor plan to generate burger level"));
 }
@@ -640,6 +640,41 @@ function DeliveryToast({ state, now }) {
   );
 }
 
+function PlayerCard({ player, submission }) {
+  const held = String(player.heldItem || (player.inventory?.length ? player.inventory[0] : "EMPTY"));
+  const inventory = Array.isArray(player.inventory) ? player.inventory : [];
+  const shownItems = held === "PLATE" ? inventory : held === "EMPTY" ? [] : [held];
+  const resultValue = Number(submission?.points);
+  const result = submission
+    ? `${submission.message || submission.status}${Number.isFinite(resultValue) && resultValue !== 0 ? ` · ${resultValue}` : ""}`
+    : null;
+  return h("article", {
+    className: cx("player-hud-card", `player-hud-${player.color || "orange"}`),
+    "data-player-card": player.id,
+    "data-held-item": held,
+    "data-action-state": player.actionState || "idle",
+    "data-submission-status": submission?.status || "none",
+  },
+  h("div", { className: "player-hud-identity" }, h("strong", null, player.label || player.id), h("span", null, player.name || "PLAYER")),
+  h("div", { className: "player-hud-held", "aria-label": `${player.name || player.id} holding ${upper(held)}` },
+    shownItems.length
+      ? shownItems.map((item, index) => h(IngredientIcon, { key: `${item}-${index}`, value: item, small: true }))
+      : h("span", { className: "player-hud-empty" }, "EMPTY"),
+    h("strong", null, held === "PLATE" ? `PLATE${inventory.length ? ` · ${inventory.map(upper).join(" + ")}` : " · EMPTY"}` : upper(held))),
+  h("div", { className: "player-hud-state" }, h("span", null, upper(player.actionState || "idle")), result && h("strong", { className: submission.status === "failure" ? "is-failure" : "is-success" }, result)));
+}
+
+function PlayersHud({ state }) {
+  const submissions = Array.isArray(state.submissions) ? state.submissions : [];
+  return h("section", { className: "game-board-players", "aria-label": "Player held items and action state" },
+    (state.players || []).map((player) => h(PlayerCard, {
+      key: player.id,
+      player,
+      submission: submissions.findLast?.((entry) => entry.playerId === player.id)
+        || [...submissions].reverse().find((entry) => entry.playerId === player.id),
+    })));
+}
+
 function GameplayBoard({ state, now }) {
   return h("section", { className: "game-board panel overflow-hidden bg-[#0c1824]", "aria-labelledby": "game-board-title" },
     h("h2", { id: "game-board-title", className: "sr-only" }, "Live burger game board"),
@@ -647,6 +682,7 @@ function GameplayBoard({ state, now }) {
       h(RoomStage, { state, now, gameplay: true }),
       h(OrdersHud, { state }),
       h(DeliveryToast, { state, now }),
+      h(PlayersHud, { state }),
       h("div", { className: "game-board-score" }, h(ScoreCard, { state })),
       h("div", { className: "game-board-timer" }, h(TimerCard, { state, compact: true })),
       h(HowItWorksOverlay),
@@ -696,7 +732,8 @@ function StationsPanel({ state }) {
 function ServingPanel({ state }) {
   const queue = Math.max(0, Number(state.serving?.gooseQueue || 0));
   const event = state.serving?.lastEvent;
-  return h("section", { className: cx("delivery-panel serving-panel border bg-[#101c29] p-5", event?.status === "success" ? "delivery-success border-[#57e389]" : event ? "delivery-failure border-[#ff6f6f]" : "border-[#2a435a]"), "aria-labelledby": "serving-title" }, h("p", { className: "mb-1 text-xs font-black uppercase tracking-[0.16em] text-[#a9bac9]" }, event ? "Serving result" : "Serving / Waterloo geese"), h("h2", { id: "serving-title", className: "text-xl font-black text-white" }, event?.message || `${queue} geese waiting`), h("div", { className: "my-4 flex flex-wrap gap-2" }, Array.from({ length: Math.min(queue, 8) }, (_, index) => h("span", { key: index, className: "border border-[#d6dce3] bg-[#f5f7fa] px-2 py-1 text-[10px] font-black text-[#16212b]" }, "GOOSE"))), h("p", { className: "text-sm text-[#a9bac9]" }, event?.detail || "Bring a completed burger to the serving badge. No washing dishes."), event && h("strong", { className: cx("delivery-points mt-5 block text-3xl", event.status === "success" ? "text-[#57e389]" : "text-[#ff6f6f]") }, event.status === "success" ? `+${event.points ?? 0}` : "NO SCORE"));
+  const change = Number(event?.points ?? event?.penalty ?? 0);
+  return h("section", { className: cx("delivery-panel serving-panel border bg-[#101c29] p-5", event?.status === "success" ? "delivery-success border-[#57e389]" : event ? "delivery-failure border-[#ff6f6f]" : "border-[#2a435a]"), "aria-labelledby": "serving-title" }, h("p", { className: "mb-1 text-xs font-black uppercase tracking-[0.16em] text-[#a9bac9]" }, event ? "Serving result" : "Serving / Waterloo geese"), h("h2", { id: "serving-title", className: "text-xl font-black text-white" }, event?.message || `${queue} geese waiting`), h("div", { className: "my-4 flex flex-wrap gap-2" }, Array.from({ length: Math.min(queue, 8) }, (_, index) => h("span", { key: index, className: "border border-[#d6dce3] bg-[#f5f7fa] px-2 py-1 text-[10px] font-black text-[#16212b]" }, "GOOSE"))), h("p", { className: "text-sm text-[#a9bac9]" }, event?.detail || "Bring a completed burger to the serving badge. No washing dishes."), event && h("strong", { className: cx("delivery-points mt-5 block text-3xl", event.status === "success" ? "text-[#57e389]" : "text-[#ff6f6f]") }, change > 0 ? `+${change}` : String(change)));
 }
 
 function GameplayView({ state, now }) {
