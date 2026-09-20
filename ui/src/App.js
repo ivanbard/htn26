@@ -57,6 +57,25 @@ const playerTeam = (value) => Object.prototype.hasOwnProperty.call(PLAYER_ASSETS
   ? String(value).toLowerCase()
   : "green";
 const playerChefAsset = (player, hasPlate) => PLAYER_ASSETS[playerTeam(player?.color)][hasPlate ? "chefWithPlate" : "chef"];
+const signedAmount = (value) => {
+  const amount = finite(value);
+  return amount > 0 ? `+${amount}` : String(amount);
+};
+
+function submissionRewardLabels(submission) {
+  if (!submission) return [];
+  if (submission.status === "success") {
+    const gold = Number.isFinite(Number(submission.gold)) ? submission.gold : submission.points;
+    return [
+      Number.isFinite(Number(gold)) ? `${signedAmount(gold)} GOLD` : null,
+      Number.isFinite(Number(submission.tip)) ? `${signedAmount(submission.tip)} TIP` : null,
+    ].filter(Boolean);
+  }
+  const penalty = Number(submission.penalty);
+  const points = Number(submission.points);
+  if (Number.isFinite(points) && points < 0) return [String(points)];
+  return Number.isFinite(penalty) && penalty > 0 ? [String(-penalty)] : [];
+}
 
 function phaseLabel(phase) {
   if (phase === SETUP_PHASES.SCANNING) return "SCANNING ROOM";
@@ -344,9 +363,8 @@ function AnimatedPlayer({ player, position, walls, plannedPath, delayMs = 0, pat
   const heldLabel = held === "PLATE"
     ? `PLATE${inventory.length ? ` · ${inventory.map(upper).join(" + ")}` : " · EMPTY"}`
     : upper(held);
-  const resultValue = Number(submission?.points);
   const submissionLabel = submission
-    ? `${submission.message || submission.status}${Number.isFinite(resultValue) && resultValue !== 0 ? ` · ${resultValue}` : ""}`
+    ? [submission.message || submission.status, ...submissionRewardLabels(submission)].join(" · ")
     : null;
 
   React.useEffect(() => {
@@ -420,7 +438,12 @@ function AnimatedPlayer({ player, position, walls, plannedPath, delayMs = 0, pat
         : h("span", { className: "player-location-empty" }, "EMPTY"),
       h("span", null, heldLabel)),
     h("span", { className: "player-location-action" }, upper(player.actionState || "idle")),
-    submissionLabel && h("strong", { className: submission.status === "failure" ? "is-failure" : "is-success" }, submissionLabel),
+    submissionLabel && h("strong", {
+      className: submission.status === "failure" ? "is-failure" : "is-success",
+      "data-submission-gold": submission.gold,
+      "data-submission-tip": submission.tip,
+      "data-submission-penalty": submission.penalty,
+    }, submissionLabel),
   ));
 }
 
@@ -624,9 +647,20 @@ function OrdersHud({ state }) {
 
 function ScoreCard({ state }) {
   const score = state.score || {};
-  return h("div", { className: "board-score", "data-node-id": "31:25", "aria-label": `${score.value ?? 0} WatCoins, ${score.delivered ?? 0} burgers served` },
+  const goldTotal = finite(state.gold?.total, score.value ?? 0);
+  const tipTotal = finite(state.tips?.total, 0);
+  return h("div", {
+    className: "board-score",
+    "data-node-id": "31:25",
+    "data-score-value": score.value ?? 0,
+    "data-gold-total": goldTotal,
+    "data-tip-total": tipTotal,
+    "aria-label": `Gold ${goldTotal}, tips ${tipTotal}, score ${score.value ?? 0}, ${score.delivered ?? 0} burgers served`,
+  },
     h("img", { src: "/assets/score-coin-counter.png", alt: "", "aria-hidden": true }),
-    h("strong", { className: "board-score-value" }, score.value ?? 0),
+    h("span", { className: "board-score-label" }, "GOLD"),
+    h("strong", { className: "board-score-value" }, goldTotal),
+    h("span", { className: "board-tip-total" }, `TIPS ${tipTotal}`),
   );
 }
 
@@ -757,8 +791,8 @@ function StationsPanel({ state }) {
 function ServingPanel({ state }) {
   const queue = Math.max(0, Number(state.serving?.gooseQueue || 0));
   const event = state.serving?.lastEvent;
-  const change = Number(event?.points ?? event?.penalty ?? 0);
-  return h("section", { className: cx("delivery-panel serving-panel border bg-[#101c29] p-5", event?.status === "success" ? "delivery-success border-[#57e389]" : event ? "delivery-failure border-[#ff6f6f]" : "border-[#2a435a]"), "aria-labelledby": "serving-title" }, h("p", { className: "mb-1 text-xs font-black uppercase tracking-[0.16em] text-[#a9bac9]" }, event ? "Serving result" : "Serving / Waterloo geese"), h("h2", { id: "serving-title", className: "text-xl font-black text-white" }, event?.message || `${queue} geese waiting`), h("div", { className: "my-4 flex flex-wrap gap-2" }, Array.from({ length: Math.min(queue, 8) }, (_, index) => h("span", { key: index, className: "border border-[#d6dce3] bg-[#f5f7fa] px-2 py-1 text-[10px] font-black text-[#16212b]" }, "GOOSE"))), h("p", { className: "text-sm text-[#a9bac9]" }, event?.detail || "Bring a completed burger to the serving badge. No washing dishes."), event && h("strong", { className: cx("delivery-points mt-5 block text-3xl", event.status === "success" ? "text-[#57e389]" : "text-[#ff6f6f]") }, change > 0 ? `+${change}` : String(change)));
+  const rewards = submissionRewardLabels(event);
+  return h("section", { className: cx("delivery-panel serving-panel border bg-[#101c29] p-5", event?.status === "success" ? "delivery-success border-[#57e389]" : event ? "delivery-failure border-[#ff6f6f]" : "border-[#2a435a]"), "aria-labelledby": "serving-title" }, h("p", { className: "mb-1 text-xs font-black uppercase tracking-[0.16em] text-[#a9bac9]" }, event ? "Serving result" : "Serving / Waterloo geese"), h("h2", { id: "serving-title", className: "text-xl font-black text-white" }, event?.message || `${queue} geese waiting`), h("div", { className: "my-4 flex flex-wrap gap-2" }, Array.from({ length: Math.min(queue, 8) }, (_, index) => h("span", { key: index, className: "border border-[#d6dce3] bg-[#f5f7fa] px-2 py-1 text-[10px] font-black text-[#16212b]" }, "GOOSE"))), h("p", { className: "text-sm text-[#a9bac9]" }, event?.detail || "Bring a completed burger to the serving badge. No washing dishes."), event && h("div", { className: cx("delivery-points mt-5 flex gap-3 text-3xl", event.status === "success" ? "text-[#57e389]" : "text-[#ff6f6f]") }, rewards.map((reward) => h("strong", { key: reward }, reward))));
 }
 
 function GameplayView({ state, now }) {

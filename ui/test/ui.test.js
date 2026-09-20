@@ -676,6 +676,8 @@ test("start game resets the authoritative clock, order, and score", async () => 
   const state = transport.snapshot();
 
   assert.equal(state.setup.phase, SETUP_PHASES.RUNNING);
+  assert.deepEqual(state.gold, { total: 0, earned: 0, lastChange: 0 });
+  assert.deepEqual(state.tips, { total: 0, earned: 0, lastChange: 0 });
   assert.deepEqual(state.score, { value: 0, delivered: 0 });
   assert.deepEqual(state.gold, { total: 0, earned: 0, lastChange: 0 });
   assert.deepEqual(state.tips, { total: 0, earned: 0, lastChange: 0 });
@@ -712,6 +714,8 @@ test("successful delivery awards the recipe's gold plus a patience-based tip, ma
   assert.deepEqual(served.score, { value: 100, delivered: 1 });
   assert.deepEqual(served.gold, { total: 100, earned: 100, lastChange: 100 });
   assert.deepEqual(served.tips, { total: 15, earned: 15, lastChange: 15 });
+  assert.equal(served.submissions[0].gold, 100);
+  assert.equal(served.submissions[0].tip, 15);
   assert.equal(served.orders[0].status, "completed");
   assert.ok(served.orders.slice(1).every((order) => order.status === "active"));
   assert.equal(served.order.id, "order-2");
@@ -790,6 +794,15 @@ test("renders serving success, gold/tip breakdown, and score update from the aut
   assert.match(html, /BURGER SERVED/);
   assert.match(html, /\+100 WATCOINS/);
   assert.match(html, /\+15 TIP/);
+  assert.match(html, /data-gold-total="100"/);
+  assert.match(html, /data-tip-total="15"/);
+  assert.match(html, /BURGER SERVED · \+100 GOLD · \+15 TIP/);
+
+  await transport.command(GAME_ACTIONS.END_GAME);
+  const results = renderApp(transport.snapshot(), 2_000);
+  assert.match(results, /delivery-points/);
+  assert.match(results, /\+100 GOLD/);
+  assert.match(results, /\+15 TIP/);
 });
 
 test("renders a rejected burger's live penalty and updates the score", async () => {
@@ -915,9 +928,17 @@ test("validates the frontend snapshot and rejects non-normalized room data", () 
   assert.match(JSON.stringify(validation.errors), /players\[0\]\.position\.x/);
   assert.match(renderApp(invalid, 1_000), /Authoritative state unavailable/);
   assert.doesNotMatch(renderApp(invalid, 1_000), /PLAYER 1/);
+
+  const invalidRewards = structuredClone(state);
+  invalidRewards.gold = [];
+  invalidRewards.tips = "not-authoritative";
+  const rewardValidation = validateFrontendSnapshot(invalidRewards);
+  assert.equal(rewardValidation.valid, false);
+  assert.match(JSON.stringify(rewardValidation.errors), /gold must be an object/);
+  assert.match(JSON.stringify(rewardValidation.errors), /tips must be an object/);
 });
 
-test("renders the laptop server snapshot contract with player event state", () => {
+test("renders the laptop server snapshot contract with player reward state", () => {
   const state = createInitialProjectionState(1_000);
   state.version = 17;
   state.setup.phase = SETUP_PHASES.RUNNING;
@@ -932,17 +953,22 @@ test("renders the laptop server snapshot contract with player event state", () =
     location: "cutting-board",
     position: { x: 25, y: 70 },
   };
-  state.submissions.push({ id: "submission-1", playerId: "p2", status: "failure", message: "WRONG BURGER", penalty: -25, points: -25 });
+  state.gold = { total: 120, earned: 120, lastChange: 120 };
+  state.tips = { total: 16, earned: 16, lastChange: 16 };
+  state.score = { value: 120, delivered: 1 };
+  state.submissions.push({ id: "submission-1", playerId: "p2", status: "success", message: "BURGER SERVED", gold: 120, tip: 16, penalty: 0, points: 120 });
 
   assert.equal(validateFrontendSnapshot(state).valid, true);
   const html = renderApp(state, 1_000);
   assert.doesNotMatch(html, /Authoritative state unavailable/);
   assert.equal((html.match(/class="player-location-info"/g) || []).length, 3);
   assert.doesNotMatch(html, /data-player-card=/);
-  assert.match(html, /data-player="p2"[^>]*data-held-item="CHOPPED_MEAT"[^>]*data-action-state="chop complete"[^>]*data-submission-status="failure"/);
+  assert.match(html, /data-player="p2"[^>]*data-held-item="CHOPPED_MEAT"[^>]*data-action-state="chop complete"[^>]*data-submission-status="success"/);
   assert.match(html, /aria-label="PLAYER 2, event-inferred cutting-board, holding CHOPPED MEAT, chop complete"/);
   assert.match(html, /CHOPPED MEAT/);
-  assert.match(html, /WRONG BURGER · -25/);
+  assert.match(html, /BURGER SERVED · \+120 GOLD · \+16 TIP/);
+  assert.match(html, /data-gold-total="120"/);
+  assert.match(html, /data-tip-total="16"/);
 });
 
 test("cleans up a connection that resolves after app destruction", async () => {

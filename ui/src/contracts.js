@@ -34,13 +34,15 @@ export const FRONTEND_SNAPSHOT_FIELD_CONTRACT = Object.freeze({
   serving: "object",
   health: "object",
   orders: "array",
+  gold: "object",
+  tips: "object",
 });
 
 export const FRONTEND_SNAPSHOT_CONTRACT = Object.freeze({
   schemaVersion: FRONTEND_SNAPSHOT_VERSION,
   requiredTopLevelFields: FRONTEND_SNAPSHOT_FIELDS,
   fields: FRONTEND_SNAPSHOT_FIELD_CONTRACT,
-  optionalTopLevelFields: Object.freeze(["orders"]),
+  optionalTopLevelFields: Object.freeze(["orders", "gold", "tips"]),
   maxActiveOrders: 4,
   floorPlan: Object.freeze({
     coordinateSpace: ROOM_COORDINATE_SPACE,
@@ -264,6 +266,14 @@ export function validateFrontendSnapshot(snapshot) {
         }
         ids.add(order.id);
       });
+    }
+  }
+
+  for (const field of ["gold", "tips"]) {
+    if (Object.prototype.hasOwnProperty.call(snapshot, field) && !isRecord(snapshot[field])) {
+      const error = invalidField(field, "object", describeValue(snapshot[field]), `Invalid optional field: ${field} must be an object.`);
+      invalid.push(error);
+      errors.push(error);
     }
   }
 

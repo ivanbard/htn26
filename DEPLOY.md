@@ -32,9 +32,11 @@ Player badges own local interaction feedback and send intent through the host.
 - NFC zones for pantry, fridge, cutting board, and stove.
 - One Apple phone for setup photographs.
 
-The current v1 does not require cloud services or live camera tracking. The
-server temporarily infers station occupancy from player actions and does not
-present it as physical-position evidence.
+The current v1 does not require cloud services or camera/live player-location
+tracking. The server and UI use badge events to infer simulated station or
+center/default occupancy; a paired bump displays both participants side by
+side at the shared center. These cues are neither physical-position evidence
+nor physical bump validation.
 
 ## Badge deployment profile
 

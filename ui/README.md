@@ -82,7 +82,7 @@ Authoritative values stay explicit:
 - `orders[].remainingSeconds`, `order.remainingSeconds`, `clock.remainingSeconds`, station `progress`, and cooking state are displayed values from the laptop-server snapshot. The UI never decrements them locally.
 - `health.gateway`, `health.workers`, and `health.inference` remain available to the host integration, but system-health warnings are intentionally excluded from the player-facing gameplay HUD.
 - `stations[].item`, `stations[].status`, and `stations[].remainingSeconds` are rendered directly on their physical boards or plates. Empty stations explicitly show `EMPTY`; the player-facing screen has no separate live-activity feed.
-- `submissions` and `serving.lastEvent` remain authoritative. Failed submissions expose the server's `-25` penalty, while `score` is rendered exactly as delivered by the transport.
+- `submissions` and `serving.lastEvent` remain authoritative. Failed submissions expose the server's `-25` penalty; successful submissions show their gold and tip rewards. The score rail renders the authoritative gold and tip totals while retaining the delivered score value in its accessible contract.
 
 ## Tests
 

@@ -861,7 +861,9 @@ button:focus-visible { outline: 3px solid var(--yellow); outline-offset: 3px; }
    different bar heights producing two different corner curves. */
 .board-score::before { content: ""; position: absolute; top: 14.4%; right: 1.44%; bottom: 9.2%; left: 12.1%; border: clamp(5px, .8vw, 14px) solid #4a5473; border-radius: 12.27% / 36.65%; background: #1b2030; box-shadow: 0 16px 22px 2px rgba(5, 8, 20, .42), inset 0 2px 0 rgba(148, 163, 199, .15); }
 .board-score > img { position: absolute; z-index: 2; top: 4%; left: 0; width: 28%; height: 82%; object-fit: contain; }
-.board-score-value { position: absolute; z-index: 2; top: 22%; right: 14.24%; bottom: 18%; left: 36.52%; display: grid; place-items: center; color: white; font-size: clamp(1.25rem, 2.75vw, 3.6rem); font-weight: 950; letter-spacing: -.05em; line-height: 1; }
+.board-score-label { position: absolute; z-index: 2; top: 18%; right: 8%; left: 36%; color: #aab6d1; font-size: clamp(.38rem, .52vw, .72rem); font-weight: 950; letter-spacing: .12em; text-align: center; }
+.board-score-value { position: absolute; z-index: 2; top: 28%; right: 8%; bottom: 29%; left: 36%; display: grid; place-items: center; color: white; font-size: clamp(1rem, 2.2vw, 3rem); font-weight: 950; letter-spacing: -.05em; line-height: 1; }
+.board-tip-total { position: absolute; z-index: 2; right: 8%; bottom: 15%; left: 36%; color: #57e389; font-size: clamp(.4rem, .58vw, .78rem); font-weight: 950; letter-spacing: .04em; text-align: center; }
 .hud-timer-value { position: absolute; z-index: 2; top: 22.2%; right: 11.36%; bottom: 17.8%; left: 35.61%; display: grid; place-items: center; min-width: 0; color: #fdfeff; font-size: clamp(1.05rem, 2.1vw, 2.8rem); font-variant-numeric: tabular-nums; font-weight: 950; letter-spacing: -.05em; line-height: 1; text-align: center; white-space: nowrap; }
 @media (max-width: 1050px) {
   /* Stacking the stage cards and workspace columns no longer fits one
@@ -886,7 +888,7 @@ button:focus-visible { outline: 3px solid var(--yellow); outline-offset: 3px; }
   .game-board-orders.orders-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .game-board-score, .game-board-timer { bottom: 1.5%; width: 24%; min-width: 100px; }
   .player-location-info { min-width: 92px; padding: .18rem; }
-  .player-location-info .is-failure, .player-location-info .is-success { display: none; }
+  .player-location-info .is-failure, .player-location-info .is-success { font-size: .34rem; line-height: 1.05; }
   .game-board-score { left: 1.4%; }
   .game-board-timer { right: 1.4%; }
   .hud-order, .hud-order-compact { min-height: 72px; grid-template-columns: 38px minmax(0, 1fr) 50px; gap: .25rem; padding: .35rem; }

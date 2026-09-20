@@ -120,6 +120,8 @@ export function createInitialMockState(now = Date.now()) {
       { id: "chop1", label: "CHOP 1", kind: "chop", status: "ready", progress: 1, remainingSeconds: 0, item: "LETTUCE" },
       { id: "chop2", label: "CHOP 2", kind: "chop", status: "chopping", progress: 0.4, remainingSeconds: 9, totalSeconds: 15, item: "CHEESE" },
     ],
+    gold: { total: 0, earned: 0, lastChange: 0 },
+    tips: { total: 0, earned: 0, lastChange: 0 },
     score: { value: 0, delivered: 0 },
     gold: { total: 0, earned: 0, lastChange: 0 },
     tips: { total: 0, earned: 0, lastChange: 0 },
@@ -179,6 +181,8 @@ function startGame(state, now) {
   const orders = normalizedOrders(state).map((order) => ({ ...order, status: "active", remainingSeconds: order.totalSeconds }));
   return withUpdate(state, {
     setup: { phase: SETUP_PHASES.RUNNING, message: "Burger game running. Badge events drive player state and inferred positions." },
+    gold: { total: 0, earned: 0, lastChange: 0 },
+    tips: { total: 0, earned: 0, lastChange: 0 },
     score: { value: 0, delivered: 0 },
     gold: { total: 0, earned: 0, lastChange: 0 },
     tips: { total: 0, earned: 0, lastChange: 0 },
