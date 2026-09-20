@@ -4,7 +4,7 @@ import { EventEmitter } from "node:events";
 import test from "node:test";
 import { createSimulator, simulationEnabled } from "../dev-simulator.mjs";
 
-function harness({ exitCodes = [] } = {}) {
+function harness({ exitCodes = [], lock } = {}) {
   const phases = [];
   let phaseIndex = 0;
   let serverDown = false;
@@ -15,6 +15,7 @@ function harness({ exitCodes = [] } = {}) {
     target: "http://server.test",
     scripts: ["/x/simulate-photos.mjs", "/x/simulate-game.mjs"],
     log: (line) => logs.push(line),
+    ...(lock ? { lockApi: lock } : { lockApi: { acquire: () => ({ ok: true, release() {} }), describe: () => "test" } }),
     fetchImpl: async () => {
       if (serverDown) throw new Error("ECONNREFUSED");
       return { ok: true, json: async () => ({ setup: { phase: phases[Math.min(phaseIndex, phases.length - 1)] } }) };
@@ -126,4 +127,26 @@ test("the fixture simulator requires an explicit opt-in, so normal dev and live 
     assert.equal(simulationEnabled({ HTN26_SIMULATE: value }), false, String(value));
   }
   for (const value of ["1", "on", "ON", "true", "yes"]) assert.equal(simulationEnabled({ HTN26_SIMULATE: value }), true, value);
+});
+
+test("if another simulation already holds the lock, the hook does not start a second one", async () => {
+  const lock = { acquire: () => ({ ok: false, holder: { pid: 4242, owner: "simulate-game", at: Date.now() - 3_000 } }), describe: (holder) => `pid ${holder.pid}, ${holder.owner}` };
+  const h = harness({ lock });
+  await h.pollPhase("idle");
+  await h.pollPhase("scanning");
+  assert.equal(h.spawned.length, 0, "no scripts were started");
+  assert.equal(h.simulator.running, false);
+  assert.ok(h.logs.some((line) => /another simulation is already running \(pid 4242, simulate-game\); not starting a second one/.test(line)));
+});
+
+test("the hook holds the lock for the whole photos-then-game run and releases it afterwards", async () => {
+  let released = 0;
+  const lock = { acquire: () => ({ ok: true, release() { released += 1; } }), describe: () => "" };
+  const h = harness({ lock });
+  await h.pollPhase("idle");
+  await h.pollPhase("scanning");
+  await h.finishNext();
+  assert.equal(released, 0, "still held between the two scripts");
+  await h.finishNext();
+  assert.equal(released, 1, "released once, at the end");
 });

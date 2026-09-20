@@ -12,6 +12,13 @@ const LOST_CONNECTION = `${SERVER_UNAVAILABLE} — lost the connection; showing 
 // happened on, so they are cleared once the game moves to another phase.
 const ACTION_ERROR = /^(COMMAND NOT SENT|ROOM LAYOUT FAILED|PHOTO UPLOAD FAILED)/;
 
+// Whatever went wrong with a layout choice, say the way forward (unless the
+// server's own message already does).
+export function layoutFailureMessage(error, failureHint = "") {
+  const hint = failureHint && !/normal room layout/i.test(error?.message || "") ? ` ${failureHint}` : "";
+  return `ROOM LAYOUT FAILED — ${error?.message || "unknown error"}${hint}`;
+}
+
 export function describeConnectionFailure(error) {
   const status = Number(error?.status);
   const unreachable = error instanceof TypeError || (status >= 500 && status <= 504);
@@ -94,7 +101,7 @@ export function createApp({ root, transport, now = () => Date.now() }) {
     render(state);
   };
 
-  const runLayoutChoice = async (operation, progressMessage, successMessage) => {
+  const runLayoutChoice = async (operation, progressMessage, successMessage, failureHint = "") => {
     if (typeof operation !== "function") return onCommand("SCAN_ROOM");
     if (layoutBusy) return undefined; // a second click while one is running would only fight it
     layoutBusy = true;
@@ -112,7 +119,7 @@ export function createApp({ root, transport, now = () => Date.now() }) {
     } catch (error) {
       uploadStatus = "";
       if (!movedOn(stateAtCommandStart)) {
-        connectionError = `ROOM LAYOUT FAILED — ${error.message}`;
+        connectionError = layoutFailureMessage(error, failureHint);
         render(state);
       }
     } finally {
@@ -125,6 +132,7 @@ export function createApp({ root, transport, now = () => Date.now() }) {
     transport.generateRoomLayout?.bind(transport),
     "Mapping the uploaded room photos…",
     "Personalized room layout ready.",
+    "You can still continue with the Normal Room Layout.",
   );
 
   const onUseDefaultLayout = () => runLayoutChoice(

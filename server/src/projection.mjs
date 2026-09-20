@@ -1400,11 +1400,52 @@ export class ServerProjection {
     return this.ingestPlayerAction(translated, now);
   }
 
+  _ingestControllerPresence(intent, now = this.now()) {
+    const value = String(intent.value || "");
+    const match = /^P([1-3])$/.exec(value);
+    const senderMac = String(intent.senderMac || "").toUpperCase();
+    const player = match ? this._player(`p${match[1]}`) : null;
+    if (!player || !/^([0-9A-F]{2}:){5}[0-9A-F]{2}$/.test(senderMac)) {
+      return { accepted: false, detail: "invalid fixed-player controller presence" };
+    }
+    const mappedPlayerId = this._badges.get(senderMac);
+    if ((mappedPlayerId && mappedPlayerId !== player.id) || (player.badgeMac && player.badgeMac !== senderMac)) {
+      this._record("controller-conflict", `${player.id} is already assigned to another badge`, now, { playerId: player.id });
+      this._touch(now);
+      return { accepted: false, detail: `${player.id} is already assigned to another badge`, stateVersion: this._state.version };
+    }
+    const wasConnected = player.connection?.status === "connected";
+    this.registerBadge(senderMac, player.id, now);
+    player.connection = {
+      ...player.connection,
+      status: "connected",
+      source: "oc2-presence",
+      lastSeenAt: iso(now),
+      staleAfterMs: this.controllerPresenceTimeoutMs,
+      detail: "Controller heartbeat received",
+    };
+    this._state.health.gateway = {
+      ...this._state.health.gateway,
+      status: "healthy",
+      lastSeenAt: iso(now),
+      detail: "Host badge / USB online",
+    };
+    if (!wasConnected) this._record("controller-connected", `${player.name} connected`, now, { playerId: player.id });
+    this._touch(now);
+    return { accepted: true, connected: true, playerId: player.id, detail: `${player.name} connected`, stateVersion: this._state.version };
+  }
+
   ingestBadgeEvent(intent, now = this.now()) {
     this._tick(now);
     const sequenceKey = `${String(intent.senderMac || "").toUpperCase()}#${intent.sequence}`;
     if (this._seenEvents.has(sequenceKey)) return { accepted: false, duplicate: true, detail: "duplicate badge sequence ignored" };
     const value = String(intent.value || "");
+    if (intent.type === "P") {
+      const result = this._ingestControllerPresence(intent, now);
+      this._seenEvents.add(sequenceKey);
+      while (this._seenEvents.size > 512) this._seenEvents.delete(this._seenEvents.values().next().value);
+      return { duplicate: false, ...result };
+    }
     const isHostControl = intent.type === "H" && /^(START|END|RESET)$/.test(value);
     if (!isHostControl && this._state.timer.status !== "running") {
       this._state.health.gateway = { ...this._state.health.gateway, status: "healthy", lastSeenAt: iso(now), detail: "Host badge / USB online" };
@@ -1424,7 +1465,7 @@ export class ServerProjection {
     else if (intent.type === "H" && value === "RESET") result = this.ingestHostControl({ control: "RESET" }, now);
     else if (intent.type === "E") result = this._legacyPlayerEvent(intent, now);
     else {
-      const player = this._playerForIntent(intent);
+      const player = this._playerForIntent(intent, now);
       if (intent.type === "B" && /^SUBMIT[:=]/i.test(value)) {
         result = player
           ? this.ingestSubmission({ playerId: player.id, plate: value.replace(/^SUBMIT[:=]/i, "") }, now)
@@ -1454,6 +1495,17 @@ export class ServerProjection {
       droppedCount: status.droppedCount,
       detail: status.up ? "Host badge / USB online" : "Gateway reported down",
     };
+    if (!status.up) {
+      for (const player of this._state.players) {
+        if (player.connection?.status !== "connected") continue;
+        player.connection = {
+          ...player.connection,
+          status: "offline",
+          detail: "Gateway reported down",
+          staleAfterMs: this.controllerPresenceTimeoutMs,
+        };
+      }
+    }
     this._record("gateway-status", status.up ? "Gateway is up" : "Gateway is down", now, { packetCount: status.packetCount, droppedCount: status.droppedCount });
     this._touch(now);
     return { accepted: true, detail: status.up ? "gateway healthy" : "gateway reported down", stateVersion: this._state.version };

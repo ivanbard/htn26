@@ -9,6 +9,7 @@
 import { spawn } from "node:child_process";
 import { basename } from "node:path";
 import { fileURLToPath } from "node:url";
+import { acquireSimLock, describeHolder } from "../server/sim-lock.mjs";
 
 const ON_VALUES = new Set(["1", "on", "true", "yes"]);
 
@@ -40,6 +41,7 @@ export function createSimulator({
   fetchImpl = globalThis.fetch,
   spawnImpl = spawn,
   log = (line) => console.log(line),
+  lockApi = { acquire: acquireSimLock, describe: describeHolder },
 } = {}) {
   let lastPhase = null;
   let running = false;
@@ -72,6 +74,14 @@ export function createSimulator({
   });
 
   async function run() {
+    // A manually started script (or another dev server's hook) may already be
+    // driving the server. Starting a second simulation would restart the host in
+    // the middle of the first one's setup, so let that one finish.
+    const lock = lockApi.acquire({ owner: "dev-hook" });
+    if (!lock.ok) {
+      log(`[sim] another simulation is already running (${lockApi.describe(lock.holder)}); not starting a second one`);
+      return;
+    }
     running = true;
     log(`[sim] game started: running ${scripts.map((script) => basename(script)).join(", then ")}`);
     try {
@@ -86,6 +96,7 @@ export function createSimulator({
       log("[sim] finished; the next game start will run it again");
     } finally {
       running = false;
+      lock.release();
     }
   }
 

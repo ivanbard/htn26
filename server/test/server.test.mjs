@@ -391,6 +391,9 @@ test("returning to the opening screen clears a pre-game placement without interr
   const opening = setup.command("RESET_TO_OPENING", {}, now);
   assert.equal(opening.setup.phase, "idle");
   assert.equal(opening.floorPlan.accepted, false);
+  assert.equal(opening.setup.photoCount, 0);
+  assert.equal(opening.floorPlan.photoCount, 0);
+  assert.deepEqual(opening.photos, []);
   assert.equal(opening.burgerLevel.status, "not-generated");
   assert.equal(opening.timer.status, "ready");
   assert.equal(opening.timer.remainingSeconds, 240);
@@ -1016,4 +1019,34 @@ test("a request that does not fit the game's state gets a 409 with the real reas
     assert.equal(unknown.status, 400);
     assert.deepEqual(await unknown.json(), { error: "unsupported command: NOT_A_COMMAND" });
   });
+});
+
+test("layout generation without an API key says how to fix it; other failures stay generic", async () => {
+  const photos = () => {
+    const form = new FormData();
+    for (let index = 1; index <= 3; index += 1) form.append("photos", new Blob([`photo ${index}`], { type: "image/jpeg" }), `room-${index}.jpg`);
+    return form;
+  };
+  // No key: a setup problem the operator can fix, and safe to state.
+  await withRuntime(async (base) => {
+    const response = await fetch(`${base}/api/layout/generate`, { method: "POST", body: photos() });
+    assert.equal(response.status, 503);
+    const { error } = await response.json();
+    assert.match(error, /needs an OpenAI API key on the game server/);
+    assert.match(error, /OPENAI_API_KEY/);
+    assert.doesNotMatch(error, /sk-/);
+  }, { env: {} });
+  // A key whose provider call fails: nothing about the provider leaks. The provider's
+  // fetch is faked so this test never touches the network.
+  const dataDir = await mkdtemp(path.join(tmpdir(), "htn26-server-"));
+  const runtime = await createRuntime({ dataDir, env: { OPENAI_API_KEY: "sk-test-not-real" }, fetchImpl: async () => { throw new Error("network down"); } });
+  await new Promise((resolve) => runtime.server.listen(0, "127.0.0.1", resolve));
+  try {
+    const response = await fetch(`http://127.0.0.1:${runtime.server.address().port}/api/layout/generate`, { method: "POST", body: photos() });
+    assert.equal(response.status, 503);
+    assert.deepEqual(await response.json(), { error: "Room layout generation is unavailable. Try again." });
+  } finally {
+    await runtime.close();
+    await rm(dataDir, { recursive: true, force: true });
+  }
 });

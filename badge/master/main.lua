@@ -160,7 +160,7 @@ local function valid_player_packet(payload)
   if string.find(payload, "\n", 1, true) ~= nil then return false end
 
   local sequence, event_type, value = string.match(payload,
-    "^OC2|([^|]+)|([NMBHE])|([^|]+)$")
+    "^OC2|([^|]+)|([NMBHEP])|([^|]+)$")
   if sequence == nil or not valid_sequence(sequence) or
       not printable_value(value) then
     return false
@@ -222,7 +222,8 @@ local function receive_packet(mac, rssi, payload)
     invalid_count = increment_counter(invalid_count)
     return
   end
-  if not game_active then
+  local presence = string.match(payload, "^OC2|%d+|P|P([1-3])$") ~= nil
+  if not game_active and not presence then
     ignored_count = increment_counter(ignored_count)
     return
   end
@@ -452,7 +453,7 @@ function on_tick()
   local now = badge.sys.ms()
   if radio_enabled then update_radio_drops() end
   if game_active then update_timer(now) end
-  if game_active then flush_packets(now) end
+  if radio_enabled then flush_packets(now) end
   if now >= next_display_ms then
     next_display_ms = now + DISPLAY_INTERVAL_MS
     update_display(false)

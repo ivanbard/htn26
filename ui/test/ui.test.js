@@ -171,7 +171,7 @@ test("renders room upload and server-driven player readiness during scanning", (
   assert.match(html, /data-player-slot="2" data-player-ready="false"/);
   assert.match(html, /data-player-slot="3" data-player-ready="false"/);
   assert.match(html, /player-readiness-icon[\s\S]*PLAYER 1/);
-  assert.match(html, /WAITING FOR PLAYER/);
+  assert.match(html, /WAITING FOR CONTROLLER/);
   assert.doesNotMatch(html, /Add room photos/);
   assert.doesNotMatch(html, /data-photo-input/);
   const styles = fs.readFileSync(new URL("../styles.css", import.meta.url), "utf8");
