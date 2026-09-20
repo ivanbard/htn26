@@ -1,4 +1,5 @@
 import { createMockTransport } from "./mock-transport.js";
+import { generateRoomLayout } from "./photo.js";
 import { normalizeServerSnapshot } from "./server-snapshot.js";
 
 /**

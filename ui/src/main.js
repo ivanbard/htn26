@@ -26,6 +26,7 @@ export function createApp({ root, transport, now = () => Date.now() }) {
       transportKind: transport.kind,
       onCommand,
       onUploadPhotos,
+      onGenerateLayout: typeof transport.generateLayout === "function" ? onGenerateLayout : undefined,
     };
     if (reactRoot) reactRoot.render(React.createElement(App, props));
     else root.innerHTML = renderApp(state, props.now, connectionError);
@@ -40,6 +41,18 @@ export function createApp({ root, transport, now = () => Date.now() }) {
       render(nextState);
     } catch (error) {
       connectionError = `COMMAND NOT SENT — ${error.message}`;
+      render(state);
+    }
+  };
+
+  const onGenerateLayout = async (files) => {
+    connectionError = "";
+    try {
+      if (typeof transport.generateLayout !== "function") throw new Error("AI room layout generation is unavailable in this transport");
+      const nextState = await transport.generateLayout(files);
+      render(nextState);
+    } catch {
+      connectionError = "ROOM LAYOUT UNAVAILABLE — Try again with 3-5 classroom photos.";
       render(state);
     }
   };

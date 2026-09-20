@@ -231,7 +231,7 @@ events.onerror = () => { element('status').textContent += ' (live event stream r
 </html>`;
 }
 
-export function createHttpServer({ projection, photoStore, bindOrigin = process.env.HTN26_CORS_ORIGIN || "*" } = {}) {
+export function createHttpServer({ projection, photoStore, roomLayoutGenerator, bindOrigin = process.env.HTN26_CORS_ORIGIN || "*" } = {}) {
   if (!projection) throw new Error("projection is required");
   if (!photoStore) throw new Error("photoStore is required");
   const clients = new Set();
@@ -254,6 +254,31 @@ export function createHttpServer({ projection, photoStore, bindOrigin = process.
     for (const upload of uploads) saved.push(await photoStore.save(upload.bytes, upload));
     projection.setPhotos(photoStore.photos, Date.now());
     return { photos: photoStore.list(), accepted: saved.map((photo) => photo.id), count: photoStore.photos.length, reviewReady: photoStore.photos.length >= 3 };
+  }
+
+  function timingHeader(metrics = {}) {
+    const entries = [["preprocess", metrics.preprocessMs], ["openai", metrics.requestMs], ["validation", metrics.validationMs], ["total", metrics.totalMs]]
+      .filter(([, value]) => Number.isFinite(Number(value)))
+      .map(([name, value]) => `${name};dur=${Number(value).toFixed(1)}`);
+    return entries.length ? { "server-timing": entries.join(", "), "x-htn26-layout-metrics": JSON.stringify(metrics) } : {};
+  }
+
+  async function generateRoomLayout(req, res, headers) {
+    const body = await readBody(req, MAX_REQUEST_BYTES);
+    const type = contentType(req);
+    const uploads = type.startsWith("multipart/form-data")
+      ? parseMultipart(body, type)
+      : [{ filename: req.headers["x-photo-name"] || "room-photo", mime: type.split(";")[0] || "application/octet-stream", bytes: body }];
+    if (uploads.length < 3 || uploads.length > 5) throw Object.assign(new Error("upload 3 to 5 room photos"), { statusCode: 400 });
+    try {
+      const result = await roomLayoutGenerator?.generate(uploads, { preprocessMs: Number(req.headers["x-htn26-photo-preprocess-ms"]) });
+      if (!result?.layout) throw new Error("no layout returned");
+      projection.proposeRoomLayout(result.layout, Date.now(), { photoCount: uploads.length });
+      send(res, 200, result.layout, { ...headers, ...timingHeader(result.metrics) });
+    } catch (error) {
+      const metrics = error?.metrics || {};
+      send(res, Number(error?.statusCode) || 503, { error: "Room layout generation is unavailable. Try again." }, { ...headers, ...timingHeader(metrics) });
+    }
   }
 
   async function handle(req, res) {
@@ -291,6 +316,9 @@ export function createHttpServer({ projection, photoStore, bindOrigin = process.
       }
       if (req.method === "POST" && url.pathname === "/api/photos") {
         send(res, 201, await uploadPhotos(req, res), headers); return;
+      }
+      if (req.method === "POST" && url.pathname === "/api/layout/generate") {
+        await generateRoomLayout(req, res, headers); return;
       }
       if (req.method === "POST" && ["/api/floorplan/review", "/api/floorplan/propose", "/api/floorplan"].includes(url.pathname)) {
         const payload = parseJsonBody(await readBody(req));

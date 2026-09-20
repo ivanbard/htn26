@@ -1,4 +1,5 @@
 import { LocalFloorplanProvider, localPlan } from "./provider.mjs";
+import { sanitizeRoomLayout } from "./layout-schema.mjs";
 
 const ROUND_SECONDS = 240;
 const CHOP_SECONDS = 3;
@@ -531,6 +532,46 @@ export class ServerProjection {
   setPhotos(photos, now = this.now()) {
     this._state.photos = photos.map(({ absolutePath, ...photo }) => ({ ...photo }));
     this._touch(now);
+  }
+
+  setRoomLayout(candidate, now = this.now()) {
+    const layout = sanitizeRoomLayout(candidate);
+    this._state.roomLayout = clone(layout);
+    const stations = layout.stations.map((station, index) => ({
+      id: station.type,
+      label: station.type.replaceAll("_", " ").toUpperCase(),
+      kind: station.type === "cutting_board" ? "chop" : station.type === "stove" ? "stove" : "ingredient",
+      x: Math.max(0, (station.center.x - station.width / 2) * 10),
+      y: Math.max(0, (station.center.y - station.height / 2) * 10),
+      width: Math.max(0.2, station.width * 10),
+      height: Math.max(0.2, station.height * 10),
+      nfcTag: station.type,
+      instruction: `Place the ${station.type.replaceAll("_", " ")} NFC sticker here.`,
+      rotationDeg: station.rotationDeg,
+    }));
+    this._state.floorPlan = {
+      accepted: true,
+      provider: "openai-layout",
+      mode: "ai",
+      reviewMessage: "AI room layout generated from the classroom photos.",
+      room: { widthMeters: 10, heightMeters: 10 },
+      width: 10,
+      height: 10,
+      units: "m",
+      coordinateSpace: "normalized-percent",
+      walls: [],
+      stations: clone(stations),
+      placementInstructions: stations.map(({ id, label, instruction, x, y }) => ({ id, label, instruction, x, y })),
+      photoCount: this._state.photos.length,
+      generatedAt: iso(now),
+    };
+    this._state.burgerLevel = { status: "placement-ready", recipe: "BURGER", placementInstructions: clone(this._state.floorPlan.placementInstructions) };
+    this._state.stations = stations.map((station) => ({ id: station.id, label: station.label, kind: station.kind, status: "idle", progress: 0, remainingSeconds: 0, item: null }));
+    this._state.setup.phase = "burger-placement";
+    this._state.setup.message = "AI room layout ready. Place the four burger stations as shown, then start the round.";
+    this._state.health.inference = { id: "inference", label: "SETUP INFERENCE", status: "healthy", lastSeenAt: iso(now), detail: this._state.setup.message };
+    this._touch(now);
+    return this.snapshot(now);
   }
 
   async proposeFloorplan({ photos = [], readPhoto } = {}, now = this.now()) {

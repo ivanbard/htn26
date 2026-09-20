@@ -6,6 +6,7 @@ import { ServerProjection } from "./src/projection.mjs";
 import { createSerialStreamAdapter } from "./src/protocol.mjs";
 import { openSerialDevice } from "./src/serial-device.mjs";
 import { PhotoStore, createHttpServer } from "./src/http.mjs";
+import { createRoomLayoutGenerator } from "./src/layout-generator.mjs";
 
 function parseArgs(argv) {
   const options = {};
@@ -28,6 +29,7 @@ export async function createRuntime({ env = process.env, now = () => Date.now(),
   const photoStore = new PhotoStore({ directory });
   await photoStore.init();
   const provider = createFloorplanProvider({ env, fetchImpl, now });
+  const roomLayoutGenerator = createRoomLayoutGenerator({ env, fetchImpl, now });
   const projection = new ServerProjection({
     provider,
     now,
@@ -57,7 +59,7 @@ export async function createRuntime({ env = process.env, now = () => Date.now(),
       onError: (error) => console.error(`serial device ${env.HTN26_SERIAL_DEVICE}: ${error.message}`),
     })
     : null;
-  const server = createHttpServer({ projection, photoStore });
+  const server = createHttpServer({ projection, photoStore, roomLayoutGenerator });
   const interval = setInterval(() => projection.snapshot(now()), 250);
   interval.unref?.();
   return {
@@ -65,6 +67,7 @@ export async function createRuntime({ env = process.env, now = () => Date.now(),
     provider,
     projection,
     photoStore,
+    roomLayoutGenerator,
     serialAdapter,
     serialDevice,
     server,
