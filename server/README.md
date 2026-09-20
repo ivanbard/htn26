@@ -108,6 +108,10 @@ curl -sS http://127.0.0.1:8787/api/health
 
 ## HTTP API
 
+The detailed frontend contract is in [`API.md`](API.md). It covers lifecycle,
+SSE behavior, snapshot fields, routes, serial fixtures, and the two frontend
+simulation scripts.
+
 Normal responses are JSON. Errors use `{ "error": "safe message" }` and do
 not contain raw provider details. `/api/events` is an SSE stream. The browser
 HTTP transport uses `GET /api/state`, `GET /api/events`, `POST /api/command`,
@@ -128,12 +132,11 @@ and `POST /api/layout/generate`.
 | `POST /api/command` | JSON command described below | updated snapshot | `400` invalid JSON or HTTP `SCAN_ROOM`; `500` unsupported/invalid state transition |
 
 The command body is `{ "type": "COMMAND" }`. Supported server commands are
-`START_HOST`, `APPROVE_LAYOUT` (alias `ACCEPT_LAYOUT`), `START_GAME`,
-`END_GAME`, and `RESET_GAME`. `START_GAME` requires an explicitly approved
-proposal. `SCAN_ROOM` on the HTTP transport returns `400` with guidance to
-send 3-5 photos to `POST /api/layout/generate`; it remains executable in the
-offline mock so that setup can progress without OpenAI. Deterministic review
-remains separate.
+`START_HOST`, `SCAN_ROOM`, `APPROVE_LAYOUT` (alias `ACCEPT_LAYOUT`),
+`START_GAME`, `END_GAME`, and `RESET_GAME`. `START_GAME` requires an explicitly
+approved proposal. On this root server, `SCAN_ROOM` creates the deterministic
+local proposal; the photo-backed path uses `POST /api/layout/generate` and
+then approval. See [`API.md`](API.md) for the complete lifecycle.
 
 ### Photo, layout, and approval routes
 
