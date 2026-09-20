@@ -4,9 +4,9 @@ import assert from "node:assert/strict";
 import { createApp } from "../src/main.js";
 import { createInitialMockState, createMockTransport } from "../src/mock-transport.js";
 import { renderApp } from "../src/render.js";
+import { createHttpTransport } from "../src/transport.js";
 import { ROOM_COORDINATE_SPACE, validateFrontendSnapshot } from "../src/contracts.js";
 import { normalizeServerSnapshot } from "../src/server-snapshot.js";
-import { createHttpTransport } from "../src/transport.js";
 import {
   isWalkablePosition,
   pathsHaveAgentConflict,
@@ -340,9 +340,11 @@ test("renders gameplay as a framed room board with state shown on each station",
   assert.match(html, /data-player="p2"[\s\S]*?chef-player-blue\.svg/);
   assert.match(html, /data-player="p3"[\s\S]*?<span class="player-tag">P3<\/span>/);
   assert.equal((html.match(/data-player-path="barrier-safe"/g) || []).length, 3);
-  assert.equal((html.match(/data-player-card=/g) || []).length, 3);
-  assert.match(html, /data-player-card="p2"[^>]*data-held-item="RAW_MEAT"[^>]*data-action-state="chopping"/);
-  assert.match(html, /data-player-card="p1"[^>]*data-submission-status="failure"/);
+  assert.equal((html.match(/class="player-location-info"/g) || []).length, 3);
+  assert.doesNotMatch(html, /data-player-card=/);
+  assert.match(html, /data-player="p2"[^>]*data-location="cutting-board"[^>]*data-held-item="RAW_MEAT"[^>]*data-action-state="chopping"/);
+  assert.match(html, /data-player="p1"[^>]*data-submission-status="failure"/);
+  assert.match(html, /PLAYER 2/);
   assert.match(html, /RAW MEAT/);
   assert.match(html, /CHOPPING/);
   assert.match(html, /WRONG BURGER · -25/);
@@ -470,12 +472,47 @@ test("renders only event-inferred player locations", () => {
 
   const html = renderApp(state, 7_000);
 
-  assert.match(html, /data-player="p1" data-location="bottom"[^>]*aria-label="PLAYER 1, event-inferred bottom"/);
-  assert.match(html, /data-player="p2" data-location="cutting-board"[^>]*aria-label="PLAYER 2, event-inferred cutting-board"/);
-  assert.match(html, /data-player="p3" data-location="bump-middle"[^>]*aria-label="PLAYER 3, event-inferred bump-middle"/);
+  assert.match(html, /data-player="p1" data-location="bottom"[^>]*aria-label="PLAYER 1, event-inferred bottom, holding/);
+  assert.match(html, /data-player="p2" data-location="cutting-board"[^>]*aria-label="PLAYER 2, event-inferred cutting-board, holding/);
+  assert.match(html, /data-player="p3" data-location="bump-middle"[^>]*aria-label="PLAYER 3, event-inferred bump-middle, holding/);
   assert.doesNotMatch(html, /tracking (?:lost|stale)/i);
   assert.doesNotMatch(html, /TRACKING DEGRADED/);
   assert.doesNotMatch(html, /LOCAL SYSTEM HEALTH/);
+});
+
+test("receives named state events from the laptop server", async () => {
+  const initial = createInitialMockState(1_000);
+  const updated = structuredClone(initial);
+  updated.version += 1;
+  updated.players[1].heldItem = "CHOPPED_MEAT";
+  updated.players[1].actionState = "chop complete";
+  const received = [];
+
+  class FakeEventSource {
+    static instance;
+    constructor(url) {
+      this.url = url;
+      this.listeners = new Map();
+      FakeEventSource.instance = this;
+    }
+    addEventListener(type, listener) { this.listeners.set(type, listener); }
+    emit(type, data) { this.listeners.get(type)?.({ data: JSON.stringify(data) }); }
+    close() { this.closed = true; }
+  }
+
+  const transport = createHttpTransport({
+    baseUrl: "http://laptop.test",
+    fetchImpl: async () => ({ ok: true, async json() { return initial; } }),
+    eventSourceFactory: FakeEventSource,
+  });
+  const cleanup = await transport.connect((state) => received.push(state));
+
+  assert.equal(FakeEventSource.instance.url, "http://laptop.test/api/events");
+  assert.deepEqual(received, [initial]);
+  FakeEventSource.instance.emit("state", updated);
+  assert.deepEqual(received, [initial, updated]);
+  cleanup();
+  assert.equal(FakeEventSource.instance.closed, true);
 });
 
 test("host commands follow start, scan, approval, burger placement, and round lifecycle", async () => {
@@ -730,7 +767,7 @@ test("renders a rejected burger's live penalty and updates the score", async () 
   assert.match(html, /class="delivery-toast is-failure"/);
   assert.match(html, /WRONG BURGER/);
   assert.match(html, /-25 PENALTY/);
-  assert.match(html, /data-player-card="p1"[^>]*data-submission-status="failure"/);
+  assert.match(html, /data-player="p1"[^>]*data-submission-status="failure"/);
   assert.match(html, /WRONG BURGER · -25/);
 });
 
@@ -862,9 +899,10 @@ test("renders the laptop server snapshot contract with player event state", () =
   assert.equal(validateFrontendSnapshot(state).valid, true);
   const html = renderApp(state, 1_000);
   assert.doesNotMatch(html, /Authoritative state unavailable/);
-  assert.equal((html.match(/data-player-card=/g) || []).length, 3);
-  assert.match(html, /data-player-card="p2"[^>]*data-held-item="CHOPPED_MEAT"[^>]*data-action-state="chop complete"[^>]*data-submission-status="failure"/);
-  assert.match(html, /aria-label="PLAYER 2, event-inferred cutting-board"/);
+  assert.equal((html.match(/class="player-location-info"/g) || []).length, 3);
+  assert.doesNotMatch(html, /data-player-card=/);
+  assert.match(html, /data-player="p2"[^>]*data-held-item="CHOPPED_MEAT"[^>]*data-action-state="chop complete"[^>]*data-submission-status="failure"/);
+  assert.match(html, /aria-label="PLAYER 2, event-inferred cutting-board, holding CHOPPED MEAT, chop complete"/);
   assert.match(html, /CHOPPED MEAT/);
   assert.match(html, /WRONG BURGER · -25/);
 });

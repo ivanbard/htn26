@@ -107,6 +107,20 @@ button:focus-visible { outline: 3px solid var(--yellow); outline-offset: 3px; }
 .player-marker-cyan { --player-color: #5bd8ee; border-color: #5bd8ee; }
 .player-marker-violet { --player-color: #c995ff; border-color: #c995ff; }
 .player-marker-stale { border-style: dashed; border-color: #ff6f6f; }
+.event-player { --player-color: #ff9d45; pointer-events: none; }
+.event-player-orange { --player-color: #ff9d45; }
+.event-player-cyan { --player-color: #5bd8ee; }
+.event-player-violet { --player-color: #c995ff; }
+.player-location-info { position: absolute; bottom: calc(100% + .25rem); left: 50%; display: grid; min-width: clamp(110px, 9vw, 165px); transform: translateX(-50%); gap: .12rem; border: 2px solid var(--player-color); border-radius: clamp(6px, .55vw, 10px); background: rgba(8, 16, 25, .94); padding: clamp(.25rem, .38vw, .45rem); color: white; box-shadow: 0 4px 8px rgba(0, 0, 0, .38); text-align: left; }
+.player-location-name { overflow: hidden; color: var(--player-color); font-size: clamp(.5rem, .65vw, .78rem); line-height: 1; text-overflow: ellipsis; white-space: nowrap; }
+.player-location-held { display: flex; min-width: 0; align-items: center; gap: .2rem; }
+.player-location-held img { flex: 0 0 auto; width: clamp(16px, 1.35vw, 24px); height: clamp(16px, 1.35vw, 24px); }
+.player-location-held img + img { margin-left: -.55rem; }
+.player-location-held > span:last-child { min-width: 0; overflow: hidden; font-size: clamp(.42rem, .52vw, .65rem); font-weight: 950; text-overflow: ellipsis; white-space: nowrap; }
+.player-location-empty { color: #a9bac9; font-size: clamp(.4rem, .48vw, .6rem); font-weight: 950; }
+.player-location-action { overflow: hidden; color: #a9bac9; font-size: clamp(.38rem, .46vw, .58rem); font-weight: 900; text-overflow: ellipsis; white-space: nowrap; }
+.player-location-info .is-failure { color: #ff6f6f; font-size: clamp(.38rem, .46vw, .58rem); }
+.player-location-info .is-success { color: #57e389; font-size: clamp(.38rem, .46vw, .58rem); }
 
 .hud-timer { position: relative; width: 100%; aspect-ratio: 1320 / 500; color: #fdfeff; }
 /* Geometry lifted directly from the Figma frame (node 20-2), which specs a
@@ -513,9 +527,9 @@ button:focus-visible { outline: 3px solid var(--yellow); outline-offset: 3px; }
   filter: drop-shadow(0 2px 1px rgba(43, 23, 18, .34));
 }
 
-.player-team-red { --team-colour: #d63d3d; }
-.player-team-blue { --team-colour: #326fd0; }
-.player-team-green { --team-colour: #2d9b57; }
+.player-team-red { --team-colour: #d63d3d; --player-color: #d63d3d; }
+.player-team-blue { --team-colour: #326fd0; --player-color: #326fd0; }
+.player-team-green { --team-colour: #2d9b57; --player-color: #2d9b57; }
 .player-team-red .player-chef-art,
 .player-team-blue .player-chef-art { filter: drop-shadow(0 2px 1px rgba(43, 23, 18, .34)); }
 
@@ -849,23 +863,6 @@ button:focus-visible { outline: 3px solid var(--yellow); outline-offset: 3px; }
 .board-score > img { position: absolute; z-index: 2; top: 4%; left: 0; width: 28%; height: 82%; object-fit: contain; }
 .board-score-value { position: absolute; z-index: 2; top: 22%; right: 14.24%; bottom: 18%; left: 36.52%; display: grid; place-items: center; color: white; font-size: clamp(1.25rem, 2.75vw, 3.6rem); font-weight: 950; letter-spacing: -.05em; line-height: 1; }
 .hud-timer-value { position: absolute; z-index: 2; top: 22.2%; right: 11.36%; bottom: 17.8%; left: 35.61%; display: grid; place-items: center; min-width: 0; color: #fdfeff; font-size: clamp(1.05rem, 2.1vw, 2.8rem); font-variant-numeric: tabular-nums; font-weight: 950; letter-spacing: -.05em; line-height: 1; text-align: center; white-space: nowrap; }
-.game-board-players { position: absolute; z-index: 13; right: 19%; bottom: 1.5%; left: 19%; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: clamp(.25rem, .55vw, .7rem); pointer-events: none; }
-.player-hud-card { --player-color: #ff9d45; display: grid; min-width: 0; grid-template-columns: auto minmax(0, 1fr); grid-template-rows: auto auto; align-items: center; gap: .2rem .45rem; border: clamp(2px, .2vw, 4px) solid var(--player-color); border-radius: clamp(8px, .7vw, 14px); background: rgba(10, 18, 29, .94); padding: clamp(.3rem, .45vw, .55rem); box-shadow: 0 5px 10px rgba(0, 0, 0, .42); }
-.player-hud-orange { --player-color: #ff9d45; }
-.player-hud-cyan { --player-color: #5bd8ee; }
-.player-hud-violet { --player-color: #c995ff; }
-.player-hud-identity { display: grid; width: clamp(28px, 2.5vw, 46px); grid-row: 1 / -1; align-self: stretch; place-content: center; border-radius: 7px; background: var(--player-color); color: #17120d; text-align: center; }
-.player-hud-identity strong { font-size: clamp(.65rem, .9vw, 1.05rem); }
-.player-hud-identity span { font-size: clamp(.35rem, .4vw, .5rem); font-weight: 900; }
-.player-hud-held { display: flex; min-width: 0; align-items: center; gap: .25rem; color: white; }
-.player-hud-held img { flex: 0 0 auto; width: clamp(18px, 1.7vw, 30px); height: clamp(18px, 1.7vw, 30px); }
-.player-hud-held img + img { margin-left: -.65rem; }
-.player-hud-held strong { min-width: 0; overflow: hidden; font-size: clamp(.45rem, .57vw, .72rem); text-overflow: ellipsis; white-space: nowrap; }
-.player-hud-empty { color: #a9bac9; font-size: clamp(.42rem, .55vw, .68rem); font-weight: 950; }
-.player-hud-state { display: flex; min-width: 0; justify-content: space-between; gap: .25rem; color: #a9bac9; font-size: clamp(.38rem, .48vw, .62rem); font-weight: 900; }
-.player-hud-state span, .player-hud-state strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.player-hud-state .is-failure { color: #ff6f6f; }
-.player-hud-state .is-success { color: #57e389; }
 @media (max-width: 1050px) {
   /* Stacking the stage cards and workspace columns no longer fits one
      viewport without hurting legibility, so restore normal page scrolling. */
@@ -887,10 +884,9 @@ button:focus-visible { outline: 3px solid var(--yellow); outline-offset: 3px; }
   .game-board-orders.orders-1 { grid-template-columns: minmax(0, 360px); }
   .game-board-orders.orders-2, .game-board-orders.orders-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .game-board-orders.orders-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-.game-board-score, .game-board-timer { bottom: 1.5%; width: 24%; min-width: 100px; }
-  .game-board-players { right: 25%; bottom: 1%; left: 25%; gap: .15rem; }
-  .player-hud-card { grid-template-columns: auto minmax(0, 1fr); padding: .2rem; }
-  .player-hud-state strong { display: none; }
+  .game-board-score, .game-board-timer { bottom: 1.5%; width: 24%; min-width: 100px; }
+  .player-location-info { min-width: 92px; padding: .18rem; }
+  .player-location-info .is-failure, .player-location-info .is-success { display: none; }
   .game-board-score { left: 1.4%; }
   .game-board-timer { right: 1.4%; }
   .hud-order, .hud-order-compact { min-height: 72px; grid-template-columns: 38px minmax(0, 1fr) 50px; gap: .25rem; padding: .35rem; }

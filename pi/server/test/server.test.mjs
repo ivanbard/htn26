@@ -62,6 +62,23 @@ async function approveAndStart(base) {
   return started.data.state;
 }
 
+async function readyProjection(now = 1_000) {
+  const projection = new ServerProjection({
+    provider: new LocalFloorplanProvider({ now: () => now }),
+    now: () => now,
+    random: () => 0,
+  });
+  await projection.proposeFloorplan({ photos: [{ id: "fixture" }] }, now);
+  projection.approveFloorplan(true, now);
+  return projection;
+}
+
+function withoutGatewayHealth(state) {
+  const comparable = structuredClone(state);
+  delete comparable.health.gateway;
+  return comparable;
+}
+
 test("fixture parser accepts noisy and chunk-framed gateway records", async () => {
   const fixture = await readFile(new URL("./fixtures/gateway-events.ndjson", import.meta.url));
   const records = [];
@@ -537,6 +554,56 @@ test("legacy tip frames remain parseable but cannot change server money", () => 
   assert.equal(projection.snapshot(now).tips.total, 0);
   assert.equal(projection.snapshot(now).money.net, 0);
   assert.equal(projection.snapshot(now).eventHistory.at(-1).type, "legacy-tip-ignored");
+});
+
+test("duplicate plate transfers swap both carried states without loss", async () => {
+  const now = 2_000;
+  const projection = await readyProjection(now);
+  projection.command("START_GAME", {}, now);
+  const event = (mac, sequence, player, action) => projection.ingestBadgeEvent({
+    senderMac: mac,
+    sequence,
+    type: "E",
+    value: `P${player}:${action}`,
+    playerId: `p${player}`,
+    action,
+  }, now);
+
+  event("AA:BB:CC:DD:EE:11", 1, 1, "PU:B");
+  event("AA:BB:CC:DD:EE:22", 1, 2, "PL:B---");
+  event("AA:BB:CC:DD:EE:11", 2, 1, "X:HB");
+  event("AA:BB:CC:DD:EE:22", 2, 2, "X:PB---");
+
+  const state = projection.snapshot(now);
+  assert.equal(state.players[0].heldItem, "PLATE");
+  assert.deepEqual(state.players[0].inventory, ["BUN"]);
+  assert.equal(state.players[1].heldItem, "BUN");
+  assert.deepEqual(state.players[1].inventory, ["BUN"]);
+  assert.equal(state.players[0].actionState, "transferred");
+  assert.equal(state.players[1].actionState, "transferred");
+  assert.deepEqual(state.players.slice(0, 2).map((player) => player.location), ["bump-middle", "bump-middle"]);
+});
+
+test("serial lifecycle and development commands share projection behavior", async () => {
+  const now = 3_000;
+  const serialProjection = await readyProjection(now);
+  const developmentProjection = await readyProjection(now);
+
+  const started = serialProjection.ingestGameLifecycle({ type: "START_GAME", durationSeconds: 240, playerCount: 3 }, now);
+  assert.equal(started.accepted, true);
+  developmentProjection.command("START_GAME", { roundSeconds: 240 }, now);
+  assert.deepEqual(
+    withoutGatewayHealth(serialProjection.snapshot(now)),
+    withoutGatewayHealth(developmentProjection.snapshot(now)),
+  );
+
+  const ended = serialProjection.ingestGameLifecycle({ type: "GAME_END", playerCount: 3 }, now);
+  assert.equal(ended.accepted, true);
+  developmentProjection.command("END_GAME", {}, now);
+  assert.deepEqual(
+    withoutGatewayHealth(serialProjection.snapshot(now)),
+    withoutGatewayHealth(developmentProjection.snapshot(now)),
+  );
 });
 
 test("HTTP upload, review, approval, serial projection, and browser reads work", async () => {

@@ -24,9 +24,9 @@ export function createHttpTransport({ baseUrl = "", fetchImpl = globalThis.fetch
 
       if (typeof eventSourceFactory === "function") {
         source = new eventSourceFactory(apiUrl(baseUrl, "/api/events"));
-        const onState = (event) => listener(normalizeSnapshot(JSON.parse(event.data)));
-        if (typeof source.addEventListener === "function") source.addEventListener("state", onState);
-        else source.onmessage = onState;
+        const receiveState = (event) => listener(normalizeSnapshot(JSON.parse(event.data)));
+        if (typeof source.addEventListener === "function") source.addEventListener("state", receiveState);
+        source.onmessage = receiveState;
       } else {
         // Polling is only a local fallback for a server implementation without SSE.
         poll = setInterval(async () => {

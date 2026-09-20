@@ -302,7 +302,7 @@ function playerPointAlongPath(path, progress) {
   return path.at(-1);
 }
 
-function AnimatedPlayer({ player, position, walls, plannedPath, delayMs = 0, pathStrategy = "single-agent" }) {
+function AnimatedPlayer({ player, position, walls, plannedPath, delayMs = 0, pathStrategy = "single-agent", gameplay = false, submission }) {
   const target = projectPointIntoWalkableRoom(position, walls, position);
   const targetKey = `${target.x.toFixed(3)}:${target.y.toFixed(3)}`;
   const wallKey = (walls || []).map((wall) => `${wall.x}:${wall.y}:${wall.width}:${wall.height}:${wall.blocksMovement}`).join("|");
@@ -315,6 +315,16 @@ function AnimatedPlayer({ player, position, walls, plannedPath, delayMs = 0, pat
   const heldItems = playerHeldItems(player, plateItems);
   const hasPlate = Array.isArray(player?.plate) || (Array.isArray(player?.inventory) && player.inventory.some((item) => ingredientKey(item) === "PLATE"));
   const team = playerTeam(player?.color);
+  const held = String(player.heldItem || (player.inventory?.length ? player.inventory[0] : "EMPTY"));
+  const inventory = Array.isArray(player.inventory) ? player.inventory : [];
+  const shownItems = held === "PLATE" ? inventory : held === "EMPTY" ? [] : [held];
+  const heldLabel = held === "PLATE"
+    ? `PLATE${inventory.length ? ` · ${inventory.map(upper).join(" + ")}` : " · EMPTY"}`
+    : upper(held);
+  const resultValue = Number(submission?.points);
+  const submissionLabel = submission
+    ? `${submission.message || submission.status}${Number.isFinite(resultValue) && resultValue !== 0 ? ` · ${resultValue}` : ""}`
+    : null;
 
   React.useEffect(() => {
     const from = previousPoint.current;
@@ -359,13 +369,16 @@ function AnimatedPlayer({ player, position, walls, plannedPath, delayMs = 0, pat
   const label = player.label || player.id;
   const locationLabel = player.location || (position ? "event position" : "position unavailable");
   return h("div", {
-    className: cx("tracked-player", `player-team-${team}`, hasPlate && "has-plate", moving && "is-moving"),
+    className: cx("tracked-player", "event-player", `player-team-${team}`, hasPlate && "has-plate", moving && "is-moving"),
     style: { left: `${visualPosition.x}%`, top: `${visualPosition.y}%` },
     "data-player": player.id,
     "data-location": locationLabel,
+    "data-held-item": held,
+    "data-action-state": player.actionState || "idle",
+    "data-submission-status": submission?.status || "none",
     "data-player-path": "barrier-safe",
     "data-path-strategy": pathStrategy,
-    "aria-label": `${player.name || label}, event-inferred ${locationLabel}`,
+    "aria-label": `${player.name || label}, event-inferred ${locationLabel}, holding ${heldLabel}, ${player.actionState || "idle"}`,
   },
   h("div", { className: "player-token" },
     h("div", { className: "player-avatar" },
@@ -374,6 +387,16 @@ function AnimatedPlayer({ player, position, walls, plannedPath, delayMs = 0, pat
       !hasPlate && heldItems.length > 0 && h("div", { className: "player-held-item", "aria-label": `${label} is holding ${heldItems[0]}` }, h(IngredientIcon, { value: heldItems[0], decorative: true })),
     ),
     h("span", { className: "player-tag" }, label),
+  ),
+  gameplay && h("div", { className: "player-location-info" },
+    h("strong", { className: "player-location-name" }, player.name || label),
+    h("div", { className: "player-location-held" },
+      shownItems.length
+        ? shownItems.map((item, index) => h(IngredientIcon, { key: `${item}-${index}`, value: item, small: true }))
+        : h("span", { className: "player-location-empty" }, "EMPTY"),
+      h("span", null, heldLabel)),
+    h("span", { className: "player-location-action" }, upper(player.actionState || "idle")),
+    submissionLabel && h("strong", { className: submission.status === "failure" ? "is-failure" : "is-success" }, submissionLabel),
   ));
 }
 
@@ -395,6 +418,7 @@ function RoomSurface({ state, now, gameplay = false }) {
       })),
   ];
   const previousTargets = React.useRef(new Map());
+  const submissions = Array.isArray(state.submissions) ? state.submissions : [];
   const walls = (plan.walls || []).map((wall, index) => h("div", {
     key: `wall-${index}`,
     className: cx("kitchen-barrier", /-wall$/.test(wall.id || "") && "is-room-wall"),
@@ -424,6 +448,7 @@ function RoomSurface({ state, now, gameplay = false }) {
   const players = positionedPlayers.map((player) => {
     const position = playerPosition(player);
     const pathPlan = pathPlans.get(player.id);
+    const submission = [...submissions].reverse().find((entry) => entry.playerId === player.id);
     return position ? h(AnimatedPlayer, {
       key: player.id,
       player,
@@ -432,11 +457,16 @@ function RoomSurface({ state, now, gameplay = false }) {
       plannedPath: pathPlan?.path,
       delayMs: pathPlan?.delayMs,
       pathStrategy: pathPlan?.strategy,
+      gameplay,
+      submission,
     }) : h("div", {
       key: player.id,
       className: "tracked-player",
       "data-player": player.id,
       "data-location": "position unavailable",
+      "data-held-item": player.heldItem || "EMPTY",
+      "data-action-state": player.actionState || "idle",
+      "data-submission-status": submission?.status || "none",
       "aria-label": `${player.name || player.label || player.id}, event-inferred position unavailable`,
     });
   });
@@ -602,7 +632,6 @@ function HowItWorksOverlay() {
     ),
   );
 }
-
 // How long a submission result stays on screen. Purely a display-lifetime
 // constant — computed from `now` vs. the event's own timestamp rather than
 // local state, so it needs no timers and just stops rendering once stale.
@@ -639,42 +668,6 @@ function DeliveryToast({ state, now }) {
       : h("div", { className: "delivery-toast-breakdown" }, h("span", { className: "delivery-toast-penalty" }, `${event.penalty ? "-" : ""}${event.penalty || 0} PENALTY`)),
   );
 }
-
-function PlayerCard({ player, submission }) {
-  const held = String(player.heldItem || (player.inventory?.length ? player.inventory[0] : "EMPTY"));
-  const inventory = Array.isArray(player.inventory) ? player.inventory : [];
-  const shownItems = held === "PLATE" ? inventory : held === "EMPTY" ? [] : [held];
-  const resultValue = Number(submission?.points);
-  const result = submission
-    ? `${submission.message || submission.status}${Number.isFinite(resultValue) && resultValue !== 0 ? ` · ${resultValue}` : ""}`
-    : null;
-  return h("article", {
-    className: cx("player-hud-card", `player-hud-${player.color || "orange"}`),
-    "data-player-card": player.id,
-    "data-held-item": held,
-    "data-action-state": player.actionState || "idle",
-    "data-submission-status": submission?.status || "none",
-  },
-  h("div", { className: "player-hud-identity" }, h("strong", null, player.label || player.id), h("span", null, player.name || "PLAYER")),
-  h("div", { className: "player-hud-held", "aria-label": `${player.name || player.id} holding ${upper(held)}` },
-    shownItems.length
-      ? shownItems.map((item, index) => h(IngredientIcon, { key: `${item}-${index}`, value: item, small: true }))
-      : h("span", { className: "player-hud-empty" }, "EMPTY"),
-    h("strong", null, held === "PLATE" ? `PLATE${inventory.length ? ` · ${inventory.map(upper).join(" + ")}` : " · EMPTY"}` : upper(held))),
-  h("div", { className: "player-hud-state" }, h("span", null, upper(player.actionState || "idle")), result && h("strong", { className: submission.status === "failure" ? "is-failure" : "is-success" }, result)));
-}
-
-function PlayersHud({ state }) {
-  const submissions = Array.isArray(state.submissions) ? state.submissions : [];
-  return h("section", { className: "game-board-players", "aria-label": "Player held items and action state" },
-    (state.players || []).map((player) => h(PlayerCard, {
-      key: player.id,
-      player,
-      submission: submissions.findLast?.((entry) => entry.playerId === player.id)
-        || [...submissions].reverse().find((entry) => entry.playerId === player.id),
-    })));
-}
-
 function GameplayBoard({ state, now }) {
   return h("section", { className: "game-board panel overflow-hidden bg-[#0c1824]", "aria-labelledby": "game-board-title" },
     h("h2", { id: "game-board-title", className: "sr-only" }, "Live burger game board"),
@@ -682,7 +675,6 @@ function GameplayBoard({ state, now }) {
       h(RoomStage, { state, now, gameplay: true }),
       h(OrdersHud, { state }),
       h(DeliveryToast, { state, now }),
-      h(PlayersHud, { state }),
       h("div", { className: "game-board-score" }, h(ScoreCard, { state })),
       h("div", { className: "game-board-timer" }, h(TimerCard, { state, compact: true })),
       h(HowItWorksOverlay),
