@@ -1,5 +1,7 @@
 .tools/
 .worktrees/
 build/
+ui/node_modules/
+ui/dist/
 __pycache__/
 *.pyc

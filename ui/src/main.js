@@ -1,3 +1,6 @@
+import React from "react";
+import { createRoot } from "react-dom/client";
+import { App } from "./App.js";
 import { renderApp } from "./render.js";
 import { createBrowserTransport } from "./transport.js";
 
@@ -9,23 +12,21 @@ export function createApp({ root, transport, now = () => Date.now() }) {
   let destroyed = false;
   let unsubscribe;
   let connectionError = "";
+  const reactRoot = typeof root.nodeType === "number" ? createRoot(root) : null;
 
   const render = (nextState) => {
     if (destroyed) return;
     state = nextState;
-    root.innerHTML = renderApp(state, now(), connectionError);
+    const props = { state, now: now(), connectionError, onCommand };
+    if (reactRoot) reactRoot.render(React.createElement(App, props));
+    else root.innerHTML = renderApp(state, props.now, connectionError);
   };
 
-  const onCommand = async (event) => {
-    const button = event.target.closest("button[data-command]");
-    if (!button || button.disabled) return;
-    button.disabled = true;
+  const onCommand = async (command) => {
     connectionError = "";
     const stateAtCommandStart = state;
     try {
-      const nextState = await transport.command(button.dataset.command);
-      // A live transport update wins over a delayed command response. This
-      // prevents an older response from regressing the visible snapshot.
+      const nextState = await transport.command(command);
       if (state !== stateAtCommandStart) return;
       render(nextState);
     } catch (error) {
@@ -34,7 +35,14 @@ export function createApp({ root, transport, now = () => Date.now() }) {
     }
   };
 
-  root.addEventListener("click", onCommand);
+  const onFallbackClick = async (event) => {
+    const button = event.target.closest("button[data-command]");
+    if (!button || button.disabled) return;
+    button.disabled = true;
+    await onCommand(button.dataset.command);
+  };
+  if (!reactRoot) root.addEventListener("click", onFallbackClick);
+
   const connection = transport.connect(render);
   Promise.resolve(connection).then((cleanup) => {
     const resolvedCleanup = typeof cleanup === "function" ? cleanup : undefined;
@@ -48,8 +56,6 @@ export function createApp({ root, transport, now = () => Date.now() }) {
     render(state);
   });
 
-  // The interval only re-evaluates freshness against the last received snapshot.
-  // It never changes positions, timers, score, or any other authoritative value.
   const freshnessTimer = setInterval(() => {
     if (state) render(state);
   }, 1_000);
@@ -60,7 +66,8 @@ export function createApp({ root, transport, now = () => Date.now() }) {
       destroyed = true;
       clearInterval(freshnessTimer);
       unsubscribe?.();
-      root.removeEventListener("click", onCommand);
+      if (!reactRoot) root.removeEventListener("click", onFallbackClick);
+      reactRoot?.unmount();
       transport.close?.();
     },
   };
