@@ -376,8 +376,10 @@ function normalizeLaptopFloorPlan(floorPlan) {
 function stationPosition(stationId, floorPlan) {
   const requested = String(stationId || "center").toLowerCase();
   const stations = Array.isArray(floorPlan?.stations) ? floorPlan.stations : [];
-  const exactId = requested.startsWith("stove-") ? "stove" : requested;
-  const exact = stations.find((candidate) => String(candidate?.id || "").toLowerCase() === exactId);
+  const byId = (id) => stations.find((candidate) => String(candidate?.id || "").toLowerCase() === id);
+  // An exact tile wins (the per-stove tiles stove-left / stove-right); only a plan
+  // with one shared `stove` tile falls back to it.
+  const exact = byId(requested) || (requested.startsWith("stove-") ? byId("stove") : null);
   const indexed = (kind, index = 0) => stations.filter((candidate) => candidate?.kind === kind)[index] || null;
   const station = exact
     || (requested === "pantry" ? stations.find((candidate) => /pantry|bun|lettuce/i.test(`${candidate?.id} ${candidate?.label} ${candidate?.nfcTag}`)) : null)
@@ -387,9 +389,12 @@ function stationPosition(stationId, floorPlan) {
     || (requested === "stove-right" ? (stations.find((candidate) => /stove2|right/i.test(`${candidate?.id} ${candidate?.label}`)) || indexed("stove", 1)) : null)
     || (requested === "serving" ? (stations.find((candidate) => ["assembly", "delivery", "serving"].includes(candidate?.kind) || /assembly|serv/i.test(`${candidate?.id} ${candidate?.label}`)) || null) : null);
   if (!station) return { x: 50, y: 50 };
+  const rect = [station.display?.x, station.display?.y, station.display?.width, station.display?.height].every((value) => Number.isFinite(Number(value)))
+    ? station.display
+    : station;
   return {
-    x: Number(station.x) + (Number(station.width) / 2),
-    y: Number(station.y) + (Number(station.height) / 2),
+    x: Number(rect.x) + (Number(rect.width) / 2),
+    y: Number(rect.y) + (Number(rect.height) / 2),
   };
 }
 

@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { createSerialStreamAdapter, gameEventLog, parseCanonicalLine, parseGatewayRxLine, parseGatewaySerialLine } from "../src/protocol.mjs";
 import { browserDocument } from "../src/http.mjs";
 import { LocalFloorplanProvider } from "../src/provider.mjs";
-import { BURGER_RECIPES, GAME_TIMINGS, MONEY_RULES, ServerProjection } from "../src/projection.mjs";
+import { BURGER_RECIPES, GAME_TIMINGS, MONEY_RULES, ORDER_RULES, ServerProjection } from "../src/projection.mjs";
 import { createRuntime, startupGuide, usage } from "../server.mjs";
 import { configureSerialFd, openSerialDevice } from "../src/serial-device.mjs";
 
@@ -341,6 +341,43 @@ test("projection keeps four recipes, validates submissions, and computes gold/ti
   assert.ok(state.tips.total > 0);
   assert.ok(state.activeOrders.length >= 1);
   assert.equal(state.activeOrders[0].patience.segments, 3);
+});
+
+test("host and browser starts are safe when either one arrives first", async () => {
+  let now = 80_000;
+  const projection = new ServerProjection({ provider: new LocalFloorplanProvider({ now: () => now }), now: () => now });
+  await projection.proposeFloorplan({ photos: [{ id: "fixture" }] }, now);
+  projection.approveFloorplan(true, now);
+
+  // The normal browser preparation happens first, then the physical badge
+  // starts the round. Repeating either lifecycle message must not reset it.
+  const prepared = projection.command("START_GAME", {}, now);
+  assert.equal(prepared.setup.phase, "waiting-for-host-start");
+  const first = projection.ingestHostControl({ control: "START", durationSeconds: 240, framing: "legacy-game" }, now);
+  const beforeDuplicate = projection.snapshot(now);
+  assert.equal(first.accepted, true);
+  assert.equal(projection.command("START_GAME", {}, now).setup.phase, "running");
+  const duplicate = projection.ingestHostControl({ control: "START", durationSeconds: 240, framing: "legacy-game" }, now + 1);
+  assert.equal(duplicate.duplicate, true);
+  assert.deepEqual(projection.snapshot(now + 1).orders, beforeDuplicate.orders);
+
+  // If the badge wins the race, the browser's later preparation request is
+  // still a harmless read of the already-running authoritative round.
+  const early = new ServerProjection({ provider: new LocalFloorplanProvider({ now: () => now }), now: () => now });
+  await early.proposeFloorplan({ photos: [{ id: "fixture" }] }, now);
+  early.approveFloorplan(true, now);
+  early.ingestHostControl({ control: "START", durationSeconds: 240, framing: "legacy-game" }, now);
+  assert.equal(early.command("START_GAME", {}, now).setup.phase, "running");
+
+  // If the previous GAME_END was the line lost during a reconnect, a new
+  // physical START after the authoritative timer has elapsed is still a new
+  // round, not a duplicate of the old one.
+  const recovered = new ServerProjection({ provider: new LocalFloorplanProvider({ now: () => now }), now: () => now, roundSeconds: 1 });
+  await recovered.proposeFloorplan({ photos: [{ id: "fixture" }] }, now);
+  recovered.approveFloorplan(true, now);
+  recovered.ingestHostControl({ control: "START", durationSeconds: 1, framing: "legacy-game" }, now);
+  recovered.ingestHostControl({ control: "START", durationSeconds: 1, framing: "legacy-game" }, now + 1_001);
+  assert.equal(recovered.snapshot(now + 1_001).setup.phase, "running");
 });
 
 test("round timer ends cleanly and resets held, order, and station state", () => {
@@ -853,5 +890,102 @@ test("plain browser view and diagnostic endpoint use the same canonical state", 
     assert.ok(money.tips > 0);
     const state = await fetch(`${base}/api/state`).then((response) => response.json());
     assert.deepEqual(state.money, money);
+  });
+});
+
+async function runningProjection(options = {}) {
+  let now = 1_000_000;
+  const projection = new ServerProjection({ provider: new LocalFloorplanProvider({ now: () => now }), now: () => now, ...options });
+  await projection.proposeFloorplan({ photos: [{ id: "fixture" }] }, now);
+  projection.approveFloorplan(true, now);
+  projection.command("START_GAME", {}, now);
+  projection.ingestHostControl({ control: "START", durationSeconds: 240, framing: "legacy-game" }, now);
+  return { projection, get now() { return now; }, advance(ms) { now += ms; return projection.snapshot(now); }, snapshot() { return projection.snapshot(now); } };
+}
+
+test("a round starts with exactly one order, not a full queue", async () => {
+  const game = await runningProjection({ orderIntervalMinSeconds: 8, orderIntervalMaxSeconds: 35, random: () => 0.5 });
+  const state = game.snapshot();
+  assert.equal(state.orders.length, 1);
+  assert.equal(state.activeOrders.length, 1);
+  assert.equal(state.order.id, "order-1");
+});
+
+test("new orders arrive after a random gap inside the configured span, and never before it", async () => {
+  for (const [random, expectedGap] of [[0, 8], [0.999999, 35]]) {
+    const game = await runningProjection({ orderIntervalMinSeconds: 8, orderIntervalMaxSeconds: 35, random: () => random });
+    game.advance((expectedGap - 1) * 1000);
+    assert.equal(game.snapshot().orders.length, 1, `no second order ${expectedGap - 1}s in`);
+    game.advance(1_000);
+    assert.equal(game.snapshot().orders.length, 2, `second order at ${expectedGap}s`);
+  }
+});
+
+test("orders have realistic patience by recipe, independent of the spawn interval", async () => {
+  // A spawn gap of 8 s must not turn into an 8 s patience.
+  const game = await runningProjection({ orderIntervalMinSeconds: 8, orderIntervalMaxSeconds: 8, random: () => 0, maxActiveOrders: 6 });
+  for (let step = 0; step < 4; step += 1) game.advance(8_000);
+  const orders = game.snapshot().orders;
+  assert.ok(orders.length >= 4);
+  for (const order of orders) {
+    const recipe = BURGER_RECIPES.find((candidate) => candidate.id === order.recipe);
+    assert.equal(order.totalSeconds, ORDER_RULES.patienceBaseSeconds + ORDER_RULES.patiencePerToppingSeconds * recipe.toppings.length, order.recipe);
+    assert.ok(order.totalSeconds >= 60, "long enough to chop, cook, plate, and shake");
+  }
+  // A configured fixed patience still overrides the per-recipe default.
+  const fixed = await runningProjection({ orderPatienceSeconds: 45, random: () => 0 });
+  assert.equal(fixed.snapshot().orders[0].totalSeconds, 45);
+});
+
+test("there is always at least one active order and never more than the cap, even when nothing is served", async () => {
+  const game = await runningProjection({ orderIntervalMinSeconds: 8, orderIntervalMaxSeconds: 8, random: () => 0, maxActiveOrders: 3 });
+  let expired = 0;
+  for (let second = 0; second < 239; second += 1) {
+    const state = game.advance(1_000);
+    assert.equal(state.setup.phase, "running");
+    assert.ok(state.activeOrders.length >= 1, `an order is active at t+${second + 1}s`);
+    assert.ok(state.activeOrders.length <= 3, `at most 3 active at t+${second + 1}s`);
+    expired = state.orders.filter((order) => order.status === "expired").length;
+  }
+  assert.ok(expired >= 1, "unserved orders do eventually expire and are replaced");
+});
+
+test("serving the only active order immediately brings the next one", async () => {
+  const game = await runningProjection({ orderIntervalMinSeconds: 30, orderIntervalMaxSeconds: 30, random: () => 0 });
+  const projection = game.projection;
+  const target = projection._activeOrders()[0];
+  const summary = ["BUN", "MEAT", "LETTUCE", "CHEESE"].map((item) => target.components.includes(item) ? item[0] : "-").join("");
+  projection.ingestPlayerAction({ playerId: "p3", action: "PLATE", plate: summary }, game.now);
+  for (const playerId of ["p1", "p2"]) projection.ingestPlayerAction({ playerId, action: "READY" }, game.now);
+  projection.submit(projection._player("p3"), target.recipe, game.now);
+  const state = game.snapshot();
+  assert.equal(state.orders.find((order) => order.id === target.id).status, "completed");
+  assert.equal(state.activeOrders.length, 1, "a replacement order is waiting");
+  assert.notEqual(state.activeOrders[0].id, target.id);
+});
+
+test("a request that does not fit the game's state gets a 409 with the real reason, not an opaque 500", async () => {
+  await withRuntime(async (base) => {
+    const post = (route, body) => fetch(`${base}${route}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+
+    // Approve with nothing proposed: e.g. another setup restarted the host after this one's review.
+    await post("/api/command", { type: "START_HOST" });
+    await post("/api/floorplan/review", { allowEmpty: true });
+    await post("/api/command", { type: "START_HOST" }); // resets the proposal
+    const approve = await post("/api/floorplan/approve", { approved: true });
+    assert.equal(approve.status, 409);
+    const body = await approve.json();
+    assert.match(body.error, /proposed floorplan is required before approval/);
+    assert.doesNotMatch(body.error, /^server error$/);
+
+    // Start before approval.
+    const start = await post("/api/command", { type: "START_GAME" });
+    assert.equal(start.status, 409);
+    assert.match((await start.json()).error, /approve the floorplan before preparing the game/);
+
+    // A genuine failure is still a generic 500 (nothing internal leaks).
+    const unknown = await post("/api/command", { type: "NOT_A_COMMAND" });
+    assert.equal(unknown.status, 500);
+    assert.deepEqual(await unknown.json(), { error: "server error" });
   });
 });

@@ -87,14 +87,14 @@ OPENAI_API_KEY=sk-... \
 HTN26_BIND_HOST=127.0.0.1 \
 HTN26_PORT=8787 \
 HTN26_DATA_DIR=./data \
-node server.mjs
+node server.mjs --serial DEVICE
 ```
 
-Add `HTN26_SERIAL_DEVICE` with the laptop's readable host-badge device when
-testing serial input. If omitted, the server starts without physical serial
-input and the diagnostic route remains available. Do not copy this command to
-QNX and claim deployment; Node availability, serial enumeration, permissions,
-and baud settings still require target validation.
+Replace `DEVICE` with the laptop's readable host-badge serial path. Serial is
+CLI-only: omitting `--serial DEVICE` starts the server without a physical badge
+attached. Do not copy this command to QNX and claim deployment; Node
+availability, serial enumeration, permissions, and baud settings still require
+target validation.
 
 Health check:
 
@@ -116,6 +116,8 @@ Useful settings:
 - `HTN26_ORDER_INTERVAL_MIN_SECONDS=8`
 - `HTN26_ORDER_INTERVAL_MAX_SECONDS=35`
 - `HTN26_MAX_ACTIVE_ORDERS=3`
+- `HTN26_ORDER_PATIENCE_SECONDS` (optional; default is 60 s plus 15 s per
+  topping, independent of the spawn interval above)
 - `OPENAI_API_KEY` is required for active 3-5-photo generation and must remain
   server-only; omit it only for the separate deterministic path.
 
@@ -127,8 +129,14 @@ The UI development server requires Node.js 20 or newer:
 
 ```sh
 cd ui
-HOST=0.0.0.0 PORT=4173 npm run dev
+npm run dev:live
 ```
+
+`dev:live` explicitly disables Ethan's photo/game fixture scripts. It leaves
+the browser waiting for the physical host's `START_GAME|240|<1-3>` record, so
+the presentation screen runs the full four-minute game. Use `npm run
+dev:simulate` only for a no-hardware fixture preview; that script intentionally
+ends early.
 
 The mock UI is available at:
 

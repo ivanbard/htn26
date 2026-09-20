@@ -842,7 +842,7 @@ function SetupView({ state, now, onCommand, transportKind, onUploadPhotos, uploa
   return h("div", { className: "setup-flow" },
     h(HostPanel, { state, onCommand }),
     h("div", { className: "setup-workspace" },
-      h("section", { className: "setup-card map-card", "aria-labelledby": "map-title" }, h("div", { className: "map-heading" }, h("div", null, h("p", { className: "setup-kicker" }, accepted ? "Layout ready" : "Room map"), h("h2", { id: "map-title" }, accepted ? "Your burger kitchen" : "Room map loading")), h("span", { className: cx("map-state", accepted && "is-ready") }, accepted ? "Ready to place" : "Mapping")), h("p", null, accepted ? "Match each printed ingredient and station to its labelled spot on the map below. Keep chopping boards and stoves still once the round begins." : "The room map is being prepared. Follow the floor walkthrough when it is ready."), transportKind === "http" && h("div", { className: "server-photo-upload" }, h("label", { htmlFor: "room-photo-input" }, "Room photos are uploaded from the phone to the master Pi"), h("input", { id: "room-photo-input", type: "file", accept: "image/*", multiple: true, onChange: (event) => onUploadPhotos?.(event.target.files) }), uploadStatus && h("span", { role: "status" }, uploadStatus)), h("div", { className: "map-frame" }, h(RoomStage, { state, now }))),
+      h("section", { className: "setup-card map-card", "aria-labelledby": "map-title" }, h("div", { className: "map-heading" }, h("div", null, h("p", { className: "setup-kicker" }, accepted ? "Layout ready" : "Room map"), h("h2", { id: "map-title" }, accepted ? "Your burger kitchen" : "Room map loading")), h("span", { className: cx("map-state", accepted && "is-ready") }, accepted ? "Ready to place" : "Mapping")), h("p", null, accepted ? "Match each printed ingredient and station to its labelled spot on the map below. Keep chopping boards and stoves still once the round begins." : "The room map is being prepared. Follow the floor walkthrough when it is ready."), transportKind === "http" && h("div", { className: "server-photo-upload" }, h("label", { htmlFor: "room-photo-input" }, "Room photos are uploaded from the phone to the game server"), h("input", { id: "room-photo-input", type: "file", accept: "image/*", multiple: true, onChange: (event) => onUploadPhotos?.(event.target.files) }), uploadStatus && h("span", { role: "status" }, uploadStatus)), h("div", { className: "map-frame" }, h(RoomStage, { state, now }))),
     ),
   );
 }
@@ -935,10 +935,13 @@ function PlayerSetupView({ state, onCommand, onGenerateLayout, onUseDefaultLayou
   const photoCount = roomPhotoCount(state);
   const hasMinimumPlayers = readyCount >= 1;
   const personalizedReady = transportKind === "http" && photoCount >= 3;
-  const serverUnavailable = Boolean(connectionError) || /failed|unavailable|error/i.test(String(uploadStatus || ""));
-  const canContinue = hasMinimumPlayers && canRunAction(state, GAME_ACTIONS.SCAN_ROOM);
+  const failed = Boolean(connectionError) || /failed|unavailable|error/i.test(String(uploadStatus || ""));
+  const personalizedFirst = personalizedReady && !failed;
+  const canScan = canRunAction(state, GAME_ACTIONS.SCAN_ROOM);
+  const canContinue = hasMinimumPlayers && canScan;
   const personalizedAction = onGenerateLayout || (() => onCommand?.(GAME_ACTIONS.SCAN_ROOM));
   const defaultAction = onUseDefaultLayout || (() => onCommand?.(GAME_ACTIONS.SCAN_ROOM));
+  const primaryAction = () => personalizedFirst ? personalizedAction() : defaultAction();
   return h("main", { className: "onboarding-screen player-setup-screen", "data-onboarding": "players", "aria-labelledby": "player-setup-title" },
     h("div", { className: "player-setup-content" },
       h("div", { className: "onboarding-copy player-setup-heading" },
@@ -955,14 +958,31 @@ function PlayerSetupView({ state, onCommand, onGenerateLayout, onUseDefaultLayou
           className: "onboarding-button player-setup-continue",
           disabled: !canContinue,
           "data-command": GAME_ACTIONS.SCAN_ROOM,
-          onClick: () => personalizedReady && !serverUnavailable ? personalizedAction() : defaultAction(),
-        }, personalizedReady && !serverUnavailable ? "Continue with Personalized Room Layout" : "Continue with Normal Room Layout"),
-        personalizedReady && !serverUnavailable && h("button", {
+          onClick: primaryAction,
+        }, personalizedFirst ? "Continue with Personalized Room Layout" : "Continue with Normal Room Layout"),
+        personalizedFirst && h("button", {
           type: "button",
           className: "onboarding-button onboarding-button-secondary player-setup-default-layout",
           disabled: !canContinue,
           onClick: () => defaultAction(),
         }, "Use Normal Room Layout"),
+        // The personalized layout failed: the normal one is offered first, but the
+        // personalized one is never taken away, so it can be retried.
+        personalizedReady && failed && h("button", {
+          type: "button",
+          className: "onboarding-button onboarding-button-secondary player-setup-retry-personalized",
+          disabled: !canContinue,
+          onClick: () => personalizedAction(),
+        }, "Try the personalized layout again"),
+        // Waiting for badges must never be the only way forward: the round starts from
+        // the host badge anyway, so players can connect after this screen.
+        !hasMinimumPlayers && canScan && h("p", { className: "player-setup-note" }, "No badges are connected yet. You can continue now and connect them before pressing START on the host badge."),
+        !hasMinimumPlayers && canScan && h("button", {
+          type: "button",
+          className: "onboarding-button onboarding-button-secondary player-setup-continue-anyway",
+          "data-command": GAME_ACTIONS.SCAN_ROOM,
+          onClick: primaryAction,
+        }, "Continue anyway"),
       ),
     ),
   );
@@ -1002,12 +1022,18 @@ function sourceIdsForTour(plan, ingredients) {
   return [...new Set(resolved)];
 }
 
-function tourStepsForOrder(order, plan) {
+export function tourStepsForOrder(order, plan) {
   const ingredients = tourIngredients(order);
   const pantry = ingredients.filter((item) => ["BUN", "LETTUCE"].includes(item)).map((item) => TOUR_INGREDIENT_LABELS[item]);
   const fridge = ingredients.filter((item) => ["CHEESE", "MEAT"].includes(item)).map((item) => TOUR_INGREDIENT_LABELS[item]);
   const sourceFocus = sourceIdsForTour(plan, ingredients);
   const fallbackSources = (plan?.stations || []).filter((station) => station.kind === "ingredient").map((station) => station.id);
+  // The server's rooms have no assembly counter: per the v1 rules a plate is taken
+  // at the pantry (Down + scan), so that is where this step points.
+  const assemblyStations = stationIdsForTour(plan, "assembly", null);
+  const pantryStations = (plan?.stations || [])
+    .filter((station) => station.kind === "ingredient" && /PANTRY/i.test(`${station.assetKey || ""} ${station.id || ""}`))
+    .map((station) => station.id);
   return [
     {
       key: "orders",
@@ -1044,9 +1070,11 @@ function tourStepsForOrder(order, plan) {
     {
       key: "assembly",
       title: "Build the order",
-      detail: "Use a plate and match the leftmost card.",
-      control: "In game: scan the plate to add the order's ingredients.",
-      focus: stationIdsForTour(plan, "assembly", ["assembly"]),
+      detail: assemblyStations ? "Use a plate and match the leftmost card." : "Take a plate at the pantry and match the leftmost card.",
+      control: assemblyStations
+        ? "In game: scan the plate to add the order's ingredients."
+        : "In game: press Down while scanning the pantry for a plate, then add the ingredients.",
+      focus: assemblyStations || (pantryStations.length ? pantryStations : fallbackSources.length ? fallbackSources : ["pantry"]),
       target: "station",
     },
     {
@@ -1060,7 +1088,7 @@ function tourStepsForOrder(order, plan) {
   ];
 }
 
-function measureTourTargets(board, step) {
+export function measureTourTargets(board, step) {
   if (!board || typeof board.getBoundingClientRect !== "function") return null;
   const boardRect = board.getBoundingClientRect();
   if (!(boardRect.width > 0) || !(boardRect.height > 0)) return null;
@@ -1091,6 +1119,28 @@ function measureTourTargets(board, step) {
   const signature = `${Math.round(boardRect.width)}:${Math.round(boardRect.height)}:${rects.map((rect) => Object.values(rect).map((value) => Math.round(value)).join(",")).join("|")}`;
   return { stepKey: step.key, width: boardRect.width, height: boardRect.height, rects, bounds, signature };
 }
+
+// What the tour uses when a step cannot be measured (board is 0x0, hidden, or
+// measuring threw): "nothing to point at", which shows the card centred.
+export function unmeasuredTargetInfo(step) {
+  return { stepKey: step.key, width: 1, height: 1, rects: [], bounds: null, signature: `unmeasured:${step.key}` };
+}
+
+// Never lets a failed measurement leave the tour without an answer: the card's
+// buttons only appear once the step has *some* target info.
+export function resolveTourTargetInfo(board, step) {
+  let measured = null;
+  try {
+    measured = measureTourTargets(board, step);
+  } catch {
+    measured = null;
+  }
+  return measured || unmeasuredTargetInfo(step);
+}
+
+// If neither a measurement nor a placement has revealed the card by now, show it
+// anyway (centred): the buttons are inside it.
+export const TOUR_REVEAL_FALLBACK_MS = 600;
 
 function rectanglesOverlap(left, right) {
   return left.left < right.right && left.right > right.left && left.top < right.bottom && left.bottom > right.top;
@@ -1150,6 +1200,13 @@ function TourWalkthrough({ steps, step, targetInfo, onStepChange, onCommand }) {
   const activeTargetInfo = targetInfo?.stepKey === current.key ? targetInfo : null;
   const cardRef = React.useRef(null);
   const [placement, setPlacement] = React.useState(null);
+  const [revealed, setRevealed] = React.useState(false);
+
+  React.useEffect(() => {
+    setRevealed(false);
+    const timer = setTimeout(() => setRevealed(true), TOUR_REVEAL_FALLBACK_MS);
+    return () => clearTimeout(timer);
+  }, [step]);
 
   React.useEffect(() => {
     const card = cardRef.current;
@@ -1165,6 +1222,15 @@ function TourWalkthrough({ steps, step, targetInfo, onStepChange, onCommand }) {
   }, [step, activeTargetInfo?.signature]);
 
   const renderPlacement = activeTargetInfo?.bounds ? placement : null;
+  // Measured but nothing to point at: show the card centred rather than keeping it
+  // hidden (its buttons are inside it, so a hidden card strands the tour).
+  const noTarget = Boolean(activeTargetInfo) && !activeTargetInfo.bounds;
+  const ready = Boolean(renderPlacement) || noTarget || revealed;
+
+  // Put keyboard focus on the main button once the card is showing, so Enter works.
+  React.useEffect(() => {
+    if (ready) cardRef.current?.querySelector(".tour-primary-button")?.focus?.({ preventScroll: true });
+  }, [ready, step]);
   const cardStyle = renderPlacement
     ? { left: `${renderPlacement.x}px`, top: `${renderPlacement.y}px`, "--tour-pointer-offset": `${renderPlacement.pointerOffset}px` }
     : undefined;
@@ -1182,7 +1248,7 @@ function TourWalkthrough({ steps, step, targetInfo, onStepChange, onCommand }) {
       "data-tour-step": current.key,
       "data-tour-placement": renderPlacement?.pointerSide || "center",
       "data-tour-region": "anchored",
-      "data-tour-ready": renderPlacement ? "true" : "false",
+      "data-tour-ready": ready ? "true" : "false",
     },
       h("p", { className: "tour-kicker" }, `Tour ${step + 1} of ${steps.length}`),
       h("h1", { id: "tour-step-title" }, current.title),
@@ -1198,6 +1264,16 @@ function TourWalkthrough({ steps, step, targetInfo, onStepChange, onCommand }) {
         h("button", { type: "button", className: "tour-skip-button", "data-command": GAME_ACTIONS.START_GAME, onClick: () => onCommand?.(GAME_ACTIONS.START_GAME) }, "Skip Tour"),
       ),
     ),
+    // A second way out that does not live inside the card: shown while the card
+    // is not yet showing, and always on very short windows where the card can
+    // be taller than the screen.
+    h("button", {
+      type: "button",
+      className: cx("tour-escape-skip", ready && "is-redundant"),
+      "data-tour-escape": "skip",
+      "data-command": GAME_ACTIONS.START_GAME,
+      onClick: () => onCommand?.(GAME_ACTIONS.START_GAME),
+    }, "Skip tour"),
   );
 }
 
@@ -1216,8 +1292,8 @@ function TourIntroView({ state, now, onCommand }) {
       return undefined;
     }
     const measure = () => {
-      const next = measureTourTargets(boardRef.current, currentStep);
-      if (next) setTargetInfo(next);
+      const next = resolveTourTargetInfo(boardRef.current, currentStep);
+      setTargetInfo((previous) => previous && previous.stepKey === next.stepKey && previous.signature === next.signature ? previous : next);
     };
     measure();
     const observer = typeof ResizeObserver === "function" && boardRef.current
@@ -1248,7 +1324,7 @@ function TourIntroView({ state, now, onCommand }) {
             h("img", { className: "tour-burger", src: "/assets/order-burger.png", alt: "" }),
             h("h1", { id: "tour-title" }, "Welcome to ", h("strong", null, "UnderCooked Interactive Tour")),
             h("div", { className: "tour-actions" },
-              h("button", { type: "button", className: "tour-primary-button", "data-tour-action": "start", onClick: startTour }, "Start Tour"),
+              h("button", { type: "button", className: "tour-primary-button", "data-tour-action": "start", autoFocus: true, onClick: startTour }, "Start Tour"),
               h("button", { type: "button", className: "tour-skip-button", "data-command": GAME_ACTIONS.START_GAME, onClick: () => onCommand?.(GAME_ACTIONS.START_GAME) }, "Skip to the Game"),
             ),
           ),
@@ -1312,7 +1388,38 @@ function ResultsView({ state, onCommand }) {
 // Shown after the UI's START_GAME while the server waits for the physical host
 // badge. The round (and its timer) starts from the badge, so this screen has no
 // start button of its own: it only tells the operator what to do next.
+export const WAITING_HINT_MS = 20_000;
+
+function hostConnectionCopy(state) {
+  const status = String(state?.health?.gateway?.status || "unknown").toLowerCase();
+  if (status === "healthy") {
+    return {
+      label: "Host badge connected",
+      detail: "Press START on the badge. The game will begin here automatically.",
+      className: "is-connected",
+    };
+  }
+  if (["offline", "lost", "failed"].includes(status)) {
+    return {
+      label: "Host badge connection lost",
+      detail: "Reconnect its USB cable and leave the badge in host mode. The server will keep listening.",
+      className: "is-disconnected",
+    };
+  }
+  return {
+    label: "Waiting for the host badge connection",
+    detail: "Connect the badge over USB, start the server with --serial DEVICE, and leave host mode open.",
+    className: "is-unknown",
+  };
+}
+
 function WaitingForHostView({ state, onCommand }) {
+  const [slow, setSlow] = React.useState(false);
+  const host = hostConnectionCopy(state);
+  React.useEffect(() => {
+    const timer = setTimeout(() => setSlow(true), WAITING_HINT_MS);
+    return () => clearTimeout(timer);
+  }, []);
   return h("main", { className: "onboarding-screen waiting-host-screen", "data-onboarding": "waiting", "aria-labelledby": "waiting-title" },
     h("div", { className: "onboarding-content" },
       h("img", { className: "onboarding-burger", src: "/assets/order-burger.png", alt: "" }),
@@ -1320,7 +1427,16 @@ function WaitingForHostView({ state, onCommand }) {
         h("h1", { id: "waiting-title" }, "Ready when you are"),
         h("p", { className: "waiting-host-pulse", role: "status" }, "Press START on the host badge"),
         h("p", null, "The four-minute round begins from the badge."),
+        h("p", { className: cx("waiting-host-status", host.className), role: "status", "data-gateway-status": host.className }, host.label),
+        h("p", { className: "waiting-host-detail" }, host.detail),
+        slow && h("p", { className: "waiting-host-hint", role: "status" }, "Still listening. You can reconnect the badge without cancelling this round."),
       ),
+      h("button", {
+        type: "button",
+        className: "onboarding-button onboarding-button-secondary",
+        "data-command": GAME_ACTIONS.START_GAME,
+        onClick: () => onCommand?.(GAME_ACTIONS.START_GAME),
+      }, "Check host connection"),
       h("button", {
         type: "button",
         className: "onboarding-button onboarding-button-secondary",
@@ -1331,10 +1447,59 @@ function WaitingForHostView({ state, onCommand }) {
   );
 }
 
-export function App({ state, now = Date.now(), connectionError = "", uploadStatus = "", transportKind, onCommand, onGenerateLayout, onUseDefaultLayout, onUploadPhotos }) {
-  if (!state) return h("section", { className: "mx-auto mt-24 max-w-2xl border border-[#2a435a] bg-[#101c29] p-8 text-center" }, h("p", { className: "text-xs font-black uppercase tracking-[0.16em] text-[#a9bac9]" }, "Burger level"), h("h1", { className: "mt-2 text-3xl font-black text-white" }, "Waiting for authoritative state…"), connectionError && h("div", { id: "ui-error", className: "ui-error", role: "alert" }, connectionError));
+// Every screen the app can land on needs a way out. These are the buttons that the
+// dead-end screens (no state yet, unreadable state, a render error) share.
+function EscapeActions({ onCommand, onRetry, onTryAgain, offlineLink = false }) {
+  return h("div", { className: "escape-actions" },
+    onRetry && h("button", { type: "button", className: "escape-button", "data-escape": "retry", onClick: onRetry }, "Try again now"),
+    onTryAgain && h("button", { type: "button", className: "escape-button", "data-escape": "try-again", onClick: onTryAgain }, "Try again"),
+    h("button", { type: "button", className: "escape-button", "data-escape": "reload", onClick: () => globalThis.location?.reload?.() }, "Reload the page"),
+    onCommand && h("button", { type: "button", className: "escape-button", "data-escape": "reset", "data-command": GAME_ACTIONS.RESET_GAME, onClick: () => onCommand(GAME_ACTIONS.RESET_GAME) }, "Reset the game"),
+    offlineLink && h("a", { className: "escape-link", "data-escape": "offline", href: "?transport=mock" }, "Open the offline demo"),
+  );
+}
+
+// A render exception must never leave a blank page. It shows what happened and
+// the same way out, and clears itself when a newer snapshot arrives (`resetKey`).
+export class AppErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { error: null, resetKey: props.resetKey };
+    this.tryAgain = () => this.setState({ error: null });
+  }
+
+  static getDerivedStateFromError(error) {
+    return { error };
+  }
+
+  static getDerivedStateFromProps(props, state) {
+    return props.resetKey !== state.resetKey ? { error: null, resetKey: props.resetKey } : null;
+  }
+
+  componentDidCatch(error) {
+    console.error("UI render error:", error);
+  }
+
+  render() {
+    if (!this.state.error) return this.props.children;
+    return h("section", { className: "mx-auto mt-24 max-w-2xl border border-[#ff6f6f] bg-[#2c1820] p-8", role: "alert", "data-render-error": "true" },
+      h("h1", { className: "text-2xl font-black text-white" }, "Something went wrong drawing this screen"),
+      h("p", { className: "mt-3 text-[#a9bac9]" }, "The game itself is not affected. Try again, reload the page, or reset the game."),
+      h(EscapeActions, { onCommand: this.props.onCommand, onTryAgain: this.tryAgain }),
+    );
+  }
+}
+
+export function App(props) {
+  const { state } = props;
+  const resetKey = `${state?.setup?.phase ?? ""}:${state?.revision ?? state?.setup?.updatedAt ?? ""}`;
+  return h(AppErrorBoundary, { resetKey, onCommand: props.onCommand }, h(AppContent, props));
+}
+
+function AppContent({ state, now = Date.now(), connectionError = "", uploadStatus = "", transportKind, onCommand, onGenerateLayout, onUseDefaultLayout, onUploadPhotos, onRetryConnect, onDismissError }) {
+  if (!state) return h("section", { className: "mx-auto mt-24 max-w-2xl border border-[#2a435a] bg-[#101c29] p-8 text-center" }, h("p", { className: "text-xs font-black uppercase tracking-[0.16em] text-[#a9bac9]" }, "Burger level"), h("h1", { className: "mt-2 text-3xl font-black text-white" }, "Waiting for authoritative state…"), connectionError && h("div", { id: "ui-error", className: "ui-error", role: "alert" }, connectionError), h(EscapeActions, { onRetry: onRetryConnect, offlineLink: true }));
   const validation = validateFrontendSnapshot(state);
-  if (!validation.valid) return h("section", { className: "mx-auto mt-24 max-w-3xl border border-[#ff6f6f] bg-[#2c1820] p-8", role: "alert" }, h("p", { className: "text-xs font-black uppercase tracking-[0.16em] text-[#ff6f6f]" }, "Burger level"), h("h1", { className: "mt-2 text-3xl font-black text-white" }, "Authoritative state unavailable"), h("p", { className: "mt-3 text-[#a9bac9]" }, "The received snapshot does not match the frontend contract. No game values were rendered."), h("p", { className: "mt-3 text-white" }, validation.errors.map((error) => error.message).join(" ")));
+  if (!validation.valid) return h("section", { className: "mx-auto mt-24 max-w-3xl border border-[#ff6f6f] bg-[#2c1820] p-8", role: "alert" }, h("p", { className: "text-xs font-black uppercase tracking-[0.16em] text-[#ff6f6f]" }, "Burger level"), h("h1", { className: "mt-2 text-3xl font-black text-white" }, "Authoritative state unavailable"), h("p", { className: "mt-3 text-[#a9bac9]" }, "The received snapshot does not match the frontend contract. No game values were rendered."), h("p", { className: "mt-3 text-white" }, validation.errors.map((error) => error.message).join(" ")), h(EscapeActions, { onCommand }));
   const mode = displayModeForPhase(state.setup?.phase);
   const onboarding = state.setup?.phase === SETUP_PHASES.IDLE;
   const playerSetup = state.setup?.phase === SETUP_PHASES.SCANNING;
@@ -1357,7 +1522,10 @@ export function App({ state, now = Date.now(), connectionError = "", uploadStatu
   const gameplay = mode === UI_DISPLAY_MODES.GAMEPLAY;
   const setupMode = mode === UI_DISPLAY_MODES.SETUP;
   return h("div", { className: cx("app-shell", gameplay && "is-gameplay", setupMode && "is-setup", (onboarding || waitingForHost || results) && "is-onboarding", playerSetup && "is-player-setup", tour && "is-tour"), "data-display-mode": mode },
-    connectionError && h("div", { id: "ui-error", className: "ui-error mb-4", role: "alert" }, connectionError),
+    connectionError && h("div", { id: "ui-error", className: "ui-error mb-4", role: "alert" },
+      h("span", null, connectionError),
+      onDismissError && h("button", { type: "button", className: "ui-error-dismiss", "data-dismiss-error": "true", onClick: onDismissError }, "Dismiss"),
+    ),
     content,
   );
 }

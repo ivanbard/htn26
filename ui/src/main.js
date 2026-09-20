@@ -5,6 +5,21 @@ import { renderApp } from "./render.js";
 import { createBrowserTransport } from "./transport.js";
 import { PhotosPage } from "./PhotosPage.js";
 
+const SERVER_UNAVAILABLE = "GAME SERVER UNAVAILABLE";
+const CONNECT_RETRY_MS = 3_000;
+const LOST_CONNECTION = `${SERVER_UNAVAILABLE} — lost the connection; showing the last state we had. Reconnecting…`;
+// Notices about something the user just tried. They belong to the screen they
+// happened on, so they are cleared once the game moves to another phase.
+const ACTION_ERROR = /^(COMMAND NOT SENT|ROOM LAYOUT FAILED|PHOTO UPLOAD FAILED)/;
+
+export function describeConnectionFailure(error) {
+  const status = Number(error?.status);
+  const unreachable = error instanceof TypeError || (status >= 500 && status <= 504);
+  return unreachable
+    ? `${SERVER_UNAVAILABLE} — can't reach it${status ? ` (${status})` : ""}. Start it with "node server/server.mjs --serial DEVICE"; retrying every ${CONNECT_RETRY_MS / 1000} s…`
+    : `${SERVER_UNAVAILABLE} — ${error?.message || "unknown error"}. Retrying every ${CONNECT_RETRY_MS / 1000} s…`;
+}
+
 export function createApp({ root, transport, now = () => Date.now() }) {
   if (!root) throw new Error("A root element is required");
   if (!transport) throw new Error("A state transport is required");
@@ -14,10 +29,15 @@ export function createApp({ root, transport, now = () => Date.now() }) {
   let unsubscribe;
   let connectionError = "";
   let uploadStatus = "";
+  let lastPhase;
+  let layoutBusy = false;
   const reactRoot = typeof root.nodeType === "number" ? createRoot(root) : null;
 
   const render = (nextState) => {
     if (destroyed) return;
+    const phase = nextState?.setup?.phase;
+    if (lastPhase !== undefined && phase !== lastPhase && ACTION_ERROR.test(connectionError)) connectionError = "";
+    lastPhase = phase;
     state = nextState;
     const props = {
       state,
@@ -29,10 +49,16 @@ export function createApp({ root, transport, now = () => Date.now() }) {
       onGenerateLayout,
       onUseDefaultLayout,
       onUploadPhotos,
+      onRetryConnect,
+      onDismissError,
     };
     if (reactRoot) reactRoot.render(React.createElement(App, props));
     else root.innerHTML = renderApp(state, props.now, connectionError);
   };
+
+  // Failures that arrive after the game has already moved on are moot (a double
+  // click, or the server got there first), so they are not reported.
+  const movedOn = (before) => before?.setup?.phase !== state?.setup?.phase;
 
   const onCommand = async (command) => {
     connectionError = "";
@@ -40,21 +66,27 @@ export function createApp({ root, transport, now = () => Date.now() }) {
     try {
       const nextState = await transport.command(command);
       if (state !== stateAtCommandStart) return;
-      render(nextState);
+      render(nextState || state);
     } catch (error) {
+      if (movedOn(stateAtCommandStart)) return;
       connectionError = `COMMAND NOT SENT — ${error.message}`;
       render(state);
     }
   };
 
+  const onDismissError = () => {
+    connectionError = "";
+    render(state);
+  };
+
   const onUploadPhotos = async (files) => {
     if (typeof transport.uploadPhotos !== "function") return;
     connectionError = "";
-    uploadStatus = "Uploading room photos to the master Pi…";
+    uploadStatus = "Uploading room photos to the game server…";
     render(state);
     try {
       const result = await transport.uploadPhotos(files);
-      uploadStatus = `${result.count || 0} room photos on the master Pi${result.reviewReady ? " — ready to scan" : " — waiting for more photos"}.`;
+      uploadStatus = `${result.count || 0} room photos on the game server${result.reviewReady ? " — ready to scan" : " — waiting for more photos"}.`;
     } catch (error) {
       uploadStatus = "";
       connectionError = `PHOTO UPLOAD FAILED — ${error.message}`;
@@ -64,6 +96,8 @@ export function createApp({ root, transport, now = () => Date.now() }) {
 
   const runLayoutChoice = async (operation, progressMessage, successMessage) => {
     if (typeof operation !== "function") return onCommand("SCAN_ROOM");
+    if (layoutBusy) return undefined; // a second click while one is running would only fight it
+    layoutBusy = true;
     connectionError = "";
     uploadStatus = progressMessage;
     render(state);
@@ -76,9 +110,15 @@ export function createApp({ root, transport, now = () => Date.now() }) {
       if (state === stateAtCommandStart && nextState?.setup) render(nextState);
       else render(state);
     } catch (error) {
-      connectionError = `ROOM LAYOUT FAILED — ${error.message}`;
-      render(state);
+      uploadStatus = "";
+      if (!movedOn(stateAtCommandStart)) {
+        connectionError = `ROOM LAYOUT FAILED — ${error.message}`;
+        render(state);
+      }
+    } finally {
+      layoutBusy = false;
     }
+    return undefined;
   };
 
   const onGenerateLayout = () => runLayoutChoice(
@@ -101,18 +141,60 @@ export function createApp({ root, transport, now = () => Date.now() }) {
   };
   if (!reactRoot) root.addEventListener("click", onFallbackClick);
 
-  const connection = transport.connect(render);
-  Promise.resolve(connection).then((cleanup) => {
-    const resolvedCleanup = typeof cleanup === "function" ? cleanup : undefined;
-    if (destroyed) {
-      resolvedCleanup?.();
-      return;
+  // Keep trying until the server answers, so starting it after the page is open
+  // just works (no reload). A dead server behind the dev proxy shows up as a 5xx
+  // or a failed fetch, so those get the "is it running?" hint.
+  let retryTimer;
+  // A working connection that later drops is announced, and cleared when it is back.
+  const connectionHooks = {
+    onConnectionLost() {
+      if (destroyed) return;
+      connectionError = LOST_CONNECTION;
+      render(state);
+    },
+    onConnectionRestored() {
+      if (destroyed) return;
+      if (connectionError.startsWith(SERVER_UNAVAILABLE)) {
+        connectionError = "";
+        render(state);
+      }
+    },
+  };
+  const connectToServer = () => {
+    let connection;
+    try {
+      connection = transport.connect(render, connectionHooks);
+    } catch (error) {
+      connection = Promise.reject(error);
     }
-    unsubscribe = resolvedCleanup;
-  }).catch((error) => {
-    connectionError = `MASTER PI UNAVAILABLE — ${error.message}`;
-    render(state);
-  });
+    Promise.resolve(connection)
+      .then((cleanup) => {
+        const resolvedCleanup = typeof cleanup === "function" ? cleanup : undefined;
+        if (destroyed) {
+          resolvedCleanup?.();
+          return;
+        }
+        unsubscribe = resolvedCleanup;
+        if (connectionError.startsWith(SERVER_UNAVAILABLE)) {
+          connectionError = "";
+          render(state);
+        }
+      })
+      .catch((error) => {
+        if (destroyed) return;
+        connectionError = describeConnectionFailure(error);
+        render(state);
+        retryTimer = setTimeout(connectToServer, CONNECT_RETRY_MS);
+      });
+  };
+  connectToServer();
+
+  // "Try again now" on the waiting screen: skip the wait, unless already connected.
+  function onRetryConnect() {
+    if (state || destroyed) return;
+    clearTimeout(retryTimer);
+    connectToServer();
+  }
 
   const freshnessTimer = setInterval(() => {
     if (state) render(state);
@@ -120,9 +202,13 @@ export function createApp({ root, transport, now = () => Date.now() }) {
 
   return {
     getState: () => state,
+    getConnectionError: () => connectionError,
+    // The handlers the screens are given, exposed so they can be exercised directly.
+    actions: { onCommand, onGenerateLayout, onUseDefaultLayout, onUploadPhotos, onDismissError, onRetryConnect },
     destroy() {
       destroyed = true;
       clearInterval(freshnessTimer);
+      clearTimeout(retryTimer);
       unsubscribe?.();
       if (!reactRoot) root.removeEventListener("click", onFallbackClick);
       reactRoot?.unmount();

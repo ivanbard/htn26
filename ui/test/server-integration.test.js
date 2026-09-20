@@ -51,8 +51,10 @@ test("waiting-for-host-start is a valid phase with its own screen, not the error
   assert.equal(validateFrontendSnapshot(state).valid, true);
   assert.match(html, /data-onboarding="waiting"/);
   assert.match(html, /Press START on the host badge/);
+  assert.match(html, /Waiting for the host badge connection/);
+  assert.match(html, /data-command="START_GAME">Check host connection/);
   assert.doesNotMatch(html, /Authoritative state unavailable/);
-  assert.doesNotMatch(html, /data-command="START_GAME"/);
+  assert.doesNotMatch(html, />Start Game</);
 });
 
 test("players without a plate are not drawn holding one, and their hands show the right sprite", async () => {

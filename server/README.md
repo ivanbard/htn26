@@ -29,10 +29,19 @@ Use `--host 0.0.0.0` only for a trusted LAN. Useful environment variables:
   `HTN26_ORDER_INTERVAL_MAX_SECONDS`: randomized order-spawn interval,
   default 8-35 seconds.
 - `HTN26_MAX_ACTIVE_ORDERS`: active order-card limit, default 3.
+- `HTN26_ORDER_PATIENCE_SECONDS`: optional fixed patience for every order.
+  Unset, an order waits 60 s plus 15 s per topping (plain 60, cheese or lettuce
+  75, both 90). Patience is independent of the spawn interval.
 - `OPENAI_API_KEY`: required for the active 3-5-photo AI flow and kept only in
   this server process. It may be omitted only for the deterministic path.
 - `OPENAI_LAYOUT_TIMEOUT_MS`: bounded Responses request timeout in
   milliseconds, default 12000.
+
+Order pacing: a round opens with exactly one order, another arrives after a
+random 8-35 s gap while fewer than the cap are open, and if none are open the
+next is issued at once, so the kitchen always has an order to work on. Serving
+the last open order also brings the next immediately. An order that runs out of
+patience expires with a penalty and is replaced the same way.
 - `HTN26_DIFFICULTY_SIDECAR_URL`: optional QNX difficulty recommendation
   adapter. When absent or blank, the runtime does not create or call a sidecar
   client and uses the normal laptop order sequence.
@@ -129,7 +138,7 @@ and `POST /api/layout/generate`.
 | `GET /api/health` | none | `{ "ok": true, "state": health }` | `500` generic server error |
 | `POST /api/serial` | JSON `{ "line": "HTN26|..." }` | parser result plus current `state`; invalid protocol records remain parser results | `400` missing/non-string line or invalid JSON |
 | `POST /api/players/assign` | JSON `{ "mac": "AA:BB:CC:DD:EE:FF", "playerId": "p1" }` | updated snapshot | `400` invalid MAC/player or JSON |
-| `POST /api/command` | JSON command described below | updated snapshot | `400` invalid JSON or HTTP `SCAN_ROOM`; `500` unsupported/invalid state transition |
+| `POST /api/command` | JSON command described below | updated snapshot | `400` invalid JSON or HTTP `SCAN_ROOM`; `409` valid request that does not fit the current state (for example `START_GAME` before approval), with the reason in `error`; `500` unsupported command |
 
 The command body is `{ "type": "COMMAND" }`. Supported server commands are
 `START_HOST`, `SCAN_ROOM`, `APPROVE_LAYOUT` (alias `ACCEPT_LAYOUT`),
@@ -146,7 +155,7 @@ then approval. See [`API.md`](API.md) for the complete lifecycle.
 | `GET /api/layout` | none | approved `roomLayout`, or `null` before approval | `500` generic server error |
 | `GET /api/layout/submissions` | none | `{ "submissions": [...] }` audit summaries | `500` generic server error |
 | `POST /api/floorplan/review` | JSON `{ "allowEmpty": true }` for the no-photo fixture, otherwise previously uploaded compatibility photos | unaccepted deterministic `floorPlan` proposal | `400` no photos/invalid JSON; `500` provider failure |
-| `POST /api/floorplan/approve` | JSON `{ "approved": true }` | updated snapshot with accepted plan and active `roomLayout` for AI output | `400` invalid JSON; `500` no proposal |
+| `POST /api/floorplan/approve` | JSON `{ "approved": true }` | updated snapshot with accepted plan and active `roomLayout` for AI output | `400` invalid JSON; `409` nothing proposed to approve (with the reason in `error`) |
 | `GET /api/floorplan` | none | current deterministic or AI-derived floor-plan projection | `500` generic server error |
 | `GET /api/photos` | none | deprecated cumulative-photo metadata with `Deprecation: true` | `500` generic server error |
 | `POST /api/photos` | deprecated raw image or multipart compatibility upload | cumulative photo metadata with `Deprecation: true` | `400` empty/malformed; `409` more than five cumulative photos; `413` too large |

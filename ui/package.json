@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 4173",
+    "dev:live": "HTN26_SIMULATE=0 vite --host 127.0.0.1 --port 4173",
+    "dev:simulate": "HTN26_SIMULATE=1 vite --host 127.0.0.1 --port 4173",
     "start": "vite --host 127.0.0.1 --port 4173",
     "build": "vite build",
     "test": "node --test"
