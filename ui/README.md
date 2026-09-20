@@ -26,7 +26,7 @@ transport. Try the prototype host flow:
 2. `Scan Room` to show the proposed floor plan.
 3. `Approve Layout` (the existing `Accept Layout` protocol alias) to accept the plan and generate burger-level placement instructions.
 4. Place the cheese, lettuce, meat, and bun sources, the chopping boards, stoves, and serving badge as shown.
-5. `Start Game` for a roughly two-minute round.
+5. `Start Game` for a four-minute round.
 
 The mock also supports delivery fixtures for tests (`DELIVERY_SUCCESS` and `DELIVERY_FAILURE`). The UI renders the serving result and score supplied by the transport; it does not create a delivery result itself.
 
@@ -41,7 +41,7 @@ host Start
   -> proposed floor plan
   -> host approves floor plan
   -> burger level placement instructions
-  -> two-minute burger round
+  -> four-minute burger round
   -> topping-variation orders and live player positions
   -> serving badge validates completed burger
 ```

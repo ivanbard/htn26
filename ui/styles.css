@@ -1148,9 +1148,7 @@ button:focus-visible { outline: 3px solid var(--yellow); outline-offset: 3px; }
   width: 38%;
 }
 
-/* The warning triangle used to sit above the status caption, half outside the
-   room. Tuck it inside the appliance's top-right corner instead so it never
-   covers the caption text. */
+/* Keep the warning triangle inside the stove, above the MEAT warning chip. */
 .station-hazard {
   top: 2%;
   right: 2%;

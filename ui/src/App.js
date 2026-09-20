@@ -18,14 +18,9 @@ import {
   separatePlayerPositions,
 } from "./room-layout.js";
 import { cookingStateLabel, cookingVisualState, plateableIngredientKeys } from "./food-rules.js";
+import { INGREDIENT_KINDS, ingredientSprite, ingredientStage, platedStage, plateSprite } from "./ingredient-sprites.js";
 
 const h = React.createElement;
-const ASSETS = Object.freeze({
-  BUN: "/assets/ingredient-bun.png",
-  MEAT: "/assets/ingredient-meat.png",
-  CHEESE: "/assets/ingredient-cheese.png",
-  LETTUCE: "/assets/ingredient-lettuce.png",
-});
 const FIGMA_ASSETS = Object.freeze({
   CHEF: "/assets/chef-player.svg",
   CHEF_WITH_PLATE: "/assets/chef-player-with-plate.svg",
@@ -50,7 +45,6 @@ const finite = (value, fallback = 0) => Number.isFinite(Number(value)) ? Number(
 const clamp = (value, min = 0, max = 100) => Math.max(min, Math.min(max, finite(value, min)));
 const upper = (value) => String(value || "").replaceAll("-", " ").toUpperCase();
 const ingredientKey = (value) => String(value || "").trim().toUpperCase().replaceAll(" ", "_");
-const ingredientAsset = (value) => ASSETS[ingredientKey(value)] || null;
 const playerTeam = (value) => Object.prototype.hasOwnProperty.call(PLAYER_ASSETS, String(value || "").toLowerCase())
   ? String(value).toLowerCase()
   : "green";
@@ -114,13 +108,13 @@ function stagesForLayout(layoutFromImage) {
     { key: "scan", label: "Map the room", description: "Use setup photos for the play area", action: GAME_ACTIONS.SCAN_ROOM },
     { key: "approve", label: "Choose the layout", description: "Review the image-based placement", action: GAME_ACTIONS.APPROVE_LAYOUT },
     { key: "place", label: "Place the stations", description: "Match pieces to those spots", action: null },
-    { key: "play", label: "Start cooking", description: "Begin the two-minute round", action: GAME_ACTIONS.START_GAME },
+    { key: "play", label: "Start cooking", description: "Begin the four-minute round", action: GAME_ACTIONS.START_GAME },
   ] : [
     { key: "host", label: "Wake the kitchen", description: "Turn on the host badge and display", action: GAME_ACTIONS.START_HOST },
     { key: "scan", label: "Load the room", description: "Use the standard kitchen layout", action: GAME_ACTIONS.SCAN_ROOM },
     { key: "approve", label: "Confirm the layout", description: "Review the fixed station positions", action: GAME_ACTIONS.APPROVE_LAYOUT },
     { key: "place", label: "Place the stations", description: "Put the NFC zones at the illustrated counters", action: null },
-    { key: "play", label: "Start cooking", description: "Begin the two-minute round", action: GAME_ACTIONS.START_GAME },
+    { key: "play", label: "Start cooking", description: "Begin the four-minute round", action: GAME_ACTIONS.START_GAME },
   ];
 }
 
@@ -167,8 +161,13 @@ function ingredientNames(value) {
   const values = Array.isArray(value) ? value : [value];
   return values.flatMap((item) => {
     const name = upper(item);
-    return Object.keys(ASSETS).filter((ingredient) => name.includes(ingredient));
+    return INGREDIENT_KINDS.filter((ingredient) => name.includes(ingredient));
   });
+}
+
+function ingredientItems(value) {
+  const values = Array.isArray(value) ? value : [value];
+  return values.filter((item) => ingredientNames(item).length > 0);
 }
 
 function stationAsset(station) {
@@ -180,13 +179,13 @@ function stationAsset(station) {
   return /BUN|LETTUCE/i.test(station.id || station.label) ? STATION_ASSETS.PANTRY : STATION_ASSETS.FRIDGE;
 }
 
-function PlateIngredients({ ingredients, className, label }) {
+function PlateIngredients({ ingredients, className, label, stage }) {
   const visible = ingredients.slice(0, 4);
   if (!visible.length) return null;
   return h("div", { className: cx(className, visible.length === 1 && "is-single"), "aria-label": label }, visible.map((ingredient, index) => h(IngredientIcon, {
     key: `${ingredient}-${index}`,
     value: ingredient,
-    decorative: true,
+    stage,
   })));
 }
 
@@ -228,7 +227,12 @@ function StationContents({ station, runtimeStation, serving }) {
     ? "ready"
     : cookingVisualState({ status, item: displayItem, progress });
   const contentLabel = ingredients.length ? ingredients.join("+") : "EMPTY";
+  const items = ingredientItems(displayItem);
   const isWorkstation = station.kind === "stove" || station.kind === "chop";
+  // Source stations are self-describing: the fridge/crate art plus the
+  // accessible label carry the meaning, so they render no icon cluster and
+  // no name caption.
+  const isSource = station.kind === "ingredient";
   const isWarning = isWorkstation && stationWarning(runtimeStation, progress);
   const stateLabel = station.kind === "ingredient"
     ? "SOURCE"
@@ -242,7 +246,7 @@ function StationContents({ station, runtimeStation, serving }) {
   return h("div", { className: cx("station-visual", `station-visual-${station.kind}`, `station-state-${visualState}`, isWarning && "station-state-warning"), "data-station-content": contentLabel, "data-station-phase": visualState, "data-cook-progress": isWorkstation ? progress : undefined, "data-station-warning": isWarning ? "true" : "false", "aria-label": `${station.label || station.id}: ${contentLabel}, ${stateLabel}${timingLabel}` },
     h("img", { className: "station-art", src: stationAsset(station), alt: "" }),
     (station.kind === "delivery" || station.kind === "assembly") && h("img", { className: "station-plate-art", src: FIGMA_ASSETS.PLATE, alt: "" }),
-    h(PlateIngredients, { ingredients, className: "station-ingredients", label: `${station.label || station.id} contents: ${contentLabel}` }),
+    !isSource && h(PlateIngredients, { ingredients: items, stage: station.kind === "stove" ? "cooked" : station.kind === "chop" ? "chopped" : "plated", className: "station-ingredients", label: `${station.label || station.id} contents: ${contentLabel}` }),
     // The knife is baked into the chop board art, which would put it *under* the
     // ingredient. A cut-out copy of it is layered above the item so the knife
     // reads as cutting it.
@@ -253,7 +257,7 @@ function StationContents({ station, runtimeStation, serving }) {
     ),
     isWorkstation && ingredients.length > 0 && h("span", { className: "station-item-label", title: ingredients.join(" + "), "data-station-item": ingredients.join("+") }, ingredients.join(" + ")),
     h("span", { className: "room-station-state" }, stateLabel, timingLabel),
-    h("div", { className: "station-caption" },
+    !isSource && h("div", { className: "station-caption" },
       h("span", { className: "room-station-label" }, station.label || station.id),
       timingStation && h("span", { className: "station-progress-track", role: "meter", "aria-label": `${station.label || station.id} progress`, "aria-valuemin": 0, "aria-valuemax": 100, "aria-valuenow": Math.round(progress), "data-progress": progress, "data-total-seconds": Number.isFinite(totalSeconds) && totalSeconds > 0 ? totalSeconds : undefined, "data-remaining-seconds": Number.isFinite(Number(remaining)) ? remaining : undefined }, h("span", { style: { width: `${progress}%` } })),
     ),
@@ -270,7 +274,7 @@ function playerPlateItems(player) {
 
 function playerHeldItems(player, plateItems) {
   const inventory = Array.isArray(player?.inventory) ? player.inventory : [];
-  return plateItems.length ? [] : ingredientNames(inventory).slice(0, 1);
+  return plateItems.length ? [] : ingredientItems(inventory).slice(0, 1);
 }
 
 function stationGridClass(station, grid) {
@@ -368,8 +372,8 @@ function AnimatedPlayer({ player, position, walls, stale, plannedPath, delayMs =
   h("div", { className: "player-token" },
     h("div", { className: "player-avatar" },
       h("img", { className: "player-chef-art", src: playerChefAsset(player, hasPlate), alt: "" }),
-      hasPlate && h(PlateIngredients, { ingredients: plateItems, className: "player-plate-ingredients", label: `${label} plate: ${plateItems.join(", ") || "empty"}` }),
-      !hasPlate && heldItems.length > 0 && h("div", { className: "player-held-item", "aria-label": `${label} is holding ${heldItems[0]}` }, h(IngredientIcon, { value: heldItems[0], decorative: true })),
+      hasPlate && h(PlateIngredients, { ingredients: plateItems, stage: "plated", className: "player-plate-ingredients", label: `${label} plate: ${plateItems.join(", ") || "empty"}` }),
+      !hasPlate && heldItems.length > 0 && h("div", { className: "player-held-item", "aria-label": `${label} is holding ${heldItems[0]}` }, h(IngredientIcon, { value: heldItems[0], stage: "plated" })),
     ),
     h("span", { className: "player-tag" }, label),
   ));
@@ -494,13 +498,15 @@ function OrderTimerIcon() {
   );
 }
 
-function IngredientIcon({ value }) {
+function IngredientIcon({ value, stage = "raw" }) {
   // Every caller (.station-plate img, .hud-ingredient-slot img) already sets
   // its own explicit width/height/object-fit for this <img> based on its own
   // slot, so this intentionally sets no size of its own (a fixed Tailwind
   // h-*/w-* class here previously fought that per-slot sizing).
-  const source = ingredientAsset(value);
-  return source ? h("img", { className: "object-contain", src: source, alt: upper(value), loading: "lazy" }) : h("span", { className: "text-xs font-black text-[#8e7664]" }, upper(value).slice(0, 3));
+  const kind = ingredientNames(value)[0];
+  const resolved = ingredientStage(value, stage === "plated" ? platedStage(kind) : stage);
+  const source = kind ? ingredientSprite(kind, resolved) : null;
+  return source ? h("img", { className: "object-contain", src: source, alt: upper(value), "data-ingredient-stage": resolved, loading: "lazy" }) : h("span", { className: "text-xs font-black text-[#8e7664]" }, upper(value).slice(0, 3));
 }
 
 // A single pre-drawn burger icon (not an assembled stack of the individual
@@ -540,7 +546,7 @@ function OrderCard({ order, compact = false }) {
         h("h2", { id: titleId }, orderTitle(order)),
         h("span", { className: "hud-order-recipe-count" }, `${components.length || 1} ITEMS`),
       ),
-      h("div", { className: "hud-ingredient-slots", "aria-label": `Assembly order: ${components.map((item) => upper(item)).join(", ")}` }, components.map((item, index) => h("div", { key: `${item}-${index}`, className: "hud-ingredient-slot", "data-ingredient-slot": index + 1, "aria-label": `${index + 1}. ${upper(item)}` }, h(IngredientIcon, { value: item })))),
+      h("div", { className: "hud-ingredient-slots", "aria-label": `Assembly order: ${components.map((item) => upper(item)).join(", ")}` }, components.map((item, index) => h("div", { key: `${item}-${index}`, className: "hud-ingredient-slot", "data-ingredient-slot": index + 1, "aria-label": `${index + 1}. ${upper(item)}` }, h(IngredientIcon, { value: item, stage: "plated" })))),
     ),
     h("div", { className: "hud-order-time", "aria-label": `${seconds(order.remainingSeconds)} remaining` },
       h(OrderTimerIcon),

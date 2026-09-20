@@ -494,7 +494,7 @@ test("host commands follow start, scan, approval, burger placement, and round li
   await transport.command(GAME_ACTIONS.START_GAME);
   assert.equal(transport.snapshot().setup.phase, SETUP_PHASES.RUNNING);
   assert.equal(transport.snapshot().clock.status, "running");
-  assert.equal(transport.snapshot().clock.remainingSeconds, 120);
+  assert.equal(transport.snapshot().clock.remainingSeconds, 240);
 
   await transport.command(GAME_ACTIONS.END_GAME);
   assert.equal(transport.snapshot().setup.phase, SETUP_PHASES.ENDED);
@@ -566,7 +566,7 @@ test("reset returns to the idle authoritative state from every setup phase", asy
     assert.equal(state.score.value, 0);
     assert.equal(state.score.delivered, 0);
     assert.equal(state.clock.status, "ready");
-    assert.equal(state.clock.remainingSeconds, 112);
+    assert.equal(state.clock.remainingSeconds, 240);
     assert.equal(state.order.status, "active");
   }
 });
@@ -577,7 +577,7 @@ test("start game resets the authoritative clock, order, and score", async () => 
   initialState.floorPlan.accepted = true;
   initialState.burgerLevel.status = "placement-ready";
   initialState.score = { value: 250, delivered: 2 };
-  initialState.clock = { status: "ended", remainingSeconds: 3, totalSeconds: 120 };
+  initialState.clock = { status: "ended", remainingSeconds: 3, totalSeconds: 240 };
   initialState.order = { ...initialState.order, status: "completed", remainingSeconds: 3 };
   initialState.orders = initialState.orders.map((order) => ({ ...order, status: "completed", remainingSeconds: 3 }));
   const transport = createMockTransport({ initialState, now: () => 5_000 });

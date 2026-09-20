@@ -23,8 +23,8 @@ const round = (value) => Math.round(value * 1_000_000) / 1_000_000;
 
 const STATION_SLOTS = Object.freeze([
   { id: "cheese-source", label: "CHEESE", kind: "ingredient", column: 1, row: 1, assetKey: "FRIDGE", contents: ["CHEESE"] },
-  { id: "lettuce-source", label: "LETTUCE", kind: "ingredient", column: 4, row: 1, assetKey: "PANTRY", contents: ["LETTUCE"] },
-  { id: "meat-source", label: "MEAT", kind: "ingredient", column: 7, row: 1, assetKey: "FRIDGE", contents: ["MEAT"] },
+  { id: "meat-source", label: "MEAT", kind: "ingredient", column: 4, row: 1, assetKey: "FRIDGE", contents: ["MEAT"] },
+  { id: "lettuce-source", label: "LETTUCE", kind: "ingredient", column: 7, row: 1, assetKey: "PANTRY", contents: ["LETTUCE"] },
   { id: "buns-source", label: "BUNS", kind: "ingredient", column: 10, row: 1, assetKey: "PANTRY", contents: ["BUN"] },
   { id: "stove1", label: "STOVE 1", kind: "stove", column: 15, row: 1, assetKey: "STOVE" },
   { id: "stove2", label: "STOVE 2", kind: "stove", column: 19, row: 1, assetKey: "STOVE" },
@@ -153,8 +153,8 @@ function stationForSlot(slot) {
 
 const PLACEMENT_TEXT = Object.freeze({
   "cheese-source": "Place cheese on the left top counter tile",
-  "lettuce-source": "Place lettuce beside the cheese tile",
-  "meat-source": "Place meat beside the lettuce tile",
+  "meat-source": "Place meat beside the cheese tile",
+  "lettuce-source": "Place lettuce beside the meat tile",
   "buns-source": "Place buns at the end of the ingredient row",
   assembly: "Use the bottom-center counter to assemble the current burger on a plate",
   chop1: "Keep the first chopping board on the lower-left counter",
