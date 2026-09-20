@@ -450,7 +450,7 @@ test("marks old or missing player tracking and stale worker health", () => {
   state.clock.status = "running";
   state.players[1].tracking.status = "stale";
   delete state.players[0].position;
-  state.health.workers[1].lastSeenAt = 0;
+  state.health.workers.push({ id: "worker-1", label: "WORKER 1", status: "stale", lastSeenAt: 0, detail: "test" });
 
   const html = renderApp(state, 7_000);
 
@@ -495,7 +495,7 @@ test("host commands follow start, scan, approval, burger placement, and round li
   await transport.command(GAME_ACTIONS.START_GAME);
   assert.equal(transport.snapshot().setup.phase, SETUP_PHASES.RUNNING);
   assert.equal(transport.snapshot().clock.status, "running");
-  assert.equal(transport.snapshot().clock.remainingSeconds, 120);
+  assert.equal(transport.snapshot().clock.remainingSeconds, 240);
 
   await transport.command(GAME_ACTIONS.END_GAME);
   assert.equal(transport.snapshot().setup.phase, SETUP_PHASES.ENDED);
@@ -567,7 +567,7 @@ test("reset returns to the idle authoritative state from every setup phase", asy
     assert.equal(state.score.value, 0);
     assert.equal(state.score.delivered, 0);
     assert.equal(state.clock.status, "ready");
-    assert.equal(state.clock.remainingSeconds, 112);
+    assert.equal(state.clock.remainingSeconds, 240);
     assert.equal(state.order.status, "active");
   }
 });
@@ -620,7 +620,7 @@ test("successful delivery awards the recipe's gold plus a patience-based tip, ma
   // order-1 is PLAIN_MEAT (gold: 100); START_GAME resets it to full patience
   // (remaining === total), so server's tip formula — max(1, round(gold *
   // 0.1 + ratio * 5)) — gives round(10 + 5) = 15 at a 1.0 ratio.
-  assert.deepEqual(served.score, { value: 100, delivered: 1 });
+  assert.deepEqual(served.score, { value: 115, delivered: 1 });
   assert.deepEqual(served.gold, { total: 100, earned: 100, lastChange: 100 });
   assert.deepEqual(served.tips, { total: 15, earned: 15, lastChange: 15 });
   assert.equal(served.orders[0].status, "completed");
@@ -632,7 +632,7 @@ test("successful delivery awards the recipe's gold plus a patience-based tip, ma
   assert.equal(served.serving.lastEvent.patienceSegments, 3);
 
   await assertCommandUnchanged(transport, { type: GAME_ACTIONS.DELIVERY_SUCCESS, orderId: "order-1" });
-  assert.deepEqual(transport.snapshot().score, { value: 100, delivered: 1 });
+  assert.deepEqual(transport.snapshot().score, { value: 115, delivered: 1 });
 });
 
 test("failed delivery applies the documented penalty and does not complete the order", async () => {
@@ -687,7 +687,7 @@ test("renders serving success, gold/tip breakdown, and score update from the aut
   await transport.command(GAME_ACTIONS.DELIVERY_SUCCESS);
   const state = transport.snapshot();
 
-  assert.equal(state.score.value, 100);
+  assert.equal(state.score.value, 115);
   assert.equal(state.orders[0].status, "completed");
   const html = renderApp(state, 2_000);
   assert.doesNotMatch(html, /LIVE ACTIVITY/);

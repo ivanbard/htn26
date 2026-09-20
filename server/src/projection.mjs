@@ -1,3 +1,4 @@
+import { DIFFICULTY_LABELS } from "./difficulty-sidecar.mjs";
 import { LocalFloorplanProvider, localPlan } from "./provider.mjs";
 import { sanitizeRoomLayout } from "./layout-schema.mjs";
 
@@ -31,6 +32,13 @@ const SHORT_ITEMS = Object.freeze({
 });
 const PLATE_ITEMS = new Set(["BUN", "COOKED_MEAT", "MEAT", "LETTUCE", "CHEESE"]);
 const RAW_TO_CHOPPED = Object.freeze({ RAW_MEAT: "CHOPPED_MEAT", RAW_LETTUCE: "LETTUCE", RAW_CHEESE: "CHEESE" });
+
+function recipeForDifficulty(difficulty, orderSequence) {
+  if (difficulty === "easy") return RECIPE_BY_ID.get("PLAIN_MEAT");
+  if (difficulty === "hectic") return RECIPE_BY_ID.get("CHEESE_LETTUCE_MEAT");
+  if (difficulty === "normal") return RECIPE_BY_ID.get(orderSequence % 2 === 1 ? "CHEESEBURGER" : "LETTUCE_MEAT");
+  return null;
+}
 
 function clone(value) { return structuredClone(value); }
 function iso(ms) { return new Date(ms).toISOString(); }
@@ -181,7 +189,7 @@ export class ServerProjection {
   constructor({ provider, now = () => Date.now(), roundSeconds = ROUND_SECONDS,
     orderIntervalSeconds, orderIntervalMinSeconds = 8, orderIntervalMaxSeconds = 35,
     orderPatienceSeconds, maxActiveOrders = 3, locationHoldSeconds = DEFAULT_LOCATION_HOLD_SECONDS,
-    random = Math.random, authoritativeEngine } = {}) {
+    random = Math.random, authoritativeEngine, difficultySidecar } = {}) {
     this.now = now;
     this.provider = provider || new LocalFloorplanProvider({ now });
     this.roundSeconds = clampInteger(roundSeconds, 1, 3600, ROUND_SECONDS);
@@ -193,6 +201,7 @@ export class ServerProjection {
     this.locationHoldSeconds = clampInteger(locationHoldSeconds, 0, 30, DEFAULT_LOCATION_HOLD_SECONDS);
     this.random = typeof random === "function" ? random : Math.random;
     this.authoritativeEngine = authoritativeEngine || null;
+    this.difficultySidecar = difficultySidecar || null;
     this._revision = 1;
     this._nextOrderAt = null;
     this._orderSequence = 0;
@@ -207,6 +216,9 @@ export class ServerProjection {
     this._pendingTransfer = null;
     this._pendingSubmission = null;
     this._historySequence = 0;
+    this._nextDifficulty = null;
+    this._difficultyEpoch = 0;
+    this._difficultyRequestId = 0;
   }
 
   subscribe(listener) {
@@ -270,14 +282,46 @@ export class ServerProjection {
     this._state.order = active[0] ? clone(active[0]) : null;
   }
 
+  _difficultyFeatures(now = this.now()) {
+    const recent = this._state.submissions.slice(-6);
+    const failures = recent.filter((submission) => submission.status === "failure").length;
+    const busyStoves = this._state.stations.filter((station) => station.kind === "stove" && station.status !== "idle").length;
+    const elapsed = this._roundStartedAt == null ? 0 : (now - this._roundStartedAt) / (this._roundDurationSeconds * 1000);
+    return { activeOrderPressure: this._activeOrders().length / this.maxActiveOrders, recentFailureRate: recent.length ? failures / recent.length : 0, busyStovePressure: busyStoves / 2, roundElapsed: Math.max(0, Math.min(1, elapsed)) };
+  }
+
+  _requestDifficulty(now = this.now()) {
+    if (!this.difficultySidecar?.recommend) return;
+    const epoch = this._difficultyEpoch;
+    const requestId = ++this._difficultyRequestId;
+    const expiresAt = now + this.orderIntervalMaxSeconds * 1000;
+    Promise.resolve().then(() => this.difficultySidecar.recommend(this._difficultyFeatures(now))).then((result) => {
+      if (epoch !== this._difficultyEpoch || requestId !== this._difficultyRequestId || this._state.timer.status !== "running" || !DIFFICULTY_LABELS.has(result?.difficulty)) return;
+      this._nextDifficulty = { ...result, requestedAt: now, expiresAt };
+    }).catch(() => {
+      if (epoch === this._difficultyEpoch && requestId === this._difficultyRequestId) this._nextDifficulty = null;
+    });
+  }
+
+  _clearDifficultyRecommendation() {
+    this._difficultyEpoch += 1;
+    this._difficultyRequestId += 1;
+    this._nextDifficulty = null;
+  }
+
   _issueOrder(now = this.now()) {
-    const recipe = BURGER_RECIPES[this._orderSequence % BURGER_RECIPES.length];
+    const candidate = this._nextDifficulty;
+    this._nextDifficulty = null;
+    const recommendation = candidate && now <= candidate.expiresAt ? candidate : null;
+    const fallbackRecipe = BURGER_RECIPES[this._orderSequence % BURGER_RECIPES.length];
+    const recipe = recipeForDifficulty(recommendation?.difficulty, this._orderSequence) || fallbackRecipe;
     this._orderSequence += 1;
     const order = makeOrder(`order-${this._orderSequence}`, recipe, now, this._patienceSeconds());
     this._state.orders.push(order);
     while (this._state.orders.length > 32) this._state.orders.shift();
     this._syncActiveOrder();
-    this._record("order-created", `${order.recipeName} ordered`, now, { orderId: order.id, recipe: order.recipe });
+    this._record("order-created", `${order.recipeName} ordered`, now, { orderId: order.id, recipe: order.recipe, ...(recommendation ? { difficulty: recommendation.difficulty, difficultySource: recommendation.source, difficultyModel: recommendation.model?.version || null, difficultyLatencyMs: recommendation.latencyMs } : {}) });
+    this._requestDifficulty(now);
     return order;
   }
 
@@ -659,6 +703,7 @@ export class ServerProjection {
     this._nextOrderAt = null;
     this._pendingTransfer = null;
     this._pendingSubmission = null;
+    this._clearDifficultyRecommendation();
     this._seenEvents.clear();
     this._record("round-started", `Round started for ${this._roundDurationSeconds} seconds`, now, { durationSeconds: this._roundDurationSeconds, playerCount: 3, startSource });
     this._issueOrder(now);
@@ -689,6 +734,7 @@ export class ServerProjection {
     this._nextOrderAt = null;
     this._pendingTransfer = null;
     this._pendingSubmission = null;
+    this._clearDifficultyRecommendation();
     this._seenEvents.clear();
     this._publish(now);
     return this.snapshot(now);
