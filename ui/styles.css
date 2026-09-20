@@ -1350,44 +1350,62 @@ button:focus-visible { outline: 3px solid var(--yellow); outline-offset: 3px; }
    the order cards, above the room, so it's clearly visible but never
    overlaps the score/timer chips or blocks the room for long — it's gone
    (see DeliveryToast's own lifetime check) well before the next one shows. */
-/* Announcement: same pill as the WatCoin counter and the clock, centred between
-   them. The wrapper copies their box (same bottom, width, aspect ratio) so the
-   pill lines up with theirs at every size. */
+/* Announcement: the same pill as the WatCoin counter and the clock. Its zone is
+   exactly the gap between those two (their edge + a small margin on each side)
+   and as tall as they are, so it lines up with them and can never overlap
+   them. Sizes are in container units so it scales with the board like they do. */
 .game-board-toast {
   position: absolute;
   z-index: 10;
   bottom: 2.4%;
-  left: 50%;
+  left: calc(2.4cqw + clamp(120px, 15cqw, 300px) + 1.5cqw);
+  right: calc(2.4cqw + clamp(120px, 15cqw, 300px) + 1.5cqw);
   display: flex;
-  width: clamp(120px, 15%, 300px);
-  aspect-ratio: 1320 / 500;
+  height: calc(clamp(120px, 15cqw, 300px) * 500 / 1320);
   align-items: center;
   justify-content: center;
   /* The pills' dark rail is centred at 52.6% of their box, not 50%. */
-  transform: translate(-50%, 2.6%);
+  transform: translateY(2.6%);
   pointer-events: none;
 }
 .delivery-toast {
   display: flex;
+  min-width: 0;
+  max-width: 100%;
   align-items: center;
   gap: .6em;
-  width: max-content;
   border: clamp(3px, .5vw, 7px) solid #4a5473;
   border-radius: 999px;
   background: #1b2030;
   box-shadow: 0 16px 22px 2px rgba(5, 8, 20, .42), inset 0 2px 0 rgba(148, 163, 199, .15);
   color: #fff;
-  font-size: clamp(.95rem, 1.9vw, 2.3rem);
+  font-size: clamp(.7rem, 1.9cqw, 2.3rem);
   font-weight: 950;
   letter-spacing: -.02em;
   line-height: 1.1;
+  overflow: hidden;
   padding: .3em 1em;
   white-space: nowrap;
   animation: delivery-toast-life 3.2s ease both;
 }
-.delivery-toast-amount { opacity: .95; }
+/* If space runs out the message gives way first; the figures never clip. */
+.delivery-toast-message { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.delivery-toast-amount { flex: none; }
 .delivery-toast.is-success .delivery-toast-amount { color: #8fe3a8; }
 .delivery-toast.is-failure .delivery-toast-amount { color: #ff9a9a; }
+/* The tip: a smaller second figure after a thin divider. */
+.delivery-toast-tip {
+  flex: none;
+  border-left: 2px solid rgba(148, 163, 199, .4);
+  padding-left: .6em;
+  color: #8fe3a8;
+  font-size: .78em;
+  opacity: .9;
+}
+/* On a very small board the tip is dropped (the counter still includes it). */
+@container (max-width: 520px) {
+  .delivery-toast-tip { display: none; }
+}
 @keyframes delivery-toast-life {
   0% { opacity: 0; }
   8% { opacity: 1; }
@@ -1425,7 +1443,13 @@ button:focus-visible { outline: 3px solid var(--yellow); outline-offset: 3px; }
   .setup-progress-heading { align-items: flex-start; flex-direction: column; }
   .game-board-orders { top: 1.2%; left: 1.2%; right: 1.2%; gap: .2rem; }
   .game-board-orders.orders-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.game-board-score, .game-board-timer, .game-board-toast { bottom: 1.5%; width: 24%; min-width: 100px; }
+.game-board-score, .game-board-timer { bottom: 1.5%; width: 24%; min-width: 100px; }
+  .game-board-toast {
+    bottom: 1.5%;
+    left: calc(1.4cqw + max(24cqw, 100px) + 1.5cqw);
+    right: calc(1.4cqw + max(24cqw, 100px) + 1.5cqw);
+    height: calc(max(24cqw, 100px) * 500 / 1320);
+  }
   .game-board-score { left: 1.4%; }
   .game-board-timer { right: 1.4%; }
   .hud-order, .hud-order-compact { min-height: 72px; grid-template-columns: 38px minmax(0, 1fr) 50px; gap: .25rem; padding: .35rem; }

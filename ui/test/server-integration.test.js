@@ -9,6 +9,8 @@ import { LocalFloorplanProvider } from "../../server/src/provider.mjs";
 import { normalizeServerSnapshot } from "../src/server-snapshot.js";
 import { normalizeFrontendSnapshot, validateFrontendSnapshot } from "../src/contracts.js";
 import { renderApp } from "../src/render.js";
+import { createHttpTransport } from "../src/transport.js";
+import { createActionTracker } from "../src/action-tracker.js";
 
 async function startedRound() {
   let now = 1_000_000;
@@ -22,6 +24,8 @@ async function startedRound() {
   await projection.proposeFloorplan({ photos: [{ id: "fixture" }] }, now);
   projection.approveFloorplan(true, now);
   projection.command("START_GAME", {}, now);
+  // The HTTP transport runs every snapshot through this; do the same here.
+  const tracker = createActionTracker(() => now);
   const game = {
     projection,
     get now() { return now; },
@@ -30,6 +34,7 @@ async function startedRound() {
     start() { projection.ingestHostControl({ control: "START", durationSeconds: 240, framing: "legacy-game" }, now); now += 300; },
     view() {
       const state = normalizeFrontendSnapshot(normalizeServerSnapshot(projection.snapshot(now)));
+      state.players = tracker.annotate(state.players);
       return { state, html: renderApp(state, now, "", "http") };
     },
   };
@@ -151,16 +156,32 @@ test("submission results and expired orders are announced with the server's ISO 
   assert.match(game.view().html, /Order expired/);
 });
 
-test("a failed cut and a rejected plate show a short callout over the player", async () => {
+test("a cut abandoned mid-way shows a short callout over the player, then fades", async () => {
   const game = await startedRound();
   game.start();
+  game.view();
   game.act({ playerId: "p1", action: "PICKUP", item: "RAW_MEAT" });
+  game.view();
   game.act({ playerId: "p1", action: "CHOP", phase: "START" });
+  game.view();
   game.advance(500);
   game.act({ playerId: "p1", action: "CHOP", phase: "FAIL" });
   assert.match(chunkFor(game.view().html, "data-player", "p1"), /data-player-action="CUT FAILED"/);
   game.advance(30_000);
   assert.doesNotMatch(chunkFor(game.view().html, "data-player", "p1"), /data-player-action/, "callout fades");
+});
+
+test("a finished cut is not reported as a failure", async () => {
+  const game = await startedRound();
+  game.start();
+  game.view();
+  game.act({ playerId: "p1", action: "PICKUP", item: "RAW_MEAT" });
+  game.view();
+  game.act({ playerId: "p1", action: "CHOP", phase: "START" });
+  game.view();
+  game.advance(3_500);
+  game.act({ playerId: "p1", action: "CHOP", phase: "DONE", item: "CHOPPED_MEAT" });
+  assert.doesNotMatch(chunkFor(game.view().html, "data-player", "p1"), /data-player-action="CUT FAILED"/);
 });
 
 test("the results screen shows the final score, stars, and order outcomes without serving-badge copy", async () => {
@@ -180,4 +201,29 @@ test("the results screen shows the final score, stars, and order outcomes withou
   assert.match(html, /data-result-stat="burgers-served"><strong>1<\/strong>/);
   assert.match(html, /data-stars="[123]"/);
   assert.doesNotMatch(html, /serving badge|geese/i);
+});
+
+test("through the real HTTP transport, an abandoned cut arrives labelled and stamped", async () => {
+  const game = await startedRound();
+  game.start();
+  let latest = () => JSON.parse(JSON.stringify(game.projection.snapshot(game.now)));
+  let listener;
+  const transport = createHttpTransport({
+    baseUrl: "http://x",
+    fetchImpl: async () => ({ ok: true, json: async () => latest() }),
+    eventSourceFactory: class { constructor() { this.handlers = {}; listener = this; } addEventListener(name, fn) { this.handlers[name] = fn; } close() {} },
+  });
+  const received = [];
+  const stop = await transport.connect((snapshot) => received.push(snapshot));
+  const push = () => listener.handlers.state({ data: JSON.stringify(latest()) });
+  const p1 = () => received.at(-1).players.find((player) => player.id === "p1");
+
+  game.act({ playerId: "p1", action: "PICKUP", item: "RAW_MEAT" }); push();
+  game.act({ playerId: "p1", action: "CHOP", phase: "START" }); push();
+  assert.equal(p1().actionState, "chopping");
+  game.advance(500);
+  game.act({ playerId: "p1", action: "CHOP", phase: "FAIL" }); push();
+  assert.equal(p1().actionState, "cut failed; holding raw_meat");
+  assert.equal(typeof p1().actionStateAt, "number", "stamped by the browser");
+  stop();
 });

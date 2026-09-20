@@ -104,29 +104,64 @@ const TOUR_PREVIEW_ORDER = Object.freeze({
   toppings: [],
   components: ["BUN", "MEAT"],
   goldValue: 100,
-  remainingSeconds: 120,
-  totalSeconds: 120,
+  remainingSeconds: null,
+  totalSeconds: null,
   patience: { segments: 3, filledSegments: 3 },
 });
 
 function tourPreviewState(state) {
   const order = activeOrdersFor(state)[0] || TOUR_PREVIEW_ORDER;
+  const components = Array.isArray(order.components) && order.components.length
+    ? [...order.components]
+    : [...TOUR_PREVIEW_ORDER.components];
   const previewOrder = {
     ...TOUR_PREVIEW_ORDER,
     ...order,
+    components,
     status: "active",
-    remainingSeconds: Number(order.totalSeconds) > 0 ? Number(order.totalSeconds) : TOUR_PREVIEW_ORDER.totalSeconds,
-    totalSeconds: Number(order.totalSeconds) > 0 ? Number(order.totalSeconds) : TOUR_PREVIEW_ORDER.totalSeconds,
+    // The tour is a paused preview. A customer timer must not count down while
+    // somebody is still learning the room.
+    remainingSeconds: null,
+    totalSeconds: null,
+    preview: true,
     patience: { ...TOUR_PREVIEW_ORDER.patience, ...order.patience, filledSegments: 3 },
   };
   const totalSeconds = Number(state.clock?.totalSeconds) > 0 ? Number(state.clock.totalSeconds) : 240;
+  const previewStations = Array.isArray(state.stations)
+    ? state.stations.map((station) => ({
+      ...station,
+      status: station.kind === "ingredient" ? "ready" : "idle",
+      progress: 0,
+      remainingSeconds: 0,
+      totalSeconds: 0,
+      item: "EMPTY",
+      warning: false,
+      warningMessage: undefined,
+      actionState: undefined,
+    }))
+    : state.stations;
+  const previewPlayers = Array.isArray(state.players)
+    ? state.players.map((player) => ({
+      ...player,
+      inventory: [],
+      plate: [],
+      hasPlate: false,
+      heldItem: null,
+      actionState: undefined,
+      actionStateAt: undefined,
+    }))
+    : state.players;
   return {
     ...state,
     orders: [previewOrder],
+    activeOrders: [previewOrder],
     order: previewOrder,
+    stations: previewStations,
+    players: previewPlayers,
     score: { ...(state.score || {}), value: 0, delivered: 0 },
     gold: { ...(state.gold || {}), total: 0, earned: 0, lastChange: 0 },
     tips: { ...(state.tips || {}), total: 0, earned: 0, lastChange: 0 },
+    serving: { ...(state.serving || {}), lastEvent: null },
     clock: { ...(state.clock || {}), status: "ready", remainingSeconds: totalSeconds, totalSeconds },
   };
 }
@@ -399,7 +434,7 @@ function actionBubble(player, now) {
   const match = ACTION_BUBBLES.find(([pattern]) => pattern.test(state));
   if (!match) return null;
   // actionState persists until the player's next action, so fade it out using
-  // the server's `actionStateAt`. With no stamp its age is unknown; hide it
+  // `actionStateAt` (stamped in the browser by action-tracker.js). With no stamp its age is unknown; hide it
   // rather than leave a stale callout on screen.
   const changedAt = timestampMs(player?.actionStateAt);
   if (changedAt == null || !Number.isFinite(Number(now))) return null;
@@ -407,7 +442,7 @@ function actionBubble(player, now) {
   return { text: match[1], tone: match[2] };
 }
 
-function AnimatedPlayer({ player, position, walls, stale, plannedPath, delayMs = 0, pathStrategy = "single-agent", now }) {
+function AnimatedPlayer({ player, position, walls, stale, plannedPath, delayMs = 0, pathStrategy = "single-agent", now, tourTarget = false }) {
   const target = projectPointIntoWalkableRoom(position, walls, position);
   const targetKey = `${target.x.toFixed(3)}:${target.y.toFixed(3)}`;
   const wallKey = (walls || []).map((wall) => `${wall.x}:${wall.y}:${wall.width}:${wall.height}:${wall.blocksMovement}`).join("|");
@@ -480,9 +515,10 @@ function AnimatedPlayer({ player, position, walls, stale, plannedPath, delayMs =
   const label = player.label || player.id;
   const locationLabel = !position ? "location unavailable" : stale ? "last scan is stale" : "last scan confirmed";
   return h("div", {
-    className: cx("tracked-player", `player-team-${team}`, hasPlate && "has-plate", moving && "is-moving", stale && "is-stale"),
+    className: cx("tracked-player", `player-team-${team}`, hasPlate && "has-plate", moving && "is-moving", stale && "is-stale", tourTarget && "is-tour-target"),
     style: { left: `${visualPosition.x}%`, top: `${visualPosition.y}%` },
     "data-player": player.id,
+    "data-tour-target": tourTarget ? "player" : undefined,
     "data-stale": stale,
     "data-player-path": "barrier-safe",
     "data-path-strategy": pathStrategy,
@@ -530,14 +566,18 @@ function RoomSurface({ state, now, gameplay = false, tourFocus = [] }) {
     "data-barrier": wall.id || index,
     "aria-hidden": true,
   }));
-  const stations = (plan.stations || []).map((station) => h("div", {
+  const stations = (plan.stations || []).map((station) => {
+    const tourTarget = tourFocus.some((target) => target === station.id || target === station.kind || target === station.assetKey?.toLowerCase());
+    return h("div", {
       key: station.id,
-      className: cx("room-station", gameplay ? "room-station-gameplay" : "room-station-setup", stationClass(station.kind), stationGridClass(station, plan.grid), tourFocus.some((target) => target === station.id || target === station.kind || target === station.assetKey?.toLowerCase()) && "is-tour-target"),
+      className: cx("room-station", gameplay ? "room-station-gameplay" : "room-station-setup", stationClass(station.kind), stationGridClass(station, plan.grid), tourTarget && "is-tour-target"),
       style: rectStyle(station.display || station),
       "data-station": station.id,
-      "data-tour-target": tourFocus.some((target) => target === station.id || target === station.kind || target === station.assetKey?.toLowerCase()) ? "true" : undefined,
+      "data-tour-target": tourTarget ? "station" : undefined,
       "data-grid-cell": station.grid ? `${station.grid.column}:${station.grid.row}` : undefined,
-    }, h(StationContents, { station, runtimeStation: runtimeStations.get(station.id), serving: state.serving })));
+    }, h(StationContents, { station, runtimeStation: runtimeStations.get(station.id), serving: state.serving }));
+  });
+  const playersAreTourTarget = tourFocus.includes("players") || tourFocus.includes("player");
   const positionedPlayers = separatePlayerPositions(state.players || [], movementWalls);
   const planningPlayers = positionedPlayers
     .filter((player) => player?.position)
@@ -560,6 +600,7 @@ function RoomSurface({ state, now, gameplay = false, tourFocus = [] }) {
       position,
       walls: movementWalls,
       stale,
+      tourTarget: playersAreTourTarget,
       plannedPath: pathPlan?.path,
       delayMs: pathPlan?.delayMs,
       pathStrategy: pathPlan?.strategy,
@@ -659,7 +700,7 @@ function BurgerPreview({ order, components }) {
   );
 }
 
-function OrderCard({ order, compact = false }) {
+function OrderCard({ order, compact = false, tourTarget = false }) {
   const components = Array.isArray(order.components) ? order.components.slice(0, 4) : [];
   const remaining = Number(order.remainingSeconds);
   const total = Number(order.totalSeconds);
@@ -674,7 +715,7 @@ function OrderCard({ order, compact = false }) {
       ? segments <= 1 ? "is-critical" : segments === 2 ? "is-warning" : "is-healthy"
       : "is-healthy";
   const titleId = `hud-title-${String(order.id || "order").replaceAll(/[^a-zA-Z0-9_-]/g, "-")}`;
-  return h("section", { className: cx("hud-order", compact && "hud-order-compact", urgency), "data-node-id": "39:26", "data-order-id": order.id, "aria-labelledby": titleId },
+  return h("section", { className: cx("hud-order", compact && "hud-order-compact", urgency, tourTarget && "is-tour-target"), "data-node-id": "39:26", "data-order-id": order.id, "data-tour-target": tourTarget ? "order" : undefined, "aria-labelledby": titleId },
     h(BurgerPreview, { order, components }),
     h("div", { className: "hud-order-main" },
       h("div", { className: "hud-order-heading" },
@@ -693,11 +734,11 @@ function OrderCard({ order, compact = false }) {
 
 // The strip always has four slots, so a card is the same size whether one order
 // or four are open; cards fill from the left and the rest stay empty.
-function OrdersHud({ state }) {
+function OrdersHud({ state, tourTarget = false }) {
   const orders = activeOrdersFor(state);
   return h("div", { className: "game-board-orders orders-4", "data-order-count": orders.length, "aria-label": `${orders.length} active orders` },
     orders.length
-      ? orders.map((order) => h(OrderCard, { key: order.id, order, compact: true }))
+      ? orders.map((order, index) => h(OrderCard, { key: order.id, order, compact: true, tourTarget: tourTarget && index === 0 }))
       : h("div", { className: "orders-empty" }, "All orders served!"),
   );
 }
@@ -767,7 +808,8 @@ const sentenceCase = (text) => {
 };
 
 // Bottom-centre announcement, styled like the WatCoin and clock pills it sits
-// between. It always names the coins: "+120 WatCoins" or "-25 WatCoins".
+// between. It always names the coins ("+100 WatCoins", "-25 WatCoins"); a served
+// burger adds its tip as a smaller second figure.
 function DeliveryToast({ state, now }) {
   const latest = latestScoreEvent(state, now);
   if (!latest) return null;
@@ -775,11 +817,13 @@ function DeliveryToast({ state, now }) {
   const success = !expired && latest.event.status === "success";
   const message = expired ? "Order expired" : sentenceCase(latest.event.message);
   const key = expired ? `expired-${latest.order.id}` : latest.event.at;
-  const amount = latest.delta ? `${latest.delta > 0 ? "+" : "-"}${Math.abs(latest.delta)} WatCoins` : null;
+  const coins = success ? Number(latest.event.gold) || 0 : -Math.abs(Number(expired ? latest.order.penalty : latest.event.penalty) || 0);
+  const tip = success ? Number(latest.event.tip) || 0 : 0;
   return h("div", { className: "game-board-toast" },
     h("div", { key, className: cx("delivery-toast", success ? "is-success" : "is-failure", expired && "is-expired"), role: "status", "aria-live": "polite" },
       h("span", { className: "delivery-toast-message" }, message),
-      amount && h("span", { className: "delivery-toast-amount" }, amount),
+      coins !== 0 && h("span", { className: "delivery-toast-amount" }, `${coins > 0 ? "+" : "-"}${Math.abs(coins)} WatCoins`),
+      tip > 0 && h("span", { className: "delivery-toast-tip" }, `+${tip} tip`),
     ),
   );
 }

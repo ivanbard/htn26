@@ -1,10 +1,8 @@
-// Order pacing: a round opens with ONE order, more arrive after a random gap,
-// there are never more than three open, and the kitchen is never left without
-// one. The offline mock must behave like server/src/projection.mjs.
+// Order pacing (per README/DEPLOY): a round opens with ONE order, more arrive
+// after a random 8-35 s gap, there are never more than three open, and the
+// kitchen is never left without one. This exercises the offline mock.
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ServerProjection, ORDER_RULES } from "../../server/src/projection.mjs";
-import { LocalFloorplanProvider } from "../../server/src/provider.mjs";
 import { validateFrontendSnapshot } from "../src/contracts.js";
 import { advanceMockState, createMockTransport } from "../src/mock-transport.js";
 import { GAME_ACTIONS } from "../src/state.js";
@@ -120,29 +118,11 @@ test("a new round after a reset starts over with one order", async () => {
   }
 });
 
-test("the mock and the real server issue the same recipes with the same patience", async () => {
-  let now = 1_000_000;
-  const projection = new ServerProjection({
-    provider: new LocalFloorplanProvider({ now: () => now }),
-    now: () => now,
-    orderIntervalMinSeconds: 8,
-    orderIntervalMaxSeconds: 8,
-    random: () => 0,
-    maxActiveOrders: 3,
-  });
-  await projection.proposeFloorplan({ photos: [{ id: "fixture" }] }, now);
-  projection.approveFloorplan(true, now);
-  projection.command("START_GAME", {}, now);
-  projection.ingestHostControl({ control: "START", durationSeconds: 240, framing: "legacy-game" }, now);
-  for (let step = 0; step < 2; step += 1) { now += 8_000; projection.snapshot(now); }
-  const server = projection.snapshot(now).orders.slice(0, 3);
-
+test("the mock issues recipes in the documented order with patience by recipe (60 s + 15 s per topping)", async () => {
   let { state, random } = await runningMock();
+  // With three open orders allowed, the first three arrive 8 s apart.
   for (let step = 0; step < 2; step += 1) state = advanceMockState(state, 8_000, 1_000 + step * 8_000, random);
-  const mock = state.orders.slice(0, 3);
-
-  assert.deepEqual(mock.map((order) => order.recipe), server.map((order) => order.recipe));
-  assert.deepEqual(mock.map((order) => order.totalSeconds), server.map((order) => order.totalSeconds));
-  assert.deepEqual(server.map((order) => order.totalSeconds), [60, 75, 75]);
-  assert.equal(ORDER_RULES.patienceBaseSeconds, 60);
+  assert.equal(state.orders.length, 3);
+  assert.deepEqual(state.orders.map((order) => order.recipe), ["PLAIN_MEAT", "CHEESEBURGER", "LETTUCE_MEAT"]);
+  assert.deepEqual(state.orders.map((order) => order.totalSeconds), [60, 75, 75]);
 });

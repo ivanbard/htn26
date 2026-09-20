@@ -62,8 +62,8 @@ async function serverRound() {
 
 // The announcement pill's text, e.g. "Wrong burger" + "-25 WatCoins".
 const announcement = (html) => {
-  const match = html.match(/class="delivery-toast[^"]*"[^>]*><span class="delivery-toast-message">([^<]*)<\/span>(?:<span class="delivery-toast-amount">([^<]*)<\/span>)?/);
-  return match ? { message: match[1], amount: match[2] ?? null } : null;
+  const match = html.match(/class="delivery-toast[^"]*"[^>]*><span class="delivery-toast-message">([^<]*)<\/span>(?:<span class="delivery-toast-amount">([^<]*)<\/span>)?(?:<span class="delivery-toast-tip">([^<]*)<\/span>)?/);
+  return match ? { message: match[1], amount: match[2] ?? null, tip: match[3] ?? null } : null;
 };
 
 test("a wrong plate announces the WatCoins lost and turns the negative total red", async () => {
@@ -74,7 +74,7 @@ test("a wrong plate announces the WatCoins lost and turns the negative total red
   game.projection.submit(p3, "-M--", game.now);
   const { state, html } = game.view();
   assert.equal(state.score.value, -25);
-  assert.deepEqual(announcement(html), { message: "Wrong burger", amount: "-25 WatCoins" });
+  assert.deepEqual(announcement(html), { message: "Wrong burger", amount: "-25 WatCoins", tip: null });
   assert.match(html, /class="board-score-value is-negative">-25</);
   assert.match(html, /aria-label="-25 WatCoins/);
 
@@ -83,7 +83,7 @@ test("a wrong plate announces the WatCoins lost and turns the negative total red
   assert.match(game.view().html, /class="board-score-value is-negative">-25</);
 });
 
-test("a served burger announces the WatCoins gained, matching the counter", async () => {
+test("a served burger announces its WatCoins and, smaller, its tip", async () => {
   const game = await serverRound();
   const target = game.projection._activeOrders()[0];
   const summary = ["BUN", "MEAT", "LETTUCE", "CHEESE"].map((c) => target.components.includes(c) ? c[0] : "-").join("");
@@ -93,8 +93,10 @@ test("a served burger announces the WatCoins gained, matching the counter", asyn
   const { state, html } = game.view();
   const served = announcement(html);
   assert.equal(served.message, "Burger served");
-  assert.equal(served.amount, `+${state.gold.total + state.tips.total} WatCoins`);
-  assert.equal(state.score.value, state.gold.total + state.tips.total, "the counter moves by exactly the announced amount");
+  assert.equal(served.amount, `+${state.gold.total} WatCoins`);
+  assert.equal(served.tip, `+${state.tips.total} tip`);
+  assert.ok(state.tips.total > 0);
+  assert.equal(state.score.value, state.gold.total + state.tips.total, "the counter moves by the announced coins plus the tip");
   assert.doesNotMatch(html, /board-score-value is-negative/);
 });
 
@@ -103,7 +105,7 @@ test("an order that expires announces the WatCoins it cost", async () => {
   game.advance(20_000);
   const { state, html } = game.view();
   assert.equal(state.score.value, -20);
-  assert.deepEqual(announcement(html), { message: "Order expired", amount: "-20 WatCoins" });
+  assert.deepEqual(announcement(html), { message: "Order expired", amount: "-20 WatCoins", tip: null });
 });
 
 test("the offline mock charges the same penalties: wrong plate -25, expired order -20", async () => {
@@ -115,7 +117,7 @@ test("the offline mock charges the same penalties: wrong plate -25, expired orde
     assert.equal(wrong.score.value, -25);
     assert.deepEqual(wrong.penalties, { total: 25, lastChange: -25 });
     const html = renderApp(wrong, now);
-    assert.deepEqual(announcement(html), { message: "Wrong burger", amount: "-25 WatCoins" });
+    assert.deepEqual(announcement(html), { message: "Wrong burger", amount: "-25 WatCoins", tip: null });
   } finally {
     transport.close();
   }
@@ -131,7 +133,7 @@ test("the offline mock charges the same penalties: wrong plate -25, expired orde
   assert.equal(later.score.value, -20);
   assert.deepEqual(later.penalties, { total: 20, lastChange: -20 });
   const html = renderApp(later, 50_500);
-  assert.deepEqual(announcement(html), { message: "Order expired", amount: "-20 WatCoins" });
+  assert.deepEqual(announcement(html), { message: "Order expired", amount: "-20 WatCoins", tip: null });
 });
 
 test("the results screen itemizes the penalties that took coins away", async () => {

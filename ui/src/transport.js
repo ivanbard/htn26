@@ -1,4 +1,5 @@
 import { createMockTransport } from "./mock-transport.js";
+import { createActionTracker } from "./action-tracker.js";
 import { normalizeServerSnapshot } from "./server-snapshot.js";
 
 /**
@@ -10,8 +11,16 @@ function apiUrl(baseUrl, path) {
   return `${String(baseUrl || "").replace(/\/+$/, "")}${path}`;
 }
 
-export function createHttpTransport({ baseUrl = "", fetchImpl = globalThis.fetch, eventSourceFactory = globalThis.EventSource, normalizeSnapshot = normalizeServerSnapshot } = {}) {
+export function createHttpTransport({ baseUrl = "", fetchImpl = globalThis.fetch, eventSourceFactory = globalThis.EventSource, normalizeSnapshot: normalizeBase = normalizeServerSnapshot } = {}) {
   if (typeof fetchImpl !== "function") throw new Error("The local HTTP transport requires fetch");
+
+  // Every snapshot from the server goes through the same adapter, then the
+  // action tracker adds what the server does not send (see action-tracker.js).
+  const tracker = createActionTracker();
+  const normalizeSnapshot = (raw) => {
+    const snapshot = normalizeBase(raw);
+    return snapshot && Array.isArray(snapshot.players) ? { ...snapshot, players: tracker.annotate(snapshot.players) } : snapshot;
+  };
 
   let source;
   let poll;

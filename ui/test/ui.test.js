@@ -985,11 +985,12 @@ test("renders serving success, gold/tip breakdown, and score update from the aut
   assert.match(html, /data-node-id="31:25"/);
   assert.match(html, /score-coin-counter\.png/);
   // The live announcement (age 1s, inside its 3.2s lifetime) says what happened
-  // and how many WatCoins it was worth, in plain sentence case.
+  // and what it earned (WatCoins, then the tip), in plain sentence case.
   assert.match(html, /class="game-board-toast"/);
   assert.match(html, /class="delivery-toast is-success"/);
   assert.match(html, /Burger served/);
-  assert.match(html, /\+115 WatCoins/);
+  assert.match(html, /\+100 WatCoins/);
+  assert.match(html, /class="delivery-toast-tip">\+15 tip</);
   assert.doesNotMatch(html, /BURGER SERVED|TIP/);
 });
 

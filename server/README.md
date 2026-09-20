@@ -35,10 +35,13 @@ Use `--host 0.0.0.0` only for a trusted LAN. Useful environment variables:
   milliseconds, default 12000.
 
 The deterministic default is an approximately 10 m x 10 m room with exactly
-four station types: pantry, fridge, cutting board, and stove. Review it through
-`POST /api/floorplan/review`; it is not an AI fallback response. The active
-camera flow uses `POST /api/layout/generate`, and both paths require explicit
-approval before `START_GAME`.
+four station types: pantry, fridge, cutting board, and stove. The UI can select
+it through `POST /api/floorplan/review` when no photos arrive or personalized
+generation is unavailable. The active camera flow uses
+`POST /api/layout/generate`; the UI immediately activates the generated layout
+and proceeds to burger-level placement, so the player-facing flow has no
+separate confirm-layout screen. The approval route remains available for
+operator/API compatibility.
 
 ## Host-badge serial adapter
 

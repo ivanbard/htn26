@@ -11,7 +11,7 @@ fridge, cutting board, and stove.
 
 1. Photograph the play area with the phone and upload the stills to the laptop server.
 2. Connect the stationary host badge to the captain's laptop and open its host app; open the player app on the three badges.
-3. Generate and approve the floor plan on the local UI, then place the four NFC zones as instructed.
+3. Choose the personalized floor layout when the phone photos arrive, or choose the normal layout as the fallback, then place the four NFC zones as instructed.
 4. Press START on the host badge. It starts its local four-minute display,
    resets the badge session, and emits `HTN26|GAME|START_GAME|240|3` to serial
    and as a best-effort radio lifecycle hint. The laptop server applies that

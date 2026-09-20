@@ -88,10 +88,11 @@ function orderTip(recipe, remainingSeconds, totalSeconds) {
   return Math.max(1, Math.round(recipe.gold * 0.1 + ratio * 5));
 }
 
-// Order pacing mirrors server/src/projection.mjs: ONE order when the round
-// starts, then another after a random gap, at most MAX_ACTIVE_ORDERS open at
-// once, and never zero open orders while the round runs. Patience is the
-// customer's wait (by recipe), not the spawn gap.
+// Order pacing follows the documented rules (README/DEPLOY): ONE order when the
+// round starts, then another after a random 8-35 s gap, at most MAX_ACTIVE_ORDERS
+// open at once, and never zero open orders while the round runs. Patience is the
+// customer's wait, chosen here for the mock (60 s plus 15 s per topping) so a
+// burger is actually makeable; it is independent of the spawn gap.
 const MAX_ACTIVE_ORDERS = 3;
 const ORDER_INTERVAL_SECONDS = Object.freeze({ min: 8, max: 35 });
 const ORDER_PATIENCE_BASE_SECONDS = 60;
