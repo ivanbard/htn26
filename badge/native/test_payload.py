@@ -248,6 +248,9 @@ def scenario(nvs_error=0, radio_error=0, nfc_error=0, allocation_failure=False,
             "HOST READY - PRESS START" if role == "host" else
             ("RADIO READY / NFC ERROR" if nfc_error else "PLAYER READY - WAIT FOR START"))
         assert expected in texts
+        if role != "host" and not radio_error:
+            assert packets and re.match(rb'^OC2\|\d{6}\|P\|P2$', packets[-1]), packets
+            packets.clear()
     if timeout_recovery == "persistent":
         hardware["nfc_text_error"] = 62760
         hardware["tag"] = 'pantry'
@@ -266,6 +269,9 @@ def scenario(nvs_error=0, radio_error=0, nfc_error=0, allocation_failure=False,
             assert "HTN26|GW|DOWN|0|0\n" in prints
         else:
             assert "HTN26|GW|UP|0|0\n" in prints
+            incoming(b'OC2|876542|P|P2'); invoke(0x5c)
+            presence = 'HTN26|RX|%02x:%02x:%02x:%02x:%02x:%02x|%d|%s\n'
+            assert prints.count(presence) == 1
             invoke(0x60, 8)
             assert packets[-1] == b'OC2|000001|G|S|3'
             assert "HTN26|GAME|START_GAME|240|3\n" in prints

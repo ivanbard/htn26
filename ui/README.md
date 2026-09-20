@@ -120,6 +120,7 @@ Every screen in the setup-to-play flow has a working way forward or back, whatev
 - **State it cannot read** (for example a phase it has never heard of) or a **render error** shows what happened with Reload / Reset the game instead of a dead end or a blank page; the error screen clears itself when a newer snapshot arrives.
 - **Player setup:** with no badges connected the normal buttons stay disabled, but "Continue anyway" is always available (the round starts from the host badge, which does not require the badges to have connected first). If the personalized layout fails, the normal layout is offered first and "Try the personalized layout again" stays available.
 - **Tour:** the card can never hide its own buttons. A step with no target, a board that cannot be measured, or a measurement that throws all show the card centred; a second "Skip tour" button lives outside the card while it is not yet showing and on very short windows.
+- **Returning to the beginning:** "Back to start" on the placement tour clears an unstarted setup and restores the opening screen. It is deliberately unavailable during a live round, so it cannot cut off the four-minute timer.
 - **Failed commands** show the server's reason when it gives one and can be dismissed; a failure that lands after the game already moved on (a double click) is not reported. The waiting-for-host screen explains a long wait and always keeps "Cancel and reset".
 - **Phone photos page:** after a failed upload the same photos can be chosen again.
 

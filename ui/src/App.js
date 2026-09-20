@@ -874,14 +874,20 @@ function playerSlotNumber(player) {
   return match ? Number(match[0]) : null;
 }
 
+function playerConnectionStatus(player) {
+  if (!player) return "waiting";
+  const explicit = String(player?.connection?.status || "").toLowerCase();
+  if (explicit) return explicit;
+  if (Object.prototype.hasOwnProperty.call(player || {}, "ready")) return player.ready === true ? "ready" : "waiting";
+  if (Object.prototype.hasOwnProperty.call(player || {}, "connected")) return player.connected === true ? "connected" : "waiting";
+  if (Object.prototype.hasOwnProperty.call(player || {}, "badgeMac")) return player.badgeMac ? "connected" : "waiting";
+  const legacy = String(player?.status || "").toLowerCase();
+  if (legacy) return legacy;
+  return "legacy-ready";
+}
+
 function playerIsReady(player) {
-  if (!player) return false;
-  if (Object.prototype.hasOwnProperty.call(player, "ready")) return player.ready === true;
-  if (Object.prototype.hasOwnProperty.call(player, "connected")) return player.connected === true;
-  if (Object.prototype.hasOwnProperty.call(player, "badgeMac")) return Boolean(player.badgeMac);
-  const status = String(player.status || player.connection?.status || "").toLowerCase();
-  if (status) return ["ready", "connected", "online", "healthy"].includes(status);
-  return true;
+  return ["ready", "connected", "online", "healthy", "legacy-ready"].includes(playerConnectionStatus(player));
 }
 
 function playersForSlots(state) {
@@ -899,20 +905,29 @@ function roomPhotoCount(state) {
 }
 
 function PlayerReadinessCard({ slot, player }) {
+  const status = playerConnectionStatus(player);
   const ready = playerIsReady(player);
   const label = player?.name || `PLAYER ${slot}`;
+  const statusLabel = status === "offline" || status === "lost" || status === "failed"
+    ? "CONNECTION LOST"
+    : status === "connected" || status === "online" || status === "healthy"
+      ? "CONNECTED"
+      : status === "ready" || status === "legacy-ready"
+        ? "READY"
+        : "WAITING FOR CONTROLLER";
   return h("div", {
-    className: cx("player-readiness-card", !ready && "is-unavailable"),
+    className: cx("player-readiness-card", !ready && "is-unavailable", `is-${status}`),
     "data-player-slot": String(slot),
     "data-player-ready": ready ? "true" : "false",
+    "data-player-status": status,
     role: "status",
-    "aria-label": `${label}: ${ready ? "ready" : "waiting for player"}`,
+    "aria-label": `${label}: ${statusLabel.toLowerCase()}`,
   },
     h("div", { className: "player-readiness-main" },
       h("span", { className: "player-readiness-icon" }, h("img", { src: playerChefAsset(player || { color: "green" }), alt: "" })),
       h("span", { className: "player-readiness-copy" },
         h("strong", null, `PLAYER ${slot}`),
-        h("span", null, ready ? "READY" : "WAITING FOR PLAYER"),
+        h("span", null, statusLabel),
       ),
     ),
   );
@@ -1326,6 +1341,7 @@ function TourIntroView({ state, now, onCommand }) {
             h("div", { className: "tour-actions" },
               h("button", { type: "button", className: "tour-primary-button", "data-tour-action": "start", autoFocus: true, onClick: startTour }, "Start Tour"),
               h("button", { type: "button", className: "tour-skip-button", "data-command": GAME_ACTIONS.START_GAME, onClick: () => onCommand?.(GAME_ACTIONS.START_GAME) }, "Skip to the Game"),
+              h("button", { type: "button", className: "tour-skip-button", "data-command": GAME_ACTIONS.RESET_TO_OPENING, onClick: () => onCommand?.(GAME_ACTIONS.RESET_TO_OPENING) }, "Back to start"),
             ),
           ),
         ),

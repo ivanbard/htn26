@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { acquireSimLock, describeHolder } from "./sim-lock.mjs";
 
 const base = process.env.HTN26_API_URL || "http://127.0.0.1:8787";
 const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
@@ -42,7 +43,20 @@ async function report(label, expected) {
   }
 }
 
+// Only one simulation at a time: a second one would restart the host mid-setup and
+// break the first (see sim-lock.mjs).
+function takeLock() {
+  const lock = acquireSimLock({ owner: "simulate-game" });
+  if (!lock.ok) {
+    console.error(`Another simulation is already running (${describeHolder(lock.holder)}). Two at once fight over the same server. Wait for it to finish, or stop it, then try again.`);
+    process.exit(1);
+  }
+  process.on("exit", () => lock.release());
+  process.on("SIGINT", () => process.exit(130));
+}
+
 async function main() {
+  takeLock();
   console.log(`Running the burger round against ${base}`);
 
   // Put the server in the same setup state the UI reaches after the photo flow.

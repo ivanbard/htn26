@@ -369,6 +369,7 @@ export function reduceMockState(state, command, now = Date.now(), random = Math.
     case GAME_ACTIONS.START_GAME: return startGame(state, now, random);
     case GAME_ACTIONS.END_GAME: return endGame(state, now);
     case GAME_ACTIONS.RESET_GAME: return createInitialMockState(now);
+    case GAME_ACTIONS.RESET_TO_OPENING: return canRunAction(state, GAME_ACTIONS.RESET_TO_OPENING) ? createInitialMockState(now) : state;
     case GAME_ACTIONS.DELIVERY_SUCCESS: return recordDelivery(state, true, now, orderId, random);
     case GAME_ACTIONS.DELIVERY_FAILURE: return recordDelivery(state, false, now, orderId, random);
     default: return state;

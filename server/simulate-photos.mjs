@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { acquireSimLock, describeHolder } from "./sim-lock.mjs";
 
 const base = process.env.HTN26_API_URL || "http://127.0.0.1:8787";
 const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
@@ -10,7 +11,20 @@ async function request(route, options = {}) {
   return body;
 }
 
+// Only one simulation at a time: a second one would restart the host mid-setup and
+// break the first (see sim-lock.mjs).
+function takeLock() {
+  const lock = acquireSimLock({ owner: "simulate-photos" });
+  if (!lock.ok) {
+    console.error(`Another simulation is already running (${describeHolder(lock.holder)}). Two at once fight over the same server. Wait for it to finish, or stop it, then try again.`);
+    process.exit(1);
+  }
+  process.on("exit", () => lock.release());
+  process.on("SIGINT", () => process.exit(130));
+}
+
 async function main() {
+  takeLock();
   console.log(`Uploading fixture photos to ${base}`);
   await request("/api/command", {
     method: "POST",

@@ -345,7 +345,13 @@ export function createHttpServer({ projection, photoStore, layoutSubmissionStore
         finalizeMetrics: () => ({ totalMs: (preprocessMs ?? 0) + elapsedMs(totalStart) }),
       });
       if (process.env.NODE_ENV !== "production") console.debug("[htn26] room layout generation failed", { requestId: submission.requestId, reason: error?.name || "provider", ...completed.metrics });
-      send(res, Number(error?.statusCode) || 503, { error: "Room layout generation is unavailable. Try again." }, { ...headers, ...auditHeaders, ...timingHeader(completed.metrics) });
+      // No API key is a setup problem the operator can fix, and saying so leaks
+      // nothing. Every other failure (timeout, provider, bad output) stays generic.
+      const notConfigured = /not configured/i.test(error?.message || "");
+      const message = notConfigured
+        ? "Personalized room layout needs an OpenAI API key on the game server (OPENAI_API_KEY in server/.env, then restart it). The normal room layout works without one."
+        : "Room layout generation is unavailable. Try again.";
+      send(res, Number(error?.statusCode) || 503, { error: message }, { ...headers, ...auditHeaders, ...timingHeader(completed.metrics) });
     }
   }
 

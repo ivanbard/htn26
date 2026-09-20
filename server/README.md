@@ -138,11 +138,11 @@ and `POST /api/layout/generate`.
 | `GET /api/health` | none | `{ "ok": true, "state": health }` | `500` generic server error |
 | `POST /api/serial` | JSON `{ "line": "HTN26|..." }` | parser result plus current `state`; invalid protocol records remain parser results | `400` missing/non-string line or invalid JSON |
 | `POST /api/players/assign` | JSON `{ "mac": "AA:BB:CC:DD:EE:FF", "playerId": "p1" }` | updated snapshot | `400` invalid MAC/player or JSON |
-| `POST /api/command` | JSON command described below | updated snapshot | `400` invalid JSON or HTTP `SCAN_ROOM`; `409` valid request that does not fit the current state (for example `START_GAME` before approval), with the reason in `error`; `500` unsupported command |
+| `POST /api/command` | JSON command described below | updated snapshot | `400` invalid JSON or HTTP `SCAN_ROOM`; `409` valid request that does not fit the current state (for example `START_GAME` before approval), with the reason in `error`; `400` unsupported command (the command is named in `error`) |
 
 The command body is `{ "type": "COMMAND" }`. Supported server commands are
 `START_HOST`, `SCAN_ROOM`, `APPROVE_LAYOUT` (alias `ACCEPT_LAYOUT`),
-`START_GAME`, `END_GAME`, and `RESET_GAME`. `START_GAME` requires an explicitly
+`START_GAME`, `END_GAME`, `RESET_GAME`, and `RESET_TO_OPENING`. `START_GAME` requires an explicitly
 approved proposal. On this root server, `SCAN_ROOM` creates the deterministic
 local proposal; the photo-backed path uses `POST /api/layout/generate` and
 then approval. See [`API.md`](API.md) for the complete lifecycle.
@@ -151,7 +151,7 @@ then approval. See [`API.md`](API.md) for the complete lifecycle.
 
 | Method and route | Input | Successful output | Expected errors |
 | --- | --- | --- | --- |
-| `POST /api/layout/generate` | one `multipart/form-data` request with 3-5 `photos`; optional `X-HTN26-Photo-Preprocess-Ms` | sanitized layout proposal; commits public photo metadata, `floorPlan`, and `setup.phase = layout-proposed`, then publishes one SSE snapshot; request/audit IDs in headers | `400` wrong count/malformed multipart; `413` too large; `503` missing key, timeout, provider, body, or validation failure |
+| `POST /api/layout/generate` | one `multipart/form-data` request with 3-5 `photos`; optional `X-HTN26-Photo-Preprocess-Ms` | sanitized layout proposal; commits public photo metadata, `floorPlan`, and `setup.phase = layout-proposed`, then publishes one SSE snapshot; request/audit IDs in headers | `400` wrong count/malformed multipart; `413` too large; `503` missing key (says so and how to fix it), timeout, provider, body, or validation failure (generic) |
 | `GET /api/layout` | none | approved `roomLayout`, or `null` before approval | `500` generic server error |
 | `GET /api/layout/submissions` | none | `{ "submissions": [...] }` audit summaries | `500` generic server error |
 | `POST /api/floorplan/review` | JSON `{ "allowEmpty": true }` for the no-photo fixture, otherwise previously uploaded compatibility photos | unaccepted deterministic `floorPlan` proposal | `400` no photos/invalid JSON; `500` provider failure |

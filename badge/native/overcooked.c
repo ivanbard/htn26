@@ -207,12 +207,14 @@ static void receive(const usize *capture, const u8 **peer, const signed char *rs
     int event = *size > 16 && equal(p, "OC2|", 4) && sequence(p + 4) &&
                 equal(p + 10, "|E|P", 4) && p[14] >= '1' && p[14] <= '3' && p[15] == ':' &&
                 valid_action(p + 16, *size - 16);
+    int presence = *size == 15 && equal(p, "OC2|", 4) && sequence(p + 4) &&
+                   equal(p + 10, "|P|P", 4) && p[14] >= '1' && p[14] <= '3';
     int control = (*size == 14 || *size == 16) && equal(p, "OC2|", 4) && sequence(p + 4) &&
                   equal(p + 10, "|G|", 3) && (p[13] == 'S' || p[13] == 'E') &&
                   (*size == 14 || (p[14] == '|' && p[15] >= '1' && p[15] <= '3'));
     int ack = *size == ACK_BYTES && equal(p, "OC2|", 4) && sequence(p + 4) &&
               equal(p + 10, "|A|OK", 5);
-    if (!event && !control && !ack) return;
+    if (!event && !presence && !control && !ack) return;
     if (acquire(&self->inbox_full)) { ++self->dropped; return; }
     for (usize i = 0; i < sizeof(self->inbox); ++i) self->inbox[i] = 0;
     copy(self->inbox, p, *size); self->inbox_size = *size;
@@ -529,6 +531,15 @@ static void broadcast_control(App *self, char code, u8 player_count) {
     if (written != 16) return;
     self->pending_size = (u32)written; self->wait_ticks = 0;
     if (!transmit(self, self->pending, self->pending_size)) self->advertise_ticks = WAIT_TICKS;
+}
+
+static void send_presence(App *self) {
+    if (self->role != ROLE_PLAYER || self->player < 1 || self->player > 3) return;
+    u32 current = self->sequence++;
+    if (self->sequence > 999999) self->sequence = 1;
+    char packet[16];
+    int written = FORMAT(packet, sizeof(packet), "OC2|%06u|P|P%u", current, (u32)self->player);
+    if (written == 15) transmit(self, packet, (usize)written);
 }
 
 static void plate_summary(char *target, u8 plate) {
@@ -886,8 +897,11 @@ static void start_hardware(App *self) {
     if (self->role == ROLE_HOST) {
         PRINT("HTN26|GW|UP|0|0\n");
         if (self->status) LABEL_TEXT(self->status, "HOST READY - PRESS START");
-    } else if (self->status) LABEL_TEXT(self->status,
-        self->nfc_enabled ? "PLAYER READY - WAIT FOR START" : "RADIO READY / NFC ERROR");
+    } else {
+        send_presence(self);
+        if (self->status) LABEL_TEXT(self->status,
+            self->nfc_enabled ? "PLAYER READY - WAIT FOR START" : "RADIO READY / NFC ERROR");
+    }
     LED(0, 0, 128, 0); LED_SHOW();
 }
 
@@ -896,7 +910,7 @@ static void consume_radio(App *self) {
     copy(packet, self->inbox, sizeof(packet)); copy(peer, self->peer, sizeof(peer));
     int rssi = self->rssi; release(&self->inbox_full, 0);
     int duplicate = size == self->last_size && equal(packet, self->last, size) && equal(peer, self->last_peer, 6);
-    int event = packet[11] == 'E', control = packet[11] == 'G', ack = packet[11] == 'A';
+    int event = packet[11] == 'E', presence = packet[11] == 'P', control = packet[11] == 'G', ack = packet[11] == 'A';
     if (event && !self->game_active) event = 0;
     if (!duplicate) {
         for (usize i = 0; i < sizeof(self->last); ++i) self->last[i] = 0;
@@ -924,6 +938,11 @@ static void consume_radio(App *self) {
                 packet[14] != (char)('0' + self->player))
                 apply_peer_bump(self, packet + 18);
             else if (!starts(packet + 16, "X:")) apply_action(self, packet + 16, 0);
+        }
+        if (presence && self->role == ROLE_HOST) {
+            ++self->received;
+            PRINT("HTN26|RX|%02x:%02x:%02x:%02x:%02x:%02x|%d|%s\n",
+                  peer[5], peer[4], peer[3], peer[2], peer[1], peer[0], rssi, packet);
         }
         if (ack && self->wait_ticks && equal(packet + 4, self->pending + 4, 6)) {
             self->wait_ticks = self->advertise_ticks = 0; RADIO_PAUSE();
@@ -1009,6 +1028,7 @@ static void tick(App *self) {
         PRINT("OC_NATIVE|counts|tx=%u|rx=%u|errors=%u|dropped=%u\n",
               self->sent, self->received, self->errors, self->dropped);
         if (self->role == ROLE_HOST) PRINT("HTN26|GW|UP|%u|%u\n", self->received, self->dropped);
+        else if (self->role == ROLE_PLAYER) send_presence(self);
     }
 }
 

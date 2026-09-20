@@ -171,7 +171,7 @@ test("renders room upload and server-driven player readiness during scanning", (
   assert.match(html, /data-player-slot="2" data-player-ready="false"/);
   assert.match(html, /data-player-slot="3" data-player-ready="false"/);
   assert.match(html, /player-readiness-icon[\s\S]*PLAYER 1/);
-  assert.match(html, /WAITING FOR PLAYER/);
+  assert.match(html, /WAITING FOR CONTROLLER/);
   assert.doesNotMatch(html, /Add room photos/);
   assert.doesNotMatch(html, /data-photo-input/);
   const styles = fs.readFileSync(new URL("../styles.css", import.meta.url), "utf8");
@@ -923,6 +923,26 @@ test("host commands move from scan directly to burger placement and round lifecy
   await transport.command(GAME_ACTIONS.RESET_GAME);
   assert.equal(transport.snapshot().setup.phase, SETUP_PHASES.IDLE);
   assert.equal(transport.snapshot().floorPlan.accepted, false);
+});
+
+test("the placement tour can return to the true opening screen before a round begins", async () => {
+  const transport = await approvedTransport(10_000);
+  const placementHtml = renderApp(transport.snapshot(), 10_000);
+
+  assert.match(placementHtml, /data-command="RESET_TO_OPENING">Back to start</);
+  await transport.command(GAME_ACTIONS.RESET_TO_OPENING);
+
+  const opening = transport.snapshot();
+  assert.equal(opening.setup.phase, SETUP_PHASES.IDLE);
+  assert.equal(opening.floorPlan.accepted, false);
+  assert.match(renderApp(opening, 10_000), /data-onboarding="welcome"/);
+
+  await transport.command(GAME_ACTIONS.START_HOST);
+  await transport.command(GAME_ACTIONS.SCAN_ROOM);
+  await transport.command(GAME_ACTIONS.START_GAME);
+  const before = transport.snapshot();
+  await transport.command(GAME_ACTIONS.RESET_TO_OPENING);
+  assert.deepEqual(transport.snapshot(), before, "the mock mirrors the server by never resetting a running round");
 });
 
 test("rejects setup commands in invalid phases without changing authoritative state", async () => {

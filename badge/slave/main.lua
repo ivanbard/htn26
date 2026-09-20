@@ -10,6 +10,7 @@ local NFC_CLEAR_MS = 500
 local CHOP_MS = 3000
 local READY_MS = 500
 local TRANSFER_MS = 800
+local PRESENCE_INTERVAL_MS = 5000
 local COOK_MS = 15000
 local DONE_MS = 2000
 local WARNING_MS = 3000
@@ -398,6 +399,14 @@ local function event_payload(sequence, player, action)
 	return payload
 end
 
+local function presence_payload(sequence_number, player)
+	if type(sequence_number) ~= "number" or sequence_number < 0 or sequence_number > MAX_SEQUENCE or
+		sequence_number ~= math.floor(sequence_number) or player < 1 or player > 3 then
+		return nil
+	end
+	return string.format("OC2|%06d|P|P%d", sequence_number, player)
+end
+
 local function parse_event(payload)
 	if type(payload) ~= "string" or #payload > RADIO_BYTES then
 		return nil
@@ -497,6 +506,7 @@ local submit_record = nil
 local submission_committed = false
 local transfer_until = 0
 local last_chop_step = -1
+local next_presence_ms = 0
 
 local title_label, game_label, held_label, plate_label
 local chop_label, stove_label, status_label, radio_label
@@ -639,6 +649,16 @@ local function emit(action)
 		set_status("RADIO SEND FAILED", "Local state changed; event was not queued", 0xff5555)
 	end
 	return queued
+end
+
+local function send_presence(now)
+	if setup_mode or not radio_enabled or player_no < 1 or player_no > 3 or now < next_presence_ms then
+		return false
+	end
+	next_presence_ms = now + PRESENCE_INTERVAL_MS
+	sequence = sequence >= MAX_SEQUENCE and 1 or sequence + 1
+	local payload = presence_payload(sequence, player_no)
+	return payload ~= nil and badge.radio.send(payload) == true
 end
 
 local function show_invalid(reason)
@@ -1057,6 +1077,7 @@ function on_enter(root)
 		sequence = 0
 	end
 	sequence = math.floor(sequence)
+	next_presence_ms = 0
 	state = new_state()
 	nfc_enabled = badge.nfc.enable() == true
 	if nfc_enabled then
@@ -1100,9 +1121,10 @@ function on_button(button, kind)
 			a_down = true
 			if setup_mode then
 				badge.store.set_int("player_no", player_no)
-				badge.store.set_int("configured", 1)
-				setup_mode = false
-				set_status("PLAYER " .. tostring(player_no) .. " SAVED", "Waiting for host GAME START", 0x8ed8ff)
+					badge.store.set_int("configured", 1)
+					setup_mode = false
+					next_presence_ms = 0
+					set_status("PLAYER " .. tostring(player_no) .. " SAVED", "Waiting for host GAME START", 0x8ed8ff)
 			end
 		elseif button == B.B then
 			b_down = true
@@ -1166,6 +1188,7 @@ end
 function on_tick()
 	local now = badge.sys.ms()
 	service_radio(now)
+	send_presence(now)
 	if nfc_clear_at ~= 0 and now >= nfc_clear_at then
 		badge.nfc.clear()
 		nfc_clear_at = 0
@@ -1209,7 +1232,8 @@ if badge == nil then
 		parse_snapshot = parse_snapshot,
 		apply_transfer = apply_transfer,
 		all_players_ready = all_players_ready,
-		event_payload = event_payload,
+			event_payload = event_payload,
+			presence_payload = presence_payload,
 		parse_event = parse_event,
 		parse_control = parse_control,
 		accept_control_sequence = accept_control_sequence,

@@ -39,6 +39,7 @@ class PlayerBadgeTests(unittest.TestCase):
         self.execute("""
           local p = player_test.event_payload(42, 2, "PU:B")
           assert(p == "OC2|000042|E|P2:PU:B" and #p <= 44)
+          assert(player_test.presence_payload(43, 2) == "OC2|000043|P|P2")
           local seq, player, action = player_test.parse_event(p)
           assert(seq == 42 and player == 2 and action == "PU:B")
           assert(player_test.event_payload(0, 1, "READY") == nil)

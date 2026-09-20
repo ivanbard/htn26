@@ -20,6 +20,7 @@ const DEFAULT_LOCATION_HOLD_SECONDS = 2;
 // Native badges retry an unacknowledged advertisement after three seconds.
 // Keep the first half of a physical bump long enough to pair with one retry.
 const TRANSFER_PAIR_WINDOW_MS = 3_500;
+const CONTROLLER_PRESENCE_TIMEOUT_MS = 8_000;
 const HISTORY_LIMIT = 100;
 
 export const BURGER_RECIPES = Object.freeze([
@@ -110,6 +111,13 @@ function makePlayer(player, now) {
   return {
     ...player,
     badgeMac: null,
+    connection: {
+      status: "waiting",
+      source: "oc2-presence",
+      lastSeenAt: null,
+      staleAfterMs: CONTROLLER_PRESENCE_TIMEOUT_MS,
+      detail: "Waiting for controller",
+    },
     position: null,
     tracking: { status: "unknown", source: "badge-projection", lastSeenAt: null, staleAfterMs: 2000 },
     inventory: [],
@@ -206,6 +214,7 @@ export class ServerProjection {
   constructor({ provider, now = () => Date.now(), roundSeconds = ROUND_SECONDS,
     orderIntervalSeconds, orderIntervalMinSeconds = 8, orderIntervalMaxSeconds = 35,
     orderPatienceSeconds, maxActiveOrders = 3, locationHoldSeconds = DEFAULT_LOCATION_HOLD_SECONDS,
+    controllerPresenceTimeoutMs = CONTROLLER_PRESENCE_TIMEOUT_MS,
     random = Math.random, authoritativeEngine, difficultySidecar } = {}) {
     this.now = now;
     this.provider = provider || new LocalFloorplanProvider({ now });
@@ -216,6 +225,7 @@ export class ServerProjection {
     this.orderPatienceSeconds = Number.isFinite(Number(orderPatienceSeconds)) ? clampInteger(orderPatienceSeconds, 3, 600, DEFAULT_ORDER_INTERVAL_SECONDS) : null;
     this.maxActiveOrders = clampInteger(maxActiveOrders, 1, 6, 3);
     this.locationHoldSeconds = clampInteger(locationHoldSeconds, 0, 30, DEFAULT_LOCATION_HOLD_SECONDS);
+    this.controllerPresenceTimeoutMs = clampInteger(controllerPresenceTimeoutMs, 2_000, 60_000, CONTROLLER_PRESENCE_TIMEOUT_MS);
     this.random = typeof random === "function" ? random : Math.random;
     this.authoritativeEngine = authoritativeEngine || null;
     this.difficultySidecar = difficultySidecar || null;
@@ -410,6 +420,27 @@ export class ServerProjection {
     return changed;
   }
 
+  _updateControllerConnections(now) {
+    let changed = false;
+    for (const player of this._state.players) {
+      const connection = player.connection;
+      if (!connection?.lastSeenAt) continue;
+      const lastSeen = Date.parse(connection.lastSeenAt);
+      const stale = !Number.isFinite(lastSeen) || now - lastSeen > this.controllerPresenceTimeoutMs;
+      const status = stale ? "offline" : "connected";
+      if (connection.status === status) continue;
+      player.connection = {
+        ...connection,
+        status,
+        staleAfterMs: this.controllerPresenceTimeoutMs,
+        detail: stale ? "No controller heartbeat received" : "Controller heartbeat received",
+      };
+      this._record("controller-status", `${player.name} is ${status}`, now, { playerId: player.id, status });
+      changed = true;
+    }
+    return changed;
+  }
+
   _clearPlayer(player, now = this.now()) {
     player.hand = null;
     player.hasPlate = false;
@@ -500,9 +531,17 @@ export class ServerProjection {
   }
 
   _tick(now = this.now()) {
-    if (this._state.timer.status !== "running" || this._roundStartedAt == null) return false;
+    let changed = this._updateControllerConnections(now);
+    if (this._state.timer.status !== "running" || this._roundStartedAt == null) {
+      if (changed) {
+        this._revision += 1;
+        this._state.revision = this._revision;
+        this._emit(now);
+      }
+      return changed;
+    }
     const remainingRound = Math.max(0, this._roundDurationSeconds - Math.floor((now - this._roundStartedAt) / 1000));
-    let changed = remainingRound !== this._state.timer.remainingSeconds;
+    changed = remainingRound !== this._state.timer.remainingSeconds || changed;
     this._state.timer.remainingSeconds = remainingRound;
     this._state.clock.remainingSeconds = remainingRound;
     changed = this._updateChopping(now) || changed;
@@ -590,7 +629,7 @@ export class ServerProjection {
     return clone(this._state);
   }
 
-  registerBadge(mac, playerId) {
+  registerBadge(mac, playerId, now = this.now()) {
     const normalized = String(mac || "").toUpperCase();
     const player = this._state.players.find((candidate) => candidate.id === playerId || candidate.id === `p${playerId}` || String(candidate.id) === String(playerId));
     if (!/^([0-9A-F]{2}:){5}[0-9A-F]{2}$/.test(normalized) || !player) return false;
@@ -602,15 +641,23 @@ export class ServerProjection {
     if (player.badgeMac && player.badgeMac !== normalized) this._badges.delete(player.badgeMac);
     this._badges.set(normalized, player.id);
     player.badgeMac = normalized;
+    player.connection = {
+      ...(player.connection || {}),
+      status: "connected",
+      source: "oc2-presence",
+      lastSeenAt: iso(now),
+      staleAfterMs: this.controllerPresenceTimeoutMs,
+      detail: "Controller heartbeat received",
+    };
     return true;
   }
 
-  assignNextBadge(mac) {
+  assignNextBadge(mac, now = this.now()) {
     const normalized = String(mac || "").toUpperCase();
     const existing = this._badges.get(normalized);
     if (existing) return existing;
     const unassigned = this._state.players.find((player) => !player.badgeMac);
-    if (!unassigned || !this.registerBadge(normalized, unassigned.id)) return null;
+    if (!unassigned || !this.registerBadge(normalized, unassigned.id, now)) return null;
     return unassigned.id;
   }
 
@@ -748,7 +795,28 @@ export class ServerProjection {
     return this.snapshot(now);
   }
 
-  resetGame(now = this.now()) {
+  resetGame(now = this.now(), { returnToOpening = false } = {}) {
+    if (returnToOpening) {
+      // A setup may have been left at the placement/tour screen by an earlier
+      // fixture run. Restore the presentation state, rather than merely
+      // changing its phase: otherwise old fixture-photo counts make the next
+      // live setup look as if it has already begun.
+      const plan = localPlan({ generatedAt: iso(now), photoCount: 0 });
+      this._state.photos = [];
+      this._state.floorPlan = plan;
+      this._state.roomLayout = null;
+      this._state.proposedRoomLayout = null;
+      this._state.setup.photoCount = 0;
+      this._state.burgerLevel = { status: "not-generated", recipe: "BURGER", placementInstructions: clone(plan.placementInstructions) };
+      this._state.stations = makeStations();
+      this._state.health.inference = {
+        id: "inference",
+        label: "SETUP INFERENCE",
+        status: "healthy",
+        lastSeenAt: iso(now),
+        detail: plan.reviewMessage,
+      };
+    }
     this._roundStartedAt = null;
     this._roundDurationSeconds = this.roundSeconds;
     for (const player of this._state.players) this._clearPlayer(player, now);
@@ -761,12 +829,14 @@ export class ServerProjection {
     this._resetEconomy();
     this._state.timer = { status: "ready", remainingSeconds: this.roundSeconds, totalSeconds: this.roundSeconds };
     this._state.clock = { ...this._state.timer };
-    this._state.setup.phase = this._state.floorPlan.accepted ? "burger-placement" : "idle";
-    this._state.setup.message = `Round reset. Send a host START record when ${this._state.playerCount === 1 ? "the active player is" : "the active players are"} ready.`;
-    this._state.burgerLevel.status = this._state.floorPlan.accepted ? "placement-ready" : "not-generated";
+    this._state.setup.phase = returnToOpening ? "idle" : (this._state.floorPlan.accepted ? "burger-placement" : "idle");
+    this._state.setup.message = returnToOpening
+      ? "Ready to start a new game."
+      : `Round reset. Send a host START record when ${this._state.playerCount === 1 ? "the active player is" : "the active players are"} ready.`;
+    this._state.burgerLevel.status = returnToOpening || !this._state.floorPlan.accepted ? "not-generated" : "placement-ready";
     this._state.eventHistory = [];
     this._historySequence = 0;
-    this._record("round-reset", "Round state reset", now);
+    this._record("round-reset", returnToOpening ? "Returned to the opening screen" : "Round state reset", now);
     this._nextOrderAt = null;
     this._pendingTransfer = null;
     this._pendingSubmission = null;
@@ -812,9 +882,16 @@ export class ServerProjection {
         return this.snapshot(now);
       case "RESET_GAME":
         return this.resetGame(now);
+      case "RESET_TO_OPENING":
+        if (this._state.setup.phase === "running" || this._state.timer.status === "running") {
+          throw conflict("end the live round before returning to the opening screen");
+        }
+        return this.resetGame(now, { returnToOpening: true });
 
       default:
-        throw new Error(`unsupported command: ${type}`);
+        // A client mistake (or a browser newer than this server), not a server fault:
+        // say which command, so it is not hidden behind a bare "server error".
+        throw Object.assign(new Error(`unsupported command: ${type}`), { statusCode: 400 });
     }
   }
 
@@ -880,12 +957,12 @@ export class ServerProjection {
     return this._state.players.slice(0, playerCount(this._state.playerCount));
   }
 
-  _playerForIntent(intent) {
+  _playerForIntent(intent, now = this.now()) {
     if (intent.type === "H") return null;
     const mac = String(intent.senderMac || "").toUpperCase();
     const known = this._badges.get(mac);
     if (known) return this._player(known);
-    const assigned = this.assignNextBadge(mac);
+    const assigned = this.assignNextBadge(mac, now);
     return assigned ? this._player(assigned) : null;
   }
 
@@ -1336,11 +1413,52 @@ export class ServerProjection {
     return this.ingestPlayerAction(translated, now);
   }
 
+  _ingestControllerPresence(intent, now = this.now()) {
+    const value = String(intent.value || "");
+    const match = /^P([1-3])$/.exec(value);
+    const senderMac = String(intent.senderMac || "").toUpperCase();
+    const player = match ? this._player(`p${match[1]}`) : null;
+    if (!player || !/^([0-9A-F]{2}:){5}[0-9A-F]{2}$/.test(senderMac)) {
+      return { accepted: false, detail: "invalid fixed-player controller presence" };
+    }
+    const mappedPlayerId = this._badges.get(senderMac);
+    if ((mappedPlayerId && mappedPlayerId !== player.id) || (player.badgeMac && player.badgeMac !== senderMac)) {
+      this._record("controller-conflict", `${player.id} is already assigned to another badge`, now, { playerId: player.id });
+      this._touch(now);
+      return { accepted: false, detail: `${player.id} is already assigned to another badge`, stateVersion: this._state.version };
+    }
+    const wasConnected = player.connection?.status === "connected";
+    this.registerBadge(senderMac, player.id, now);
+    player.connection = {
+      ...player.connection,
+      status: "connected",
+      source: "oc2-presence",
+      lastSeenAt: iso(now),
+      staleAfterMs: this.controllerPresenceTimeoutMs,
+      detail: "Controller heartbeat received",
+    };
+    this._state.health.gateway = {
+      ...this._state.health.gateway,
+      status: "healthy",
+      lastSeenAt: iso(now),
+      detail: "Host badge / USB online",
+    };
+    if (!wasConnected) this._record("controller-connected", `${player.name} connected`, now, { playerId: player.id });
+    this._touch(now);
+    return { accepted: true, connected: true, playerId: player.id, detail: `${player.name} connected`, stateVersion: this._state.version };
+  }
+
   ingestBadgeEvent(intent, now = this.now()) {
     this._tick(now);
     const sequenceKey = `${String(intent.senderMac || "").toUpperCase()}#${intent.sequence}`;
     if (this._seenEvents.has(sequenceKey)) return { accepted: false, duplicate: true, detail: "duplicate badge sequence ignored" };
     const value = String(intent.value || "");
+    if (intent.type === "P") {
+      const result = this._ingestControllerPresence(intent, now);
+      this._seenEvents.add(sequenceKey);
+      while (this._seenEvents.size > 512) this._seenEvents.delete(this._seenEvents.values().next().value);
+      return { duplicate: false, ...result };
+    }
     const isHostControl = intent.type === "H" && /^(START|END|RESET)$/.test(value);
     if (!isHostControl && this._state.timer.status !== "running") {
       this._state.health.gateway = { ...this._state.health.gateway, status: "healthy", lastSeenAt: iso(now), detail: "Host badge / USB online" };
@@ -1360,7 +1478,7 @@ export class ServerProjection {
     else if (intent.type === "H" && value === "RESET") result = this.ingestHostControl({ control: "RESET" }, now);
     else if (intent.type === "E") result = this._legacyPlayerEvent(intent, now);
     else {
-      const player = this._playerForIntent(intent);
+      const player = this._playerForIntent(intent, now);
       if (intent.type === "B" && /^SUBMIT[:=]/i.test(value)) {
         result = player
           ? this.ingestSubmission({ playerId: player.id, plate: value.replace(/^SUBMIT[:=]/i, "") }, now)
@@ -1390,6 +1508,17 @@ export class ServerProjection {
       droppedCount: status.droppedCount,
       detail: status.up ? "Host badge / USB online" : "Gateway reported down",
     };
+    if (!status.up) {
+      for (const player of this._state.players) {
+        if (player.connection?.status !== "connected") continue;
+        player.connection = {
+          ...player.connection,
+          status: "offline",
+          detail: "Gateway reported down",
+          staleAfterMs: this.controllerPresenceTimeoutMs,
+        };
+      }
+    }
     this._record("gateway-status", status.up ? "Gateway is up" : "Gateway is down", now, { packetCount: status.packetCount, droppedCount: status.droppedCount });
     this._touch(now);
     return { accepted: true, detail: status.up ? "gateway healthy" : "gateway reported down", stateVersion: this._state.version };
