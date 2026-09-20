@@ -124,9 +124,37 @@ function HostPanel({ state, onCommand }) {
   );
 }
 
+function ingredientNames(value) {
+  const values = Array.isArray(value) ? value : [value];
+  return values.flatMap((item) => {
+    const name = upper(item);
+    return Object.keys(ASSETS).filter((ingredient) => name.includes(ingredient));
+  });
+}
+
+function StationContents({ station, runtimeStation, serving }) {
+  const runtimeItem = runtimeStation?.contents || runtimeStation?.item;
+  const sourceItem = station.kind === "ingredient" ? station.label : null;
+  const servingItem = station.kind === "delivery" ? serving?.item : null;
+  const ingredients = ingredientNames(runtimeItem || sourceItem || servingItem);
+  const status = runtimeStation?.status || (station.kind === "ingredient" ? "source" : "empty");
+  const remaining = runtimeStation?.remainingSeconds;
+  const contentLabel = ingredients.length ? ingredients.join("+") : "EMPTY";
+  return h(React.Fragment, null,
+    h("strong", { className: "room-station-label" }, station.label || station.id),
+    h("div", { className: cx("station-plate", !ingredients.length && "is-empty"), "data-station-content": contentLabel, "aria-label": `${station.label || station.id}: ${contentLabel}` },
+      ingredients.length
+        ? ingredients.map((ingredient, index) => h(IngredientIcon, { key: `${ingredient}-${index}`, value: ingredient, small: true }))
+        : h("span", null, "EMPTY"),
+    ),
+    h("span", { className: "room-station-state" }, upper(status), Number.isFinite(Number(remaining)) && Number(remaining) > 0 ? ` · ${seconds(remaining)}` : ""),
+  );
+}
+
 function RoomSurface({ state, now, gameplay = false }) {
   const plan = state.floorPlan || {};
   const accepted = plan.accepted === true;
+  const runtimeStations = new Map((state.stations || []).map((station) => [station.id, station]));
   const walls = (plan.walls || []).map((wall, index) => h("div", {
     key: `wall-${index}`,
     className: "absolute z-[1] rounded-sm border border-[#45647d]/40 bg-[#304a60]/20",
@@ -134,23 +162,26 @@ function RoomSurface({ state, now, gameplay = false }) {
     "aria-hidden": true,
   }));
   const stations = (plan.stations || []).map((station) => h("div", {
-    key: station.id,
-    className: cx("room-station absolute z-[2] flex items-center justify-center whitespace-nowrap border text-center font-black uppercase tracking-[0.05em] shadow-[0_5px_0_rgba(6,16,25,.45)]", gameplay ? "room-station-gameplay" : "room-station-setup", stationClass(station.kind)),
-    style: rectStyle(station),
-    "data-station": station.id,
-  }, station.label || station.id));
+      key: station.id,
+      className: cx("room-station absolute z-[2] flex items-center justify-center whitespace-nowrap border text-center font-black uppercase tracking-[0.05em] shadow-[0_5px_0_rgba(6,16,25,.45)]", gameplay ? "room-station-gameplay" : "room-station-setup", stationClass(station.kind)),
+      style: rectStyle(station),
+      "data-station": station.id,
+    }, gameplay
+      ? h(StationContents, { station, runtimeStation: runtimeStations.get(station.id), serving: state.serving })
+      : station.label || station.id));
   const players = (state.players || []).map((player) => {
     const position = playerPosition(player);
     const stale = !position || isStale(player, now);
     const label = player.label || player.id;
+    const trackingLabel = !position ? "tracking lost" : stale ? "tracking stale" : "tracking healthy";
     return h("div", {
       key: player.id,
       className: cx("tracked-player absolute z-[12] -translate-x-1/2 -translate-y-1/2", stale && "opacity-80"),
       style: position ? { left: `${clamp(position.x)}%`, top: `${clamp(position.y)}%` } : undefined,
       "data-player": player.id,
       "data-stale": stale,
-      "aria-label": `${player.name || label}, ${stale ? "tracking stale" : "tracking healthy"}`,
-    }, h("div", { className: cx("player-marker border-2 shadow-[0_4px_0_rgba(6,16,25,.6)]", player.color === "cyan" ? "player-marker-cyan" : "player-marker-orange", stale && "player-marker-stale") }, h("strong", null, label), stale && h("span", null, position ? "TRACKING STALE" : "TRACKING LOST")), h("span", { className: "sr-only" }, stale ? (position ? "TRACKING STALE" : "TRACKING LOST") : "TRACKING HEALTHY"));
+      "aria-label": `${player.name || label}, ${trackingLabel}`,
+    }, h("div", { className: cx("player-marker border-2", player.color === "cyan" ? "player-marker-cyan" : "player-marker-orange", stale && "player-marker-stale") }, h("strong", null, label)));
   });
   return h("div", {
     className: cx("floor-plan relative h-full min-h-0 w-full overflow-hidden bg-[#0c1824]", accepted ? "is-accepted" : "is-proposed", gameplay && "gameplay-surface"),
@@ -185,9 +216,49 @@ function TimerCard({ state, compact = false }) {
   );
 }
 
-function IngredientIcon({ value, small = false }) {
+function IngredientIcon({ value, small = false, decorative = false }) {
   const source = ingredientAsset(value);
-  return source ? h("img", { className: cx("object-contain", small ? "h-8 w-8" : "h-12 w-12"), src: source, alt: upper(value), loading: "lazy" }) : h("span", { className: "text-xs font-black text-[#8e7664]" }, upper(value).slice(0, 3));
+  return source ? h("img", { className: cx("object-contain", small ? "h-8 w-8" : "h-12 w-12"), src: source, alt: decorative ? "" : upper(value), loading: "lazy" }) : h("span", { className: "text-xs font-black text-[#8e7664]" }, upper(value).slice(0, 3));
+}
+
+function burgerLayers(components) {
+  const ingredients = components.filter(Boolean);
+  if (!ingredients.length) return ["BUN"];
+  const hasBun = ingredients.some((item) => ingredientKey(item) === "BUN");
+  if (!hasBun) return ["BUN", ...ingredients, "BUN"];
+  if (ingredients.filter((item) => ingredientKey(item) === "BUN").length === 1) return [...ingredients, "BUN"];
+  return ingredients;
+}
+
+function BurgerPreview({ order, components }) {
+  const layers = burgerLayers(components);
+  const title = orderTitle(order);
+  const recipe = components.length ? components.map((item) => upper(item)).join(", ") : "BUN";
+  const layerElements = layers.map((item, index) => h(
+    "span",
+    {
+      key: `${item}-${index}`,
+      className: cx("burger-preview-layer", ingredientKey(item) === "BUN" && "is-bun"),
+      "data-burger-layer": upper(item),
+      style: { zIndex: layers.length - index },
+    },
+    h(IngredientIcon, { value: item, decorative: true }),
+  ));
+
+  return h(
+    "div",
+    {
+      className: "hud-order-preview",
+      "data-burger-preview": order.id,
+      role: "img",
+      "aria-label": `${title} assembled burger: ${recipe}`,
+    },
+    h(
+      "div",
+      { className: "burger-preview" },
+      h("div", { className: "burger-preview-stack" }, layerElements),
+    ),
+  );
 }
 
 function OrderCard({ order, compact = false }) {
@@ -195,18 +266,22 @@ function OrderCard({ order, compact = false }) {
   const remaining = Number(order.remainingSeconds);
   const total = Number(order.totalSeconds);
   const progress = Number.isFinite(remaining) && Number.isFinite(total) && total > 0 ? Math.max(0, Math.min(100, (remaining / total) * 100)) : 0;
+  const urgency = progress <= 25 ? "is-critical" : progress <= 50 ? "is-warning" : "is-healthy";
   const titleId = `hud-title-${String(order.id || "order").replaceAll(/[^a-zA-Z0-9_-]/g, "-")}`;
-  return h("section", { className: cx("hud-order", compact && "hud-order-compact"), "data-node-id": "39:26", "data-order-id": order.id, "aria-labelledby": titleId },
-    h("div", { className: "hud-order-preview" }, h("div", { className: "hud-order-art", "aria-label": "Burger order marker" }, h(IngredientIcon, { value: "BUN" }))),
+  return h("section", { className: cx("hud-order", compact && "hud-order-compact", urgency), "data-node-id": "39:26", "data-order-id": order.id, "aria-labelledby": titleId },
+    h(BurgerPreview, { order, components }),
     h("div", { className: "hud-order-main" },
-      h("h2", { id: titleId }, orderTitle(order)),
-      h("div", { className: "hud-ingredient-slots" }, components.map((item, index) => h("div", { key: `${item}-${index}`, className: "hud-ingredient-slot", "data-ingredient-slot": index + 1 }, h(IngredientIcon, { value: item, small: false })))),
+      h("div", { className: "hud-order-heading" },
+        h("h2", { id: titleId }, orderTitle(order)),
+        h("span", { className: "hud-order-recipe-count" }, `${components.length || 1} ITEMS`),
+      ),
+      h("div", { className: "hud-ingredient-slots", "aria-label": `Assembly order: ${components.map((item) => upper(item)).join(", ")}` }, components.map((item, index) => h("div", { key: `${item}-${index}`, className: "hud-ingredient-slot", "data-ingredient-slot": index + 1, "aria-label": `${index + 1}. ${upper(item)}` }, h(IngredientIcon, { value: item, small: false })))),
     ),
     h("div", { className: "hud-order-time", "aria-label": `${seconds(order.remainingSeconds)} remaining` },
       h("img", { src: "/assets/hud-stopwatch.svg", alt: "" }),
       h("strong", null, seconds(order.remainingSeconds)),
-      h("div", { className: "hud-order-progress", role: "progressbar", "aria-label": "Order time remaining", "aria-valuemin": 0, "aria-valuemax": 100, "aria-valuenow": Math.round(progress) }, h("span", { style: { width: `${progress}%` } })),
     ),
+    h("div", { className: "hud-order-progress", role: "progressbar", "aria-label": `${orderTitle(order)} time remaining`, "aria-valuemin": 0, "aria-valuemax": 100, "aria-valuenow": Math.round(progress) }, h("span", { style: { width: `${progress}%` } })),
   );
 }
 
@@ -227,40 +302,14 @@ function ScoreCard({ state }) {
   );
 }
 
-function notificationsFor(state) {
-  const notifications = [];
-  const event = state.serving?.lastEvent;
-  if (event) notifications.push({ tone: event.status === "success" ? "success" : "failure", title: event.message || "SERVING UPDATE", detail: event.detail || "Serving badge update", meta: event.status === "success" ? `+${event.points ?? 0}` : "CHECK ORDER" });
-  (state.stations || []).filter((station) => {
-    const status = String(station.status || "").toLowerCase();
-    const item = String(station.item || "").toUpperCase();
-    return item && item !== "EMPTY" && !["ready", "completed", "idle"].includes(status);
-  }).slice(0, 4).forEach((station) => notifications.push({ tone: station.status === "cooking" ? "cooking" : "chopping", title: `${station.label || station.id} · ${station.item}`, detail: upper(station.status || "active"), meta: station.remainingSeconds == null ? "ACTIVE" : seconds(station.remainingSeconds) }));
-  return notifications;
-}
-
-function NotificationStack({ state }) {
-  const notifications = notificationsFor(state);
-  if (!notifications.length) return null;
-  return h("aside", { className: "board-notifications", "aria-label": "Live game notifications" },
-    h("div", { className: "px-1 text-right text-[10px] font-black uppercase tracking-[0.14em] text-white drop-shadow" }, "LIVE ACTIVITY"),
-    notifications.map((item, index) => h("div", { key: `${item.title}-${index}`, className: cx("board-notification grid grid-cols-[auto_1fr_auto] items-center gap-2 border border-[#7890a6] border-l-4 bg-[#081019]/90 px-2.5 py-2 text-white", `notification-${item.tone}`) },
-      h("span", { className: "h-2 w-2 rounded-full bg-current", "aria-hidden": true }),
-      h("span", { className: "min-w-0" }, h("strong", { className: "block truncate text-xs" }, item.title), h("small", { className: "block text-[10px] font-bold uppercase tracking-[0.08em] text-[#c1ced9]" }, item.detail)),
-      h("strong", { className: "text-xs" }, item.meta),
-    )),
-  );
-}
-
 function GameplayBoard({ state, now }) {
   return h("section", { className: "game-board panel overflow-hidden border border-[#2a435a] bg-[#0c1824]", "aria-labelledby": "game-board-title" },
     h("h2", { id: "game-board-title", className: "sr-only" }, "Live burger game board"),
-    h("div", { className: "relative aspect-[1672/941] min-h-[520px] w-full overflow-hidden bg-[#0c1824]" },
+    h("div", { className: "game-board-canvas relative h-full min-h-0 w-full overflow-hidden bg-[#0c1824]" },
       h(RoomSurface, { state, now, gameplay: true }),
       h(OrdersHud, { state }),
       h("div", { className: "game-board-score" }, h(ScoreCard, { state })),
       h("div", { className: "game-board-timer" }, h(TimerCard, { state, compact: true })),
-      h(NotificationStack, { state }),
     ),
   );
 }
