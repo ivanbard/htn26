@@ -3,6 +3,7 @@ import argparse
 import hashlib
 import json
 from pathlib import Path
+import shutil
 import struct
 import subprocess
 
@@ -138,6 +139,8 @@ def extend(header, segments, text, rodata):
 
 
 def build(dump, zig, output):
+    compiler = subprocess.check_output([str(zig), "version"], text=True).strip()
+    require(compiler == "0.14.1", "Native payload requires Zig 0.14.1, got " + compiler)
     header, segments, stock = load_stock(dump)
     require(encode(header, segments) == stock, "Stock round-trip failed")
     output.mkdir(parents=True, exist_ok=True)
@@ -159,12 +162,12 @@ def build(dump, zig, output):
         "stock_bytes": len(stock), "candidate_bytes": len(candidate),
         "factory_capacity": CAPACITY, "remaining_bytes": CAPACITY - len(candidate),
         "payload_code_bytes": len(text), "payload_rodata_bytes": len(rodata),
-        "drom_growth_bytes": 0x10000, "permanent_app_object_bytes": 128,
+        "drom_growth_bytes": 0x10000, "permanent_app_object_bytes": 300,
         "hook_virtual_address": hex(HOOK), "hook_old": HOOK_BYTES.hex(),
         "hook_new": hook_bytes().hex(), "stock_round_trip": "byte-identical",
         "stock_loaded_segments": "identical except eight-byte registration hook",
         "hardware_tested": False,
-        "compiler": subprocess.check_output([str(zig), "version"], text=True).strip(),
+        "compiler": compiler,
         "source_sha256": sha((HERE / "overcooked.c").read_bytes()),
         "linker_sha256": sha((HERE / "payload.ld").read_bytes()),
     }
@@ -172,10 +175,24 @@ def build(dump, zig, output):
     print(json.dumps(report, indent=2))
 
 
+def find_zig(requested):
+    if requested is not None:
+        return requested.resolve()
+    candidates = (ROOT / ".tools/native/ziglang/zig.exe",
+                  ROOT / ".tools/native/ziglang/zig")
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate.resolve()
+    found = shutil.which("zig")
+    if found:
+        return Path(found).resolve()
+    raise ValueError("Zig 0.14.1 not found; install it or pass --zig /path/to/zig")
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dump", type=Path, default=ROOT / "htn_badge_full.bin")
-    parser.add_argument("--zig", type=Path, default=ROOT / ".tools/native/ziglang/zig.exe")
+    parser.add_argument("--zig", type=Path)
     parser.add_argument("--output", type=Path, default=HERE / "build")
     args = parser.parse_args()
-    build(args.dump.resolve(), args.zig.resolve(), args.output.resolve())
+    build(args.dump.resolve(), find_zig(args.zig), args.output.resolve())

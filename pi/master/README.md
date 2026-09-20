@@ -6,7 +6,9 @@ The master Pi is the single authoritative controller for the game. It combines
 badge intent, fresh camera observations, and deterministic game rules. Worker
 Pis and badges never mutate authoritative state directly.
 
-This directory contains a portable C++ MVP core. QNX device and network code
+This directory contains a portable C++ MVP core. Its worker-observation and
+delivery fixtures are implementation slices from before the current one-Pi v1
+product brief; they are not current v1 product claims. QNX device and network code
 belongs behind the interfaces in `src/platform_adapters.hpp`.
 
 ## MVP implementation
@@ -25,8 +27,11 @@ The MVP implements one deterministic `TOMATO_SOUP` order:
 
 The serial parser searches for `HTN26|` inside noisy lines, validates the MAC,
 RSSI, `OC1` payload, sequence, type, value, and payload length, then the engine
-maps the normalized MAC to a player. A bounded `(sender MAC, sequence)` cache
-suppresses retransmissions before game rules run.
+maps the normalized MAC to a player. It retains the current fixed-player `E`
+event type at this transport boundary. The portable tomato-soup fixture does
+not claim to apply the burger action vocabulary (`P2:PU:R`, etc.); that semantic
+adapter remains an explicit integration boundary. A bounded `(sender MAC,
+sequence)` cache suppresses retransmissions before game rules run.
 
 Every location-sensitive intent requires a current observation from a healthy
 worker, within configured age and confidence bounds. Worker observations are
@@ -70,6 +75,24 @@ state publication, and worker failure/stale tracking behavior.
 ```sh
 make -C pi/master test
 ```
+
+Build the minimal QNX runtime and test it with a simulated gateway status line:
+
+```sh
+make -C pi/master smoke
+```
+
+Run it with newline-delimited gateway output on stdin, or pass the gateway's
+serial device as the second argument:
+
+```sh
+/tmp/htn26-master-build/htn26_master_server AA:BB:CC:DD:EE:FF
+/tmp/htn26-master-build/htn26_master_server AA:BB:CC:DD:EE:FF /dev/ser1
+```
+
+The runtime currently registers one badge and prints event results and state
+snapshots. Camera/worker input and UI publication remain outside this first
+deployment slice.
 
 `CMakeLists.txt` also defines the same C++17 test target for environments with
 CMake and CTest. The local tests use workstation C++ only.

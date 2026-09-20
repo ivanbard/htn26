@@ -24,7 +24,10 @@ There are two types of badges.
 
 Each player wears a badge.
 
-Player badges are responsible for:
+The fixed-player behavior is documented in [`slave/README.md`](slave/README.md).
+The current low-memory deployment runs that behavior through the pinned native
+extension; the self-contained Lua player remains the stock-firmware rollback.
+The player path is responsible for:
 
 * reading NFC interactions
 * identifying ingredient/station interactions
@@ -34,9 +37,8 @@ Player badges are responsible for:
 
 Player badges are **not authoritative**.
 
-They report what the player attempted to do.
-
-The QNX game server decides whether the action is valid.
+They keep local interaction state for immediate feedback and report the
+resulting intent; the Pi remains authoritative for orders and scoring.
 
 ---
 
@@ -44,14 +46,15 @@ The QNX game server decides whether the action is valid.
 
 One badge is permanently connected by USB to the main Raspberry Pi.
 
-This badge is both:
+This badge is the radio gateway between the three player badges and the QNX server.
 
-1. the radio gateway between the player badges and the QNX server
-2. the physical dish-submission station
+V1 submission is a simultaneous-shake action between the three fixed players.
+There is no delivery-zone or serving-plate NFC contract in the current product.
 
 The gateway badge runs its app continuously while a game is being hosted.
-
-Its primary data path is:
+The supported native/Lua profile selection and no-mixing rule are documented in
+[`master/README.md`](master/README.md) and [`native/README.md`](native/README.md).
+Both preserve the primary data path:
 
 ```text
 player badge
@@ -67,9 +70,11 @@ USB serial
 main QNX Raspberry Pi
 ```
 
-The gateway badge should not run authoritative game logic.
-
-It forwards player events to the Pi.
+The host badge owns only the host lifecycle: its START action resets the three
+fixed-player session, starts the four-minute countdown, and emits START_GAME;
+timeout emits GAME_END and resets the session. It does not own player intent,
+inventory, orders, scoring, or resulting game state. Player events are still
+forwarded to the Pi.
 
 ---
 
@@ -77,7 +82,10 @@ It forwards player events to the Pi.
 
 The stationary gateway badge is plugged into the main Raspberry Pi before hosting begins.
 
-Player badges launch the game application and join the game through the badge radio network.
+Each player badge is provisioned as player 1, 2, or 3 before the round. The
+host starts the fixed session over radio; there is no radio enrollment or late
+join path. The player app's exact install files and controls are owned by
+[`slave/README.md`](slave/README.md).
 
 The game should not depend on arbitrary direct Raspberry Pi ↔ player badge Bluetooth communication.
 
@@ -101,65 +109,11 @@ main Pi
 
 Physical game objects contain NFC tags.
 
-Examples include:
+The v1 zones are pantry, fridge, cutting board, and stove.
 
-```text
-ING:TOMATO
-ING:ONION
-
-STATION:CHOP1
-STATION:CHOP2
-
-STATION:POT1
-STATION:POT2
-```
-
-A player interacts with the game by touching their badge against the relevant NFC tag.
-
-The badge sends that interaction to the server.
-
-Example:
-
-```text
-OC1|42|N|ING:TOMATO
-```
-
-The server combines this with vision information before modifying authoritative state.
-
----
-
-## Dish Submission
-
-Dish delivery is intentionally different from ordinary player interactions.
-
-The physical serving plate has an NFC tag attached to it.
-
-To submit an order, the player physically brings the plate to the stationary gateway badge and taps the plate's NFC tag against that badge.
-
-Flow:
-
-```text
-completed physical plate
-        ↓
-tap plate NFC tag
-against gateway badge
-        ↓
-gateway reads tag
-        ↓
-USB serial
-        ↓
-main Pi
-        ↓
-validate dish
-        ↓
-complete / reject order
-```
-
-This makes the delivery point a fixed physical location, similar to the serving counter in Overcooked.
-
-The server should only score the dish if its authoritative state says the plate contains a valid recipe.
-
-The NFC tag itself identifies the plate. It does not need to encode the complete contents of the dish.
+The current player tag values and button combinations are owned by
+[`slave/README.md`](slave/README.md); older fixture tag names are not part of
+the current player app contract.
 
 ---
 
@@ -167,7 +121,7 @@ The NFC tag itself identifies the plate. It does not need to encode the complete
 
 Player badge events use a compact protocol.
 
-Suggested initial format:
+The current player format is:
 
 ```text
 OC1|<sequence>|<type>|<value>
@@ -176,24 +130,33 @@ OC1|<sequence>|<type>|<value>
 For example:
 
 ```text
-OC1|42|N|ING:TOM
-OC1|43|N|STN:CHOP1
-OC1|44|M|CHOP
+OC1|000042|E|P2:PU:B
+OC1|000043|E|P2:CH:D:M
+OC1|000044|E|P2:SUB:BMLC
 ```
 
 `OC1` is the protocol version.
 
-The sequence number is monotonically increasing per player badge.
+The sequence number is monotonically increasing per player badge and the
+player action is sequence-tagged in the value. The complete current event and
+control contract is owned by [`master/README.md`](master/README.md) and
+[`slave/README.md`](slave/README.md).
 
 Important actions may be retransmitted, but retransmissions must reuse the same sequence number.
+The native host acknowledges these retries but never forwards ACK packets.
 
-The main Pi deduplicates using:
+The gateway and Pi may deduplicate using:
 
 ```text
 sender MAC + sequence number
 ```
 
 Radio is not assumed to be perfectly reliable.
+
+Native and Lua deployment profiles preserve these application bytes but are not
+radio-carrier compatible: Lua's restricted API adds/filters `LUA1`, while the
+pinned native extension calls the stock HAL. Deploy or roll back all four
+badges together.
 
 ---
 
@@ -302,5 +265,4 @@ gateway logs it over USB
 main Pi sees event
 ```
 
-After this works, add stations, motion interactions, plate submission, and richer player feedback.
-
+After this works, add the remaining station, motion, and player-feedback interactions.

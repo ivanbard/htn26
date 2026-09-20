@@ -1,83 +1,135 @@
-# HTN26 stationary gateway / serving-area master
+# HTN26 host badge
 
-Radio is currently blocked by firmware memory pressure. The app uses the shared
-transport boundary; upload `badge/transport.lua` and `badge/radio_transport.lua`
-beside `main.lua`. See [local testing](../LOCAL_TESTING.md) for runnable NFC and
-forwarding checks without hardware radio. The hardware adapter is opt-in.
+This is the self-contained Lua app for the stationary host badge beside the
+single QNX Raspberry Pi. It is the host's round-lifecycle controller and radio
+gateway; it is not a camera controller, a multi-Pi coordinator, or a second
+source of authoritative order and score state.
 
-This is the serving-area master badge for the burger level. It stays in the
-foreground beside the master Raspberry Pi and has two bounded data paths:
+## Supported deployment profiles
 
-```text
-player badges -> restricted badge.radio -> gateway -> badge.sys.log() -> Pi
-plate NFC tag -> gateway NFC reader -> badge.sys.log() -> Pi
-```
+For the observed host OOM (`free heap 26124`, largest block `15360`, followed
+by NimBLE `ESP_ERR_NO_MEM`), the v1 low-memory deployment is the pinned native
+factory extension in [`../native/README.md`](../native/README.md). Flash that
+same candidate to the host and all three players using its backup/factory-only
+write gate. Open **Overcooked** on the USB-connected badge and press START to
+select host mode; radio starts through the proven clean-reboot native runtime
+without enabling host NFC.
 
-The app always runs in **HOST** mode. Press **START** to emit the room-scan
-request:
+`manifest.cfg` plus `main.lua` remain the supported Lua compatibility/rollback
+profile for unmodified stock firmware. They are intentionally retained and
+tested, but the supplied host has not started BLE successfully with that
+profile. Do not mix a Lua host with native players or a native host with Lua
+players: Lua radio uses a private `LUA1` carrier wrapper while native mode calls
+the recovered HAL directly. Profile selection is whole-fleet and rollback is
+explicit in the native guide.
 
-```text
-HTN26|HOST|SCAN|3PI|BURGER
-```
+The packet bytes, USB serial framing, one-Pi ownership, and lifecycle records
+below apply to both profiles. Native mode additionally uses private player-to-
+host ACK packets, which the host never forwards to the Pi.
 
-The three Pis own camera capture, floor-plan generation, approval, and the
-resulting burger placement instructions. The badge has no serial-input or
-network API and therefore does not pretend to receive a floor-plan response.
+## Host lifecycle
 
-## Gateway packet protocol
+The host app stays in the foreground and shows status plus a `MM:SS` countdown.
+Press **START** to:
 
-Valid player packets begin with `OC1|`, contain a non-empty value, and are at
-most 44 bytes. The gateway accepts both forms currently present in the badge
-apps and forwards the original payload unchanged:
+1. clear the bounded radio queue and reset all three fixed-player session slots;
+2. start a 240-second countdown; and
+3. log `HTN26|GAME|START_GAME|240|3` and make the same lifecycle hint available
+   to nearby player badges through the documented restricted radio channel.
 
-```text
-OC1|<sequence>|<type>|<value>
-OC1|<type>|<4-digit sequence>|<value>
-```
-
-Every accepted radio packet is logged as:
-
-```text
-HTN26|RX|<sender_mac>|<rssi>|<payload>
-```
-
-The receive callback only validates and copies into an eight-entry bounded
-queue. Normal ticks flush at most four entries, and the screen reports
-forwarded packets, invalid packets, queue drops, and radio-ring drops.
-
-## Burger-level tags and plate delivery
-
-Player event values use the compact `OC1` value field. The canonical burger
-materials and stationary stations are:
+When the countdown reaches zero, the app clears the queue and all three player
+slots, stops accepting player events, and logs:
 
 ```text
-I:CHEESE    I:LETTUCE    I:MEAT    I:BUNS
-S:CHOP1     S:CHOP2      S:STOVE1  S:STOVE2
-P:01        P:02         P:03
+HTN26|GAME|GAME_END|3
 ```
 
-The serving-area gateway reads only plate tags `P:01` through `P:03`. A valid
-plate NDEF text read is logged as:
+Pressing START after the end begins a fresh session. Events received while the
+host is idle or after the round ends are ignored. The Pi remains authoritative
+for player intent, inventory, orders, scoring, and resulting game state.
+
+## Player radio to Pi serial contract
+
+During an active round, valid sequence-first player payloads are queued and
+forwarded unchanged. A forwarded record is one `badge.sys.log()` call with this
+stable payload:
 
 ```text
-HTN26|PLATE|P:01
+HTN26|RX|<sender_mac>|<rssi>|OC1|<sequence>|<type>|<value>
 ```
 
-Unknown or unreadable NFC tags increment the bounded NFC-drop counter and are
-not sent to the Pi. NFC text is read once per newly seen card with debounce;
-the gateway never writes NFC tags.
+For example:
 
-## Health and limits
+```text
+HTN26|RX|AA:BB:CC:DD:EE:FF|-48|OC1|0042|N|ING:TOM
+```
 
-The screen shows radio/NFC health, scan state, RX/drop counters, plate count,
-and the last radio or plate event. LEDs indicate startup health (red), room
-scan request (orange), radio reception (blue), plate delivery (green), drops
-(orange), and healthy idle (slow green pulse). HOME exits; exit cleanup
-unregisters the radio callback, disables radio and NFC, and clears the LEDs.
+`sender_mac` is the radio sender identity and `rssi` is the received signal
+strength. Payloads are limited to 44 bytes, use `OC1|<sequence>|<type>|<value>`,
+and reject control characters and `|` in the value so the Pi can split fields.
+The Lua app accepts `N`, `M`, `B`, `H`, and the fixed-player `E` events emitted
+by the current player app. Native mode emits the same compact `E` payload bytes
+and forwards them unchanged. The Lua receive callback copies to an 8-entry
+FIFO; the native callback uses its documented single fixed slot to avoid the
+Lua/system-heap failure.
 
-`tests/test_gateway_protocol.py` executes the production Lua helpers using
-`lupa==2.8` (installation in the local-testing guide), covering filtering,
-both packet orders, targeted replies, serial framing,
-malformed input, burger plate/scan framing, counter saturation, and bounded FIFO
-behavior. Physical badge NFC/radio and USB validation require hardware and
-remain pending unless performed separately.
+The Pi parser should search each physical serial line for `HTN26|` because the
+badge runtime may add logging text around the application record. It should
+then parse the marker and fields rather than assuming the marker is at column
+zero. `HTN26|GW|UP|<forwarded>|<drops>` health lines are also emitted. There is
+no serial-input API and no Pi-to-badge API in this app.
+
+## Install and wire the Lua rollback profile
+
+These instructions are for the unmodified-firmware Lua profile, not the native
+OOM path. The app consists only of these two upload files:
+
+```text
+badge/master/manifest.cfg
+badge/master/main.lua
+```
+
+On an IDE page with **Import app**, make one import package using the exact
+manifest header and the complete `main.lua` after it (the header delimiter
+format is documented in [`../badge-app-guide.md`](../badge-app-guide.md)), then
+choose **Import app** and **Replace editor files**. On an older page without
+that button, put the `key=value` lines from `manifest.cfg` in the IDE's
+`manifest.cfg` editor and all of `main.lua` in its `main.lua` editor. Do not
+paste Markdown fences or explanatory text.
+
+Save existing work first. Turn the badge off, connect a USB **data** cable from
+the host badge to the single Raspberry Pi's USB port, turn it on normally
+without holding START, then use **Connect** and choose **USB JTAG/serial debug
+unit (Espressif)**. Click **Push** and keep the cable connected until upload
+finishes. Open **HTN26 Host** from the launcher and leave it in the foreground.
+The IDE's Import changes the browser workspace; Push installs the app. A
+successful Push is not a physical gameplay test.
+
+Place the three player badges in range with their player apps open in the
+foreground. The host badge's USB serial output is the only Pi-facing path:
+
+```text
+player badges -> restricted badge.radio -> host badge -> USB serial -> QNX Pi
+```
+
+Do not connect the Pi to a player badge's radio, and do not add a serial read,
+network, camera, or Pi-to-badge dependency. The host-to-player lifecycle hint
+is best effort and has no acknowledgement; the Pi-facing lifecycle record is
+always logged locally by the host.
+
+## Host-side checks
+
+From the repository root, install the documented Lua test runtime if needed and
+run the focused protocol/static checks:
+
+```sh
+python -m pip install --target .tools/python lupa==2.8
+python -m unittest discover -s badge/master/tests -p 'test_*.py' -v
+```
+
+These checks cover payload validation, sender/RSSI framing, lifecycle records,
+44-byte bounds, the bounded FIFO, and the three-player reset shape. Native
+build/emulator checks are separate in `../native/README.md`. Neither suite
+proves USB serial, radio range, timer accuracy, LED appearance, or badge
+firmware behavior. The current native contract changes and the Lua OOM both
+still require a real four-badge, USB-connected Pi run.

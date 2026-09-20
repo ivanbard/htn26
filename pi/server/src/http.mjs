@@ -1,0 +1,235 @@
+import http from "node:http";
+import { promises as fs } from "node:fs";
+import path from "node:path";
+import { URL } from "node:url";
+
+const MAX_REQUEST_BYTES = 48 * 1024 * 1024;
+const MAX_PHOTO_BYTES = 12 * 1024 * 1024;
+
+function json(value) { return JSON.stringify(value); }
+function publicError(message) { return { error: message }; }
+function contentType(req) { return String(req.headers["content-type"] || "").toLowerCase(); }
+
+function send(res, status, body, headers = {}) {
+  const payload = Buffer.isBuffer(body) ? body : Buffer.from(typeof body === "string" ? body : json(body));
+  res.writeHead(status, {
+    "content-type": headers["content-type"] || "application/json; charset=utf-8",
+    "content-length": payload.length,
+    "cache-control": "no-store",
+    ...headers,
+  });
+  res.end(payload);
+}
+
+function corsHeaders(origin = "*") {
+  return {
+    "access-control-allow-origin": origin,
+    "access-control-allow-methods": "GET,POST,OPTIONS",
+    "access-control-allow-headers": "content-type,accept,x-photo-name",
+  };
+}
+
+async function readBody(req, maximum = MAX_REQUEST_BYTES) {
+  const declared = Number(req.headers["content-length"] || 0);
+  if (declared > maximum) throw Object.assign(new Error("request body is too large"), { statusCode: 413 });
+  const chunks = [];
+  let size = 0;
+  for await (const chunk of req) {
+    size += chunk.length;
+    if (size > maximum) throw Object.assign(new Error("request body is too large"), { statusCode: 413 });
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks);
+}
+
+function parseJsonBody(buffer) {
+  if (!buffer.length) return {};
+  try { return JSON.parse(buffer.toString("utf8")); }
+  catch { throw Object.assign(new Error("request body must be valid JSON"), { statusCode: 400 }); }
+}
+
+function parseContentDisposition(value) {
+  const name = value.match(/(?:^|;)\s*name="([^"]*)"/i)?.[1] || "";
+  const filename = value.match(/(?:^|;)\s*filename="([^"]*)"/i)?.[1] || "";
+  return { name, filename };
+}
+
+function parseMultipart(buffer, type) {
+  const boundary = type.match(/boundary=(?:"([^"]+)"|([^;]+))/i)?.[1] || type.match(/boundary=(?:"([^"]+)"|([^;]+))/i)?.[2];
+  if (!boundary) throw Object.assign(new Error("multipart upload is missing its boundary"), { statusCode: 400 });
+  const delimiter = Buffer.from(`--${boundary}`);
+  const parts = [];
+  let cursor = buffer.indexOf(delimiter);
+  while (cursor >= 0) {
+    const start = cursor + delimiter.length;
+    if (buffer.slice(start, start + 2).toString() === "--") break;
+    const headerStart = start + (buffer.slice(start, start + 2).toString() === "\r\n" ? 2 : 0);
+    const headerEnd = buffer.indexOf(Buffer.from("\r\n\r\n"), headerStart);
+    if (headerEnd < 0) break;
+    const next = buffer.indexOf(delimiter, headerEnd + 4);
+    if (next < 0) break;
+    const headerText = buffer.slice(headerStart, headerEnd).toString("utf8");
+    const bodyEnd = next - (buffer.slice(next - 2, next).toString() === "\r\n" ? 2 : 0);
+    const headers = Object.fromEntries(headerText.split("\r\n").map((line) => {
+      const split = line.indexOf(":");
+      return split < 0 ? [line.toLowerCase(), ""] : [line.slice(0, split).trim().toLowerCase(), line.slice(split + 1).trim()];
+    }));
+    const disposition = parseContentDisposition(headers["content-disposition"] || "");
+    parts.push({ ...disposition, mime: headers["content-type"] || "application/octet-stream", bytes: buffer.slice(headerEnd + 4, bodyEnd) });
+    cursor = next;
+  }
+  return parts.filter((part) => part.filename || part.name === "photo" || part.name === "photos");
+}
+
+function extensionFor(mime, filename = "") {
+  const fromName = path.extname(filename).toLowerCase().replace(/[^a-z0-9.]/g, "");
+  if ([".jpg", ".jpeg", ".png", ".webp", ".heic"].includes(fromName)) return fromName;
+  return ({ "image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp", "image/heic": ".heic" })[mime] || ".bin";
+}
+
+export class PhotoStore {
+  constructor({ directory } = {}) {
+    this.directory = directory;
+    this.photoDirectory = path.join(directory, "photos");
+    this.metadataPath = path.join(directory, "photos.json");
+    this.photos = [];
+    this.sequence = 0;
+  }
+
+  async init() {
+    await fs.mkdir(this.photoDirectory, { recursive: true });
+    try {
+      const saved = JSON.parse(await fs.readFile(this.metadataPath, "utf8"));
+      if (Array.isArray(saved)) this.photos = saved.filter((photo) => photo && photo.file);
+      this.sequence = this.photos.length;
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+    }
+  }
+
+  publicPhoto(photo) {
+    const { absolutePath, file, ...publicValue } = photo;
+    return publicValue;
+  }
+
+  async save(bytes, { filename = "photo", mime = "application/octet-stream" } = {}) {
+    if (!Buffer.isBuffer(bytes) || bytes.length === 0) throw Object.assign(new Error("photo upload is empty"), { statusCode: 400 });
+    if (bytes.length > MAX_PHOTO_BYTES) throw Object.assign(new Error("each photo must be 12 MiB or smaller"), { statusCode: 413 });
+    const id = `photo-${String(++this.sequence).padStart(2, "0")}`;
+    const file = `${id}${extensionFor(mime, filename)}`;
+    const absolutePath = path.join(this.photoDirectory, file);
+    await fs.writeFile(absolutePath, bytes, { flag: "wx" });
+    const photo = { id, file, absolutePath, filename: path.basename(filename || file), mime, bytes: bytes.length, uploadedAt: new Date().toISOString() };
+    this.photos.push(photo);
+    await fs.writeFile(this.metadataPath, JSON.stringify(this.photos.map((value) => ({ ...value })), null, 2));
+    return photo;
+  }
+
+  list() { return this.photos.map((photo) => this.publicPhoto(photo)); }
+  async read(photo) { return fs.readFile(photo.absolutePath); }
+}
+
+function commandType(body) { return typeof body === "string" ? body : body?.type || body?.action; }
+
+export function createHttpServer({ projection, photoStore, bindOrigin = process.env.HTN26_CORS_ORIGIN || "*" } = {}) {
+  if (!projection) throw new Error("projection is required");
+  if (!photoStore) throw new Error("photoStore is required");
+  const clients = new Set();
+  const unsubscribe = projection.subscribe((state) => {
+    const packet = `event: state\ndata: ${json(state)}\n\n`;
+    for (const client of clients) {
+      try { client.write(packet); } catch { clients.delete(client); }
+    }
+  });
+
+  async function uploadPhotos(req, res) {
+    const body = await readBody(req, MAX_REQUEST_BYTES);
+    const type = contentType(req);
+    const uploads = type.startsWith("multipart/form-data")
+      ? parseMultipart(body, type)
+      : [{ filename: req.headers["x-photo-name"] || "room-photo", mime: type.split(";")[0] || "application/octet-stream", bytes: body }];
+    if (!uploads.length) throw Object.assign(new Error("no photo parts found"), { statusCode: 400 });
+    if (photoStore.photos.length + uploads.length > 4) throw Object.assign(new Error("at most four room photos are supported"), { statusCode: 409 });
+    const saved = [];
+    for (const upload of uploads) saved.push(await photoStore.save(upload.bytes, upload));
+    projection.setPhotos(photoStore.photos, Date.now());
+    return { photos: photoStore.list(), accepted: saved.map((photo) => photo.id), count: photoStore.photos.length, reviewReady: photoStore.photos.length >= 3 };
+  }
+
+  async function handle(req, res) {
+    const url = new URL(req.url || "/", "http://localhost");
+    const headers = corsHeaders(bindOrigin);
+    if (req.method === "OPTIONS") { res.writeHead(204, headers); res.end(); return; }
+    if (!url.pathname.startsWith("/api/")) {
+      send(res, 404, publicError("HTN26 server API paths start with /api/"), headers);
+      return;
+    }
+    try {
+      if (req.method === "GET" && url.pathname === "/api/state") { send(res, 200, projection.snapshot(), headers); return; }
+      if (req.method === "GET" && url.pathname === "/api/floorplan") { send(res, 200, projection.snapshot().floorPlan, headers); return; }
+      if (req.method === "GET" && url.pathname === "/api/photos") { send(res, 200, { photos: photoStore.list(), count: photoStore.photos.length, reviewReady: photoStore.photos.length >= 3 }, headers); return; }
+      if (req.method === "GET" && url.pathname === "/api/orders") { const state = projection.snapshot(); send(res, 200, { order: state.order, orders: state.orders }, headers); return; }
+      if (req.method === "GET" && url.pathname === "/api/gold") { send(res, 200, projection.snapshot().gold, headers); return; }
+      if (req.method === "GET" && url.pathname === "/api/tips") { send(res, 200, projection.snapshot().tips, headers); return; }
+      if (req.method === "GET" && url.pathname === "/api/timer") { const state = projection.snapshot(); send(res, 200, state.timer, headers); return; }
+      if (req.method === "GET" && url.pathname === "/api/players") { send(res, 200, { players: projection.snapshot().players }, headers); return; }
+      if (req.method === "GET" && url.pathname === "/api/submissions") { send(res, 200, { submissions: projection.snapshot().submissions }, headers); return; }
+      if (req.method === "GET" && url.pathname === "/api/health") { send(res, 200, { ok: true, state: projection.snapshot().health }, headers); return; }
+      if (req.method === "GET" && url.pathname === "/api/events") {
+        res.writeHead(200, { ...headers, "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-cache", connection: "keep-alive" });
+        res.write(`event: state\ndata: ${json(projection.snapshot())}\n\n`);
+        clients.add(res);
+        req.on("close", () => clients.delete(res));
+        return;
+      }
+      if (req.method === "POST" && url.pathname === "/api/photos") {
+        send(res, 201, await uploadPhotos(req, res), headers); return;
+      }
+      if (req.method === "POST" && ["/api/floorplan/review", "/api/floorplan/propose", "/api/floorplan"].includes(url.pathname)) {
+        const payload = parseJsonBody(await readBody(req));
+        if (!photoStore.photos.length && !payload.allowEmpty) throw Object.assign(new Error("upload 3-4 still room photos before review (or use allowEmpty for a local fixture)"), { statusCode: 400 });
+        const proposed = await projection.proposeFloorplan({ photos: photoStore.photos, readPhoto: (photo) => photoStore.read(photo), room: payload.room });
+        send(res, 200, proposed, headers); return;
+      }
+      if (req.method === "POST" && url.pathname === "/api/floorplan/approve") {
+        const payload = parseJsonBody(await readBody(req));
+        send(res, 200, projection.approveFloorplan(payload.approved !== false), headers); return;
+      }
+      if (req.method === "POST" && url.pathname === "/api/command") {
+        const payload = parseJsonBody(await readBody(req));
+        const type = commandType(payload);
+        if (type === "SCAN_ROOM" && !photoStore.photos.length) {
+          send(res, 400, publicError("upload 3-4 room photos before scanning"), headers); return;
+        }
+        if (type === "SCAN_ROOM") {
+          projection.command(type, payload);
+          send(res, 200, await projection.proposeFloorplan({ photos: photoStore.photos, readPhoto: (photo) => photoStore.read(photo) }), headers);
+          return;
+        }
+        send(res, 200, projection.command(type, payload), headers); return;
+      }
+      if (req.method === "POST" && url.pathname === "/api/players/assign") {
+        const payload = parseJsonBody(await readBody(req));
+        const playerId = payload.playerId || payload.player;
+        if (!projection.registerBadge(payload.mac, playerId)) throw Object.assign(new Error("player assignment requires a valid MAC and p1, p2, or p3"), { statusCode: 400 });
+        send(res, 200, projection.snapshot(), headers); return;
+      }
+      if (req.method === "POST" && url.pathname === "/api/serial") {
+        const payload = parseJsonBody(await readBody(req));
+        if (typeof payload.line !== "string") throw Object.assign(new Error("serial endpoint requires a line"), { statusCode: 400 });
+        const result = projection.serialAdapter?.ingest(payload.line) || { error: "serial adapter is not attached" };
+        send(res, 200, { result, state: projection.snapshot() }, headers); return;
+      }
+      send(res, 404, publicError("unknown API route"), headers);
+    } catch (error) {
+      const status = Number(error.statusCode) || 500;
+      send(res, status, publicError(status === 500 ? "server error" : error.message), headers);
+    }
+  }
+
+  const server = http.createServer((req, res) => { void handle(req, res); });
+  server.on("close", () => { unsubscribe(); for (const client of clients) client.end(); clients.clear(); });
+  return server;
+}
+
+export { MAX_PHOTO_BYTES, parseMultipart, readBody };

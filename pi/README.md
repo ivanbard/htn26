@@ -4,14 +4,17 @@
 
 All Raspberry Pis run QNX.
 
-The Pi layer owns:
+The current v1 Pi layer owns:
 
 * embedded AI inference
-* camera processing
-* player tracking
-* inter-node communication
+* phone-camera setup processing
 * authoritative game-state execution
-* health monitoring
+* host-badge and UI transport, with the local web/serial boundary documented in
+  [`server/README.md`](server/README.md)
+
+The current v1 deployment uses one Raspberry Pi and an Apple phone camera.
+The worker and multi-camera responsibilities below remain implementation seams
+for future expansion, not current v1 player-location tracking.
 
 No AI inference required for gameplay should depend on the cloud.
 
@@ -27,24 +30,32 @@ Owns:
 
 * authoritative game state
 * USB gateway-badge serial input
-* its own camera pipeline
-* AI inference for camera 1
-* observations from worker Pis
-* multi-camera position fusion
+* phone-camera setup inference
 * station-zone evaluation
 * orders
-* timers
+* cooking and order timers (the host badge owns the four-minute round lifecycle)
 * scoring
 * health monitoring
 * UI API
+
+### Pi server slice
+
+`pi/server/`
+
+The server slice is the locally runnable HTTP/SSE and USB-serial boundary for
+the QNX deployment. It owns protocol adaptation, browser projections, photo
+upload/review plumbing, and deterministic workstation fixtures; it does not
+replace the master engine as the authoritative game-state owner. Its routes,
+serial setup, provider boundary, and QNX validation limits are documented in
+[`server/README.md`](server/README.md).
 
 ### Worker Pi
 
 `pi/slave/`
 
-The same worker software is deployed to Pi 2 and Pi 3.
+The same worker software can be deployed to future additional camera Pis.
 
-Each owns:
+When enabled, each worker owns:
 
 * one camera
 * local AI inference
@@ -455,7 +466,9 @@ Do not bury game rules inside camera code.
 
 ## Timers
 
-Cooking and order timers belong on the master Pi.
+Cooking and order timers belong on the master Pi. The stationary host badge
+owns only the four-minute host round countdown and its START_GAME/GAME_END
+lifecycle records; the Pi must not invent a Pi-to-badge control path.
 
 Use a monotonic clock.
 

@@ -61,6 +61,12 @@ void test_protocol_validation() {
               parsed.intent.value == "ING:TOM",
           "parsed badge fields should match");
 
+  const auto fixed_player = htn26::protocol::parse_gateway_rx_line(
+      "HTN26|RX|aa:bb:cc:dd:ee:ff|-53|OC1|000043|E|P2:PU:R");
+  require(fixed_player.ok && fixed_player.intent.type == 'E' &&
+              fixed_player.intent.value == "P2:PU:R",
+          "current fixed-player event payload should remain parseable");
+
   require(!htn26::protocol::parse_gateway_rx_line(
                "HTN26|RX|AA:BB:CC:DD:EE:FF|-53|OC2|0042|N|ING:TOM")
                .ok,
