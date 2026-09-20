@@ -4,7 +4,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createFloorplanProvider } from "./src/provider.mjs";
 import { ServerProjection } from "./src/projection.mjs";
-import { createSerialStreamAdapter } from "./src/protocol.mjs";
+import { createSerialStreamAdapter, gameEventLog } from "./src/protocol.mjs";
 import { openSerialDevice } from "./src/serial-device.mjs";
 import { PhotoStore, createHttpServer } from "./src/http.mjs";
 import { createRoomLayoutGenerator } from "./src/layout-generator.mjs";
@@ -71,9 +71,10 @@ export async function createRuntime({ env = process.env, now = () => Date.now(),
     difficultySidecar: configuredDifficultySidecar,
   });
   const serialAdapter = createSerialStreamAdapter({
-    onLine: (line) => console.log(`[serial] ${line}`),
     onRecord: (record) => {
       const timestamp = now();
+      const log = gameEventLog(record, new Date(timestamp).toISOString());
+      if (log) console.log(JSON.stringify(log));
       if (record.kind === "badge-event") projection.ingestBadgeEvent(record.intent, timestamp);
       else if (record.kind === "gateway-status") projection.ingestGatewayStatus(record.status, timestamp);
       else if (record.kind === "host-control") projection.ingestHostControl(record, timestamp);

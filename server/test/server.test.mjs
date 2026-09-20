@@ -5,7 +5,7 @@ import { readFile, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { createSerialStreamAdapter, parseCanonicalLine, parseGatewayRxLine, parseGatewaySerialLine } from "../src/protocol.mjs";
+import { createSerialStreamAdapter, gameEventLog, parseCanonicalLine, parseGatewayRxLine, parseGatewaySerialLine } from "../src/protocol.mjs";
 import { browserDocument } from "../src/http.mjs";
 import { LocalFloorplanProvider } from "../src/provider.mjs";
 import { BURGER_RECIPES, GAME_TIMINGS, MONEY_RULES, ServerProjection } from "../src/projection.mjs";
@@ -191,11 +191,38 @@ test("canonical protocol covers host, gateway, player actions, and submissions w
   assert.equal(parseGatewaySerialLine(`noise HTN26|RX|${MAC}|-44|OC2|7|E|P2:PU:R`).kind, "badge-event");
 });
 
+test("game event logs are stable JSON and exclude gateway diagnostics", () => {
+  assert.deepEqual(gameEventLog(parseCanonicalLine("HTN26|1|HOST|START|120|3"), "2026-09-20T00:00:00.000Z"), {
+    event: "game-event",
+    at: "2026-09-20T00:00:00.000Z",
+    kind: "host-control",
+    framing: "canonical",
+    protocolVersion: 1,
+    control: "START",
+    durationSeconds: 120,
+    playerCount: 3,
+  });
+  assert.deepEqual(gameEventLog(parseCanonicalLine("HTN26|1|PLAYER|2|STOVE|RIGHT|STATUS|WARNING"), "2026-09-20T00:00:00.000Z"), {
+    event: "game-event",
+    at: "2026-09-20T00:00:00.000Z",
+    kind: "player-action",
+    framing: "canonical",
+    protocolVersion: 1,
+    playerId: "p2",
+    action: "STOVE",
+    side: "RIGHT",
+    operation: "STATUS",
+    reportedStatus: "WARNING",
+  });
+  assert.equal(gameEventLog(parseGatewaySerialLine("noise HTN26|GW|UP|4|0")), null);
+  assert.doesNotThrow(() => JSON.parse(JSON.stringify(gameEventLog(parseGatewayRxLine(`noise HTN26|RX|${MAC}|-44|OC2|7|E|P2:PU:R`), "2026-09-20T00:00:00.000Z"))));
+});
+
 test("server CLI ignores HTN26_SERIAL_DEVICE and attaches serial only with --serial", async () => {
   const directory = await mkdtemp(path.join(tmpdir(), "htn26-serial-cli-"));
   const devicePath = path.join(directory, "usb-serial.fixture");
   const dataDir = path.join(directory, "data");
-  const line = "driver noise HTN26|GW|UP|7|0";
+  const line = "driver noise HTN26|GAME|START_GAME|240|3";
   await writeFile(devicePath, `${line}\n`);
   try {
     const plain = await runServerProcess(["--port", "0"], {
@@ -210,9 +237,21 @@ test("server CLI ignores HTN26_SERIAL_DEVICE and attaches serial only with --ser
     const explicit = await runServerProcess(["--port", "0", "--serial", devicePath], {
       HTN26_DATA_DIR: dataDir,
       HTN26_SERIAL_DEVICE: path.join(directory, "ignored-device"),
-    }, ({ stdout }) => stdout.includes(`HTN26 serial input: ${devicePath}`) && stdout.includes(`[serial] ${line}`));
+    }, ({ stdout }) => stdout.includes(`HTN26 serial input: ${devicePath}`) && stdout.includes('"event":"game-event"'));
     assert.ok(explicit.stdout.includes(`HTN26 serial input: ${devicePath}`));
-    assert.ok(explicit.stdout.includes(`[serial] ${line}`));
+    const eventLine = explicit.stdout.split("\n").find((value) => value.includes('"event":"game-event"'));
+    const event = JSON.parse(eventLine);
+    assert.equal(event.event, "game-event");
+    assert.match(event.at, /^\d{4}-\d{2}-\d{2}T/);
+    assert.deepEqual({ ...event, at: undefined }, {
+      event: "game-event",
+      at: undefined,
+      kind: "host-control",
+      framing: "legacy-game",
+      control: "START",
+      durationSeconds: 240,
+      playerCount: 3,
+    });
     assert.equal(explicit.stderr, "");
 
     const help = usage();

@@ -213,6 +213,50 @@ export function parseGatewaySerialLine(line) {
   return invalid("unknown HTN26 record");
 }
 
+/** Return the stable JSON object emitted for an accepted game record. */
+export function gameEventLog(record, at = new Date().toISOString()) {
+  if (!record || record.kind === "gateway-status") return null;
+
+  const event = { event: "game-event", at, kind: record.kind, framing: record.framing };
+  if (record.protocolVersion != null) event.protocolVersion = record.protocolVersion;
+
+  if (record.kind === "badge-event") {
+    return {
+      ...event,
+      senderMac: record.intent.senderMac,
+      sequence: record.intent.sequence,
+      type: record.intent.type,
+      value: record.intent.value,
+    };
+  }
+  if (record.kind === "host-control") {
+    return {
+      ...event,
+      control: record.control,
+      ...(record.durationSeconds == null ? {} : { durationSeconds: record.durationSeconds }),
+      playerCount: record.playerCount,
+    };
+  }
+  if (record.kind === "player-action") {
+    return {
+      ...event,
+      playerId: record.playerId,
+      action: record.action,
+      ...(record.item == null ? {} : { item: record.item }),
+      ...(record.plate == null ? {} : { plate: record.plate }),
+      ...(record.phase == null ? {} : { phase: record.phase }),
+      ...(record.side == null ? {} : { side: record.side }),
+      ...(record.operation == null ? {} : { operation: record.operation }),
+      ...(record.reportedStatus == null ? {} : { reportedStatus: record.reportedStatus }),
+      ...(record.targetPlayerId == null ? {} : { targetPlayerId: record.targetPlayerId }),
+    };
+  }
+  if (record.kind === "submission") {
+    return { ...event, playerId: record.playerId, plate: record.plate };
+  }
+  return null;
+}
+
 export function createSerialAdapter({ onRecord = () => {} } = {}) {
   let lines = 0;
   let accepted = 0;

@@ -61,6 +61,20 @@ HTN26|GW|UP|12|0
 
 It searches for `HTN26|` amid log noise, validates the record, handles USB
 chunks that split a line, and suppresses duplicate `MAC + sequence` events.
+Accepted game records are emitted by `server.mjs` as one JSON object per line,
+which makes the serial log safe to pipe to another parser. For example:
+
+```json
+{"event":"game-event","at":"2026-09-20T12:00:00.000Z","kind":"host-control","framing":"legacy-game","control":"START","durationSeconds":240,"playerCount":3}
+{"event":"game-event","at":"2026-09-20T12:00:01.000Z","kind":"player-action","framing":"canonical","protocolVersion":1,"playerId":"p1","action":"PICKUP","item":"RAW_MEAT"}
+```
+
+Only accepted game records are logged: host controls, player actions,
+submissions, and legacy badge events. Gateway up/down diagnostics and malformed
+or unrelated serial noise are not emitted as game-event log lines. The
+`framing` and legacy badge fields preserve the original shortlist when a
+physical record cannot be translated further.
+
 For laptop serial integration, explicitly attach the discovered device on each
 start:
 
