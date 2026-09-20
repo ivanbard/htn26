@@ -71,7 +71,7 @@ The renderer uses three display modes so setup controls do not compete with the 
 
 - `setup`: host controls, the room mirror, and physical burger-level placement instructions.
 - `gameplay`: one framed room board with up to four active orders across the top, the score at bottom-left, the round clock at bottom-right, and each player's name, held item, action, and submission state attached to that player's event-inferred location. Operator health chrome is intentionally excluded from the player-facing HUD.
-- `results`: the completed round, score, serving result, and final room mirror.
+- `results`: the completed round, cumulative authoritative score, gold, and tip totals, latest serving result, and final room mirror.
 
 The frontend snapshot boundary is defined in `src/contracts.js` (schema version 2); `version` is the positive integer state revision used by SSE clients. Optional `orders` may retain completed history but must contain no more than four active objects, all with unique, non-empty IDs; snapshots without it continue to render the required legacy `order`. `floorPlan.coordinateSpace` must be `normalized-percent`; its `width` and `height` are positive finite values, and wall/station `x`, `y`, `width`, and `height` values are normalized to the 0–100 range. Event-inferred player positions use the same 0–100 coordinate space. Invalid snapshots render an error state instead of partially rendering authoritative data.
 
@@ -82,7 +82,7 @@ Authoritative values stay explicit:
 - `orders[].remainingSeconds`, `order.remainingSeconds`, `clock.remainingSeconds`, station `progress`, and cooking state are displayed values from the laptop-server snapshot. The UI never decrements them locally.
 - `health.gateway`, `health.workers`, and `health.inference` remain available to the host integration, but system-health warnings are intentionally excluded from the player-facing gameplay HUD.
 - `stations[].item`, `stations[].status`, and `stations[].remainingSeconds` are rendered directly on their physical boards or plates. Empty stations explicitly show `EMPTY`; the player-facing screen has no separate live-activity feed.
-- `submissions` and `serving.lastEvent` remain authoritative. Failed submissions expose the server's `-25` penalty; successful submissions show their gold and tip rewards. The score rail renders the authoritative gold and tip totals while retaining the delivered score value in its accessible contract.
+- `submissions` and `serving.lastEvent` remain authoritative. Failed submissions expose the server's `-25` penalty; successful submissions show their gold and tip rewards. The gameplay score rail and results summary render authoritative cumulative gold and tip totals while retaining the delivered score value.
 
 ## Tests
 

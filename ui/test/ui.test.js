@@ -776,33 +776,40 @@ test("setup flow reaches gameplay and results display modes", async () => {
   assert.match(renderApp(transport.snapshot(), 1_000), /GAME ENDED/);
 });
 
-test("renders serving success, gold/tip breakdown, and score update from the authoritative snapshot", async () => {
+test("renders cumulative authoritative rewards and the latest serving result", async () => {
   const transport = await approvedTransport(1_000);
   await transport.command(GAME_ACTIONS.START_GAME);
-  await transport.command(GAME_ACTIONS.DELIVERY_SUCCESS);
+  await transport.command({ type: GAME_ACTIONS.DELIVERY_SUCCESS, orderId: "order-1" });
+  await transport.command({ type: GAME_ACTIONS.DELIVERY_SUCCESS, orderId: "order-2" });
   const state = transport.snapshot();
 
-  assert.equal(state.score.value, 100);
+  assert.equal(state.score.value, 220);
+  assert.equal(state.gold.total, 220);
+  assert.equal(state.tips.total, 32);
+  assert.equal(state.score.delivered, 2);
   assert.equal(state.orders[0].status, "completed");
+  assert.equal(state.orders[1].status, "completed");
   const html = renderApp(state, 2_000);
   assert.doesNotMatch(html, /LIVE ACTIVITY/);
   assert.match(html, /data-node-id="31:25"/);
   assert.match(html, /score-coin-counter\.png/);
-  // The live delivery toast (age 1s, well inside its 3.2s lifetime) shows
-  // the gold/tip breakdown, not just the final score chip.
   assert.match(html, /class="delivery-toast is-success"/);
   assert.match(html, /BURGER SERVED/);
-  assert.match(html, /\+100 WATCOINS/);
-  assert.match(html, /\+15 TIP/);
-  assert.match(html, /data-gold-total="100"/);
-  assert.match(html, /data-tip-total="15"/);
-  assert.match(html, /BURGER SERVED · \+100 GOLD · \+15 TIP/);
+  assert.match(html, /\+120 WATCOINS/);
+  assert.match(html, /\+17 TIP/);
+  assert.match(html, /data-gold-total="220"/);
+  assert.match(html, /data-tip-total="32"/);
+  assert.match(html, /BURGER SERVED · \+120 GOLD · \+17 TIP/);
 
   await transport.command(GAME_ACTIONS.END_GAME);
   const results = renderApp(transport.snapshot(), 2_000);
+  assert.match(results, /data-results-score="220"/);
+  assert.match(results, /data-results-gold-total="220"/);
+  assert.match(results, /data-results-tip-total="32"/);
+  assert.match(results, /Round totals: score 220, gold 220, tips 32/);
   assert.match(results, /delivery-points/);
-  assert.match(results, /\+100 GOLD/);
-  assert.match(results, /\+15 TIP/);
+  assert.match(results, /\+120 GOLD/);
+  assert.match(results, /\+17 TIP/);
 });
 
 test("renders a rejected burger's live penalty and updates the score", async () => {

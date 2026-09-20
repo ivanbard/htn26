@@ -77,6 +77,16 @@ function submissionRewardLabels(submission) {
   return Number.isFinite(penalty) && penalty > 0 ? [String(-penalty)] : [];
 }
 
+function authoritativeTotals(state) {
+  const score = state.score || {};
+  return {
+    score: finite(score.value, 0),
+    gold: finite(state.gold?.total, score.value ?? 0),
+    tips: finite(state.tips?.total, 0),
+    delivered: finite(score.delivered, 0),
+  };
+}
+
 function phaseLabel(phase) {
   if (phase === SETUP_PHASES.SCANNING) return "SCANNING ROOM";
   if (phase === SETUP_PHASES.LAYOUT_PROPOSED) return "PROPOSED FLOOR PLAN";
@@ -646,21 +656,41 @@ function OrdersHud({ state }) {
 }
 
 function ScoreCard({ state }) {
-  const score = state.score || {};
-  const goldTotal = finite(state.gold?.total, score.value ?? 0);
-  const tipTotal = finite(state.tips?.total, 0);
+  const totals = authoritativeTotals(state);
   return h("div", {
     className: "board-score",
     "data-node-id": "31:25",
-    "data-score-value": score.value ?? 0,
-    "data-gold-total": goldTotal,
-    "data-tip-total": tipTotal,
-    "aria-label": `Gold ${goldTotal}, tips ${tipTotal}, score ${score.value ?? 0}, ${score.delivered ?? 0} burgers served`,
+    "data-score-value": totals.score,
+    "data-gold-total": totals.gold,
+    "data-tip-total": totals.tips,
+    "aria-label": `Gold ${totals.gold}, tips ${totals.tips}, score ${totals.score}, ${totals.delivered} burgers served`,
   },
     h("img", { src: "/assets/score-coin-counter.png", alt: "", "aria-hidden": true }),
     h("span", { className: "board-score-label" }, "GOLD"),
-    h("strong", { className: "board-score-value" }, goldTotal),
-    h("span", { className: "board-tip-total" }, `TIPS ${tipTotal}`),
+    h("strong", { className: "board-score-value" }, totals.gold),
+    h("span", { className: "board-tip-total" }, `TIPS ${totals.tips}`),
+  );
+}
+
+function ResultsTotals({ state }) {
+  const totals = authoritativeTotals(state);
+  const values = [
+    ["SCORE", totals.score],
+    ["GOLD", totals.gold],
+    ["TIPS", totals.tips],
+  ];
+  return h("section", {
+    className: "border border-[#ffd166] bg-[#101c29] p-5",
+    "aria-label": `Round totals: score ${totals.score}, gold ${totals.gold}, tips ${totals.tips}`,
+    "data-results-score": totals.score,
+    "data-results-gold-total": totals.gold,
+    "data-results-tip-total": totals.tips,
+  },
+    h("p", { className: "mb-1 text-xs font-black uppercase tracking-[0.16em] text-[#ffd166]" }, "Authoritative round totals"),
+    h("div", { className: "mt-4 grid grid-cols-3 gap-3" }, values.map(([label, value]) => h("div", { key: label, className: "border border-[#2a435a] bg-[#0c1824] p-3 text-center" },
+      h("span", { className: "block text-xs font-black tracking-[0.12em] text-[#a9bac9]" }, label),
+      h("strong", { className: "mt-1 block text-2xl font-black text-white" }, value),
+    ))),
   );
 }
 
@@ -800,7 +830,7 @@ function GameplayView({ state, now }) {
 }
 
 function ResultsView({ state, now, onCommand }) {
-  return h(React.Fragment, null, h("section", { className: "flex flex-col justify-between gap-4 border border-[#ffd166] bg-[#2a2415] p-5 md:flex-row md:items-center" }, h("div", null, h("p", { className: "mb-1 text-xs font-black uppercase tracking-[0.16em] text-[#ffd166]" }, "Round complete"), h("h2", { className: "text-2xl font-black text-white" }, phaseLabel(state.setup?.phase)), h("p", { className: "mt-1 text-sm text-[#a9bac9]" }, state.setup?.message)), h(ActionButton, { state, action: GAME_ACTIONS.RESET_GAME, label: "Reset game", onCommand })), h("div", { className: "mt-5 grid gap-5 xl:grid-cols-[minmax(0,1.55fr)_minmax(320px,.85fr)]" }, h("section", { className: "border border-[#2a435a] bg-[#101c29] p-5" }, h("div", { className: "mb-4 flex items-center justify-between" }, h("h2", { className: "text-xl font-black text-white" }, "Room mirror"), h(StatusBadge, { status: "healthy", label: "Final layout" })), h("div", { className: "aspect-[1672/941] overflow-hidden border border-[#45647d]" }, h(RoomSurface, { state, now }))), h(ServingPanel, { state })));
+  return h(React.Fragment, null, h("section", { className: "flex flex-col justify-between gap-4 border border-[#ffd166] bg-[#2a2415] p-5 md:flex-row md:items-center" }, h("div", null, h("p", { className: "mb-1 text-xs font-black uppercase tracking-[0.16em] text-[#ffd166]" }, "Round complete"), h("h2", { className: "text-2xl font-black text-white" }, phaseLabel(state.setup?.phase)), h("p", { className: "mt-1 text-sm text-[#a9bac9]" }, state.setup?.message)), h(ActionButton, { state, action: GAME_ACTIONS.RESET_GAME, label: "Reset game", onCommand })), h("div", { className: "mt-5 grid gap-5 xl:grid-cols-[minmax(0,1.55fr)_minmax(320px,.85fr)]" }, h("section", { className: "border border-[#2a435a] bg-[#101c29] p-5" }, h("div", { className: "mb-4 flex items-center justify-between" }, h("h2", { className: "text-xl font-black text-white" }, "Room mirror"), h(StatusBadge, { status: "healthy", label: "Final layout" })), h("div", { className: "aspect-[1672/941] overflow-hidden border border-[#45647d]" }, h(RoomSurface, { state, now }))), h("div", { className: "grid content-start gap-5" }, h(ResultsTotals, { state }), h(ServingPanel, { state }))));
 }
 
 export function App({ state, now = Date.now(), connectionError = "", uploadStatus = "", transportKind, onCommand, onUploadPhotos }) {
