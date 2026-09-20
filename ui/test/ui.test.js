@@ -646,6 +646,36 @@ test("adapts the Pi server projection at the HTTP boundary", async () => {
   cleanup();
 });
 
+test("refreshes a laptop snapshot when the SSE stream does not deliver a photo update", async () => {
+  const initial = createInitialProjectionState(1_000);
+  const updated = {
+    ...initial,
+    revision: initial.revision + 1,
+    setup: { ...initial.setup, photoCount: 5, phase: "layout-proposed" },
+    floorPlan: { ...initial.floorPlan, photoCount: 5 },
+    photos: Array.from({ length: 5 }, (_, index) => ({ id: `photo-${index + 1}` })),
+  };
+  let stateCalls = 0;
+  class BufferedEventSource {
+    addEventListener() {}
+    close() {}
+  }
+  const transport = createHttpTransport({
+    eventSourceFactory: BufferedEventSource,
+    pollIntervalMs: 1,
+    fetchImpl: async (url) => ({
+      ok: true,
+      json: async () => url.endsWith("/api/state") && stateCalls++ > 0 ? updated : initial,
+    }),
+  });
+  let received;
+  const cleanup = await transport.connect((snapshot) => { received = snapshot; });
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  cleanup();
+  assert.equal(received.setup.photoCount, 5);
+  assert.equal(received.photos.length, 5);
+});
+
 test("projects action-inferred player scans onto the matching room stations", () => {
   const snapshot = createInitialProjectionState(1_000);
   snapshot.players = snapshot.players.map((player, index) => ({
