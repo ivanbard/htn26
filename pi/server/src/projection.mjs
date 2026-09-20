@@ -34,6 +34,16 @@ const RAW_TO_CHOPPED = Object.freeze({ RAW_MEAT: "CHOPPED_MEAT", RAW_LETTUCE: "L
 
 function clone(value) { return structuredClone(value); }
 function iso(ms) { return new Date(ms).toISOString(); }
+function projectRotatedRect(rect) {
+  const radians = rect.rotationDeg * Math.PI / 180;
+  const extentX = (Math.abs(Math.cos(radians)) * rect.width + Math.abs(Math.sin(radians)) * rect.height) / 2;
+  const extentY = (Math.abs(Math.sin(radians)) * rect.width + Math.abs(Math.cos(radians)) * rect.height) / 2;
+  const left = Math.max(0, Math.min(100, (rect.center.x - extentX) * 100));
+  const top = Math.max(0, Math.min(100, (rect.center.y - extentY) * 100));
+  const right = Math.max(left, Math.min(100, (rect.center.x + extentX) * 100));
+  const bottom = Math.max(top, Math.min(100, (rect.center.y + extentY) * 100));
+  return { x: left, y: top, width: right - left, height: bottom - top };
+}
 function numeric(value, fallback = 0) {
   const number = Number(value);
   return Number.isFinite(number) ? number : fallback;
@@ -537,17 +547,14 @@ export class ServerProjection {
   setRoomLayout(candidate, now = this.now(), { photoCount = this._state.photos.length } = {}) {
     const layout = sanitizeRoomLayout(candidate);
     this._state.roomLayout = clone(layout);
-    const stations = layout.stations.map((station, index) => ({
+    const stations = layout.stations.map((station) => ({
       id: station.type,
       label: station.type.replaceAll("_", " ").toUpperCase(),
       kind: station.type === "cutting_board" ? "chop" : station.type === "stove" ? "stove" : "ingredient",
-      x: Math.max(0, (station.center.x - station.width / 2) * 100),
-      y: Math.max(0, (station.center.y - station.height / 2) * 100),
-      width: Math.max(1, station.width * 100),
-      height: Math.max(1, station.height * 100),
+      ...projectRotatedRect(station),
       nfcTag: station.type,
       instruction: `Place the ${station.type.replaceAll("_", " ")} NFC sticker here.`,
-      rotationDeg: station.rotationDeg,
+      rotationDeg: 0,
     }));
     this._state.floorPlan = {
       accepted: true,

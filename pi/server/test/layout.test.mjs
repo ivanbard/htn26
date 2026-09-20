@@ -105,6 +105,13 @@ test("sends all photos in one Responses request and returns the exact layout con
   let calls = 0;
   let request;
   const generated = candidate();
+  generated.stations[0] = {
+    ...generated.stations[0],
+    center: { x: 0.95, y: 0.5 },
+    width: 0.2,
+    height: 0.05,
+    rotationDeg: 90,
+  };
   generated.stations[1] = { ...generated.stations[0] };
   await withRuntime(async (_url, options) => {
     calls += 1;
@@ -127,15 +134,22 @@ test("sends all photos in one Responses request and returns the exact layout con
     assert.equal(request.tools, undefined);
     assert.equal(request.text.format.type, "json_schema");
     assert.equal(request.text.format.strict, true);
-    assert.equal(runtime.projection.snapshot().roomLayout.stations.length, 4);
-    const floorPlan = runtime.projection.snapshot().floorPlan;
+    const state = runtime.projection.snapshot();
+    assert.equal(state.roomLayout.stations.length, 4);
+    assert.equal(state.roomLayout.stations[0].rotationDeg, 90);
+    assert.equal(state.roomLayout.stations[0].width, 0.2);
+    assert.equal(state.roomLayout.stations[0].height, 0.05);
+    const floorPlan = state.floorPlan;
     assert.equal(floorPlan.photoCount, 5);
     assert.equal(floorPlan.coordinateSpace, "normalized-percent");
     assert.equal(floorPlan.units, "percent");
     assert.equal(floorPlan.width, 100);
     assert.equal(floorPlan.height, 100);
-    assert.ok(Math.abs(floorPlan.stations[0].x - 15) < Number.EPSILON * 100);
-    assert.equal(floorPlan.stations[0].width, 10);
+    assert.ok(Math.abs(floorPlan.stations[0].x - 92.5) < Number.EPSILON * 100);
+    assert.ok(Math.abs(floorPlan.stations[0].width - 5) < Number.EPSILON * 100);
+    assert.equal(floorPlan.stations[0].rotationDeg, 0);
+    assert.ok(floorPlan.stations.every((station) => station.x + station.width <= 100));
+    assert.ok(floorPlan.stations.every((station) => station.y + station.height <= 100));
   });
 });
 
@@ -239,6 +253,33 @@ test("times out an unavailable provider with a safe audited failure", async () =
     assert.equal(audit.submissions[0].metrics.validationMs, null);
     assert.ok(audit.submissions[0].metrics.totalMs >= 8);
   }, { OPENAI_LAYOUT_TIMEOUT_MS: "5" });
+});
+
+test("includes response body consumption in request timing", async () => {
+  let attempts = 0;
+  await withRuntime(async () => {
+    attempts += 1;
+    return {
+      ok: true,
+      status: 200,
+      async json() {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        if (attempts === 2) throw new Error("body read failed");
+        return { output_text: JSON.stringify(candidate()) };
+      },
+    };
+  }, async (base) => {
+    const success = await formPhotos(base, 3);
+    const failure = await formPhotos(base, 3);
+    assert.equal(success.status, 200);
+    assert.equal(failure.status, 503);
+    assert.deepEqual(await failure.json(), { error: "Room layout generation is unavailable. Try again." });
+    const audit = await fetch(`${base}/api/layout/submissions`).then((response) => response.json());
+    assert.deepEqual(audit.submissions.map(({ status }) => status), ["success", "failure"]);
+    assert.ok(audit.submissions[0].metrics.requestMs >= 15);
+    assert.ok(audit.submissions[1].metrics.requestMs >= 15);
+    assert.equal(audit.submissions[1].metrics.validationMs, null);
+  });
 });
 
 test("reconciles interrupted and corrupt audit submissions on restart", async () => {

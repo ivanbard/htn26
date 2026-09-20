@@ -57,14 +57,14 @@ export class OpenAIRoomLayoutGenerator {
     } catch {
       throw new RoomLayoutGenerationError("room layout provider request failed", { preprocessMs, requestMs: duration(requestStart), totalMs: totalDuration(totalStart, preprocessMs) });
     }
-    const requestMs = duration(requestStart);
-    if (!response?.ok) throw new RoomLayoutGenerationError("room layout provider returned an unavailable response", { preprocessMs, requestMs, totalMs: totalDuration(totalStart, preprocessMs) });
     let payload;
     try {
       payload = await response.json();
     } catch {
-      throw new RoomLayoutGenerationError("room layout provider returned invalid JSON", { preprocessMs, requestMs, totalMs: totalDuration(totalStart, preprocessMs) });
+      throw new RoomLayoutGenerationError("room layout provider returned invalid JSON", { preprocessMs, requestMs: duration(requestStart), totalMs: totalDuration(totalStart, preprocessMs) });
     }
+    const requestMs = duration(requestStart);
+    if (!response?.ok) throw new RoomLayoutGenerationError("room layout provider returned an unavailable response", { preprocessMs, requestMs, totalMs: totalDuration(totalStart, preprocessMs) });
     const validationStart = process.hrtime.bigint();
     let candidate;
     try {
