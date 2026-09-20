@@ -148,6 +148,8 @@ export function createInitialProjectionState(now = Date.now(), roundSeconds = RO
     source: "pi-server-simulator",
     setup: { phase: "idle", message: "Upload 3-4 room photos for setup, or start the local simulator with a host serial record.", updatedAt: iso(now) },
     floorPlan: plan,
+    roomLayout: null,
+    proposedRoomLayout: null,
     burgerLevel: { status: "not-generated", recipe: "BURGER", placementInstructions: clone(plan.placementInstructions) },
     photos: [],
     players: DEFAULT_PLAYERS.map((player) => makePlayer(player, now)),
@@ -544,9 +546,10 @@ export class ServerProjection {
     this._touch(now);
   }
 
-  setRoomLayout(candidate, now = this.now(), { photoCount = this._state.photos.length } = {}) {
+  proposeRoomLayout(candidate, now = this.now(), { photoCount = this._state.photos.length } = {}) {
     const layout = sanitizeRoomLayout(candidate);
-    this._state.roomLayout = clone(layout);
+    this._state.roomLayout = null;
+    this._state.proposedRoomLayout = clone(layout);
     const stations = layout.stations.map((station) => ({
       id: station.type,
       label: station.type.replaceAll("_", " ").toUpperCase(),
@@ -557,7 +560,7 @@ export class ServerProjection {
       rotationDeg: 0,
     }));
     this._state.floorPlan = {
-      accepted: true,
+      accepted: false,
       provider: "openai-layout",
       mode: "ai",
       reviewMessage: "AI room layout generated from the classroom photos.",
@@ -572,10 +575,9 @@ export class ServerProjection {
       photoCount,
       generatedAt: iso(now),
     };
-    this._state.burgerLevel = { status: "placement-ready", recipe: "BURGER", placementInstructions: clone(this._state.floorPlan.placementInstructions) };
-    this._state.stations = stations.map((station) => ({ id: station.id, label: station.label, kind: station.kind, status: "idle", progress: 0, remainingSeconds: 0, item: null }));
-    this._state.setup.phase = "burger-placement";
-    this._state.setup.message = "AI room layout ready. Place the four burger stations as shown, then start the round.";
+    this._state.burgerLevel = { status: "not-generated", recipe: "BURGER", placementInstructions: clone(this._state.floorPlan.placementInstructions) };
+    this._state.setup.phase = "layout-proposed";
+    this._state.setup.message = "Review the proposed AI room layout before approving it.";
     this._state.health.inference = { id: "inference", label: "SETUP INFERENCE", status: "healthy", lastSeenAt: iso(now), detail: this._state.setup.message };
     this._touch(now);
     return this.snapshot(now);
@@ -583,6 +585,8 @@ export class ServerProjection {
 
   async proposeFloorplan({ photos = [], readPhoto } = {}, now = this.now()) {
     const result = await this.provider.propose({ photos, readPhoto });
+    this._state.roomLayout = null;
+    this._state.proposedRoomLayout = null;
     this._state.floorPlan = clone(result);
     this._state.floorPlan.accepted = false;
     this._state.burgerLevel = { status: "not-generated", recipe: "BURGER", placementInstructions: clone(result.placementInstructions) };
@@ -597,6 +601,11 @@ export class ServerProjection {
     if (!approved) return this.snapshot(now);
     if (this._state.setup.phase !== "layout-proposed") throw new Error("a proposed floorplan is required before approval");
     this._state.floorPlan.accepted = true;
+    if (this._state.proposedRoomLayout) {
+      this._state.roomLayout = clone(this._state.proposedRoomLayout);
+      this._state.proposedRoomLayout = null;
+    }
+    this._state.stations = this._state.floorPlan.stations.map((station) => ({ id: station.id, label: station.label, kind: station.kind, status: "idle", progress: 0, remainingSeconds: 0, item: null }));
     this._state.setup.phase = "burger-placement";
     this._state.setup.message = "Floorplan approved. Place the four burger stations as instructed, then start the round.";
     this._state.burgerLevel = { status: "placement-ready", recipe: "BURGER", placementInstructions: clone(this._state.floorPlan.placementInstructions) };

@@ -118,6 +118,7 @@ test("sends all photos in one Responses request and returns the exact layout con
     request = JSON.parse(options.body);
     return responseFor({ output_text: JSON.stringify(generated) });
   }, async (base, runtime) => {
+    const previousStations = runtime.projection.snapshot().stations;
     const response = await formPhotos(base, 5);
     const layout = await response.json();
     assert.equal(response.status, 200);
@@ -134,12 +135,19 @@ test("sends all photos in one Responses request and returns the exact layout con
     assert.equal(request.tools, undefined);
     assert.equal(request.text.format.type, "json_schema");
     assert.equal(request.text.format.strict, true);
-    const state = runtime.projection.snapshot();
-    assert.equal(state.roomLayout.stations.length, 4);
-    assert.equal(state.roomLayout.stations[0].rotationDeg, 90);
-    assert.equal(state.roomLayout.stations[0].width, 0.2);
-    assert.equal(state.roomLayout.stations[0].height, 0.05);
-    const floorPlan = state.floorPlan;
+    const proposedState = runtime.projection.snapshot();
+    assert.equal(proposedState.roomLayout, null);
+    assert.equal(proposedState.proposedRoomLayout.stations.length, 4);
+    assert.equal(proposedState.proposedRoomLayout.stations[0].rotationDeg, 90);
+    assert.equal(proposedState.proposedRoomLayout.stations[0].width, 0.2);
+    assert.equal(proposedState.proposedRoomLayout.stations[0].height, 0.05);
+    assert.equal(proposedState.setup.phase, "layout-proposed");
+    assert.equal(proposedState.burgerLevel.status, "not-generated");
+    assert.deepEqual(proposedState.stations, previousStations);
+    assert.throws(() => runtime.projection.command("START_GAME"), /approve the floorplan/);
+    assert.equal(await fetch(`${base}/api/layout`).then((active) => active.json()), null);
+    const floorPlan = proposedState.floorPlan;
+    assert.equal(floorPlan.accepted, false);
     assert.equal(floorPlan.photoCount, 5);
     assert.equal(floorPlan.coordinateSpace, "normalized-percent");
     assert.equal(floorPlan.units, "percent");
@@ -150,6 +158,21 @@ test("sends all photos in one Responses request and returns the exact layout con
     assert.equal(floorPlan.stations[0].rotationDeg, 0);
     assert.ok(floorPlan.stations.every((station) => station.x + station.width <= 100));
     assert.ok(floorPlan.stations.every((station) => station.y + station.height <= 100));
+
+    const approvalResponse = await fetch(`${base}/api/floorplan/approve`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ approved: true }),
+    });
+    const approvedState = await approvalResponse.json();
+    assert.equal(approvalResponse.status, 200);
+    assert.equal(approvedState.floorPlan.accepted, true);
+    assert.equal(approvedState.setup.phase, "burger-placement");
+    assert.equal(approvedState.burgerLevel.status, "placement-ready");
+    assert.equal(approvedState.proposedRoomLayout, null);
+    assert.deepEqual(approvedState.roomLayout, layout);
+    assert.equal(approvedState.stations.length, 4);
+    assert.deepEqual(await fetch(`${base}/api/layout`).then((active) => active.json()), layout);
   });
 });
 
