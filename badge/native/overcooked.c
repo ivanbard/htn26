@@ -72,7 +72,9 @@ _Static_assert(sizeof(App) == 308, "Update heap report when app size changes");
 #define GAME_TICKS (GAME_SECONDS * 50)
 #define MAX_ATTEMPTS 3
 #define SHAKE_ABS_BITS 0x44c80000u /* 1600 mg; hardware calibration knob. */
+#define DROP_SHAKE_ABS_BITS 0x44af0000u /* 1400 mg while B disambiguates the gesture. */
 #define TAP_ABS_BITS 0x44960000u /* 1200 mg; hardware calibration knob. */
+#define SHAKE_COOLDOWN_TICKS 25
 
 #define FN(address, result, ...) ((result (*)(__VA_ARGS__))(address))
 #define PRINT FN(0x4211b726, int, const char *, ...)
@@ -352,6 +354,7 @@ static void reset_round(App *self) {
     self->held = self->plate = self->has_plate = self->selected = 0;
     self->a_held = self->b_held = self->process_from = self->process_to = 0;
     self->process_ticks = self->stove_view = self->stove_view_ticks = 0;
+    self->shake_cooldown = self->tap_cooldown = 0;
     self->ready_ticks[0] = self->ready_ticks[1] = self->ready_ticks[2] = 0;
     set_stove(self, 0, STOVE_EMPTY); set_stove(self, 1, STOVE_EMPTY);
     LED_CLEAR(); LED_SHOW();
@@ -468,19 +471,22 @@ static void apply_action(App *self, const char *action, int local) {
     render_game(self);
 }
 
-static void start_action(App *self, const char *action) {
-    if (self->wait_ticks || self->process_ticks) return;
+static int start_action(App *self, const char *action) {
+    if (self->wait_ticks || self->process_ticks) return 0;
     u32 current = self->sequence++;
     if (self->sequence > 999999) self->sequence = 1;
     int written = FORMAT(self->pending, sizeof(self->pending),
                          "OC2|%06u|E|P%u:%s", current, (u32)self->player, action);
-    if (written < 17 || written >= (int)sizeof(self->pending)) return;
+    if (written < 17 || written >= (int)sizeof(self->pending)) return 0;
     self->pending_size = (u32)written; self->advertise_ticks = 0;
     self->attempts = 1; self->wait_ticks = WAIT_TICKS;
     if (transmit(self, self->pending, self->pending_size)) {
         self->wait_ticks = 0; RADIO_PAUSE();
         if (self->status) LABEL_TEXT(self->status, "RADIO SEND ERROR");
-    } else if (self->status) LABEL_TEXT(self->status, "ACTION SENT - WAITING ACK");
+        return 0;
+    }
+    if (self->status) LABEL_TEXT(self->status, "ACTION SENT - WAITING ACK");
+    return 1;
 }
 
 static void broadcast_control(App *self, char code) {
@@ -633,13 +639,29 @@ static void snapshot(App *self, char *target) {
 static void poll_motion(App *self) {
     if (!self->game_active || self->role != ROLE_PLAYER) return;
     if (self->tap_cooldown) --self->tap_cooldown;
-    if (self->shake_cooldown) { --self->shake_cooldown; return; }
     u32 value = motion();
-    if (value > SHAKE_ABS_BITS) {
-        self->shake_cooldown = 25;
-        if (self->b_held && (self->held != EMPTY || self->has_plate)) {
-            char state[6], action[12]; snapshot(self, state);
-            FORMAT(action, sizeof(action), "DROP:%s", state); start_action(self, action);
+    u32 shake_threshold = self->b_held ? DROP_SHAKE_ABS_BITS : SHAKE_ABS_BITS;
+    if (self->shake_cooldown) {
+        /* A sustained gesture must not become DROP followed by READY after B
+           is released. Require a quiet cooldown before rearming. */
+        if (value >= shake_threshold) self->shake_cooldown = SHAKE_COOLDOWN_TICKS;
+        else --self->shake_cooldown;
+        return;
+    }
+    if (value >= shake_threshold) {
+        self->shake_cooldown = SHAKE_COOLDOWN_TICKS;
+        if (self->b_held) {
+            if (self->held != EMPTY || self->has_plate) {
+                char state[6], action[12]; snapshot(self, state);
+                FORMAT(action, sizeof(action), "DROP:%s", state);
+                /* Capture and queue the OC2 snapshot before clearing local state.
+                   If the radio is busy or fails, keep inventory rather than lose it. */
+                if (start_action(self, action)) {
+                    self->held = self->plate = self->has_plate = 0;
+                    if (self->status) LABEL_TEXT(self->status, "ITEM DROPPED");
+                    render_game(self);
+                }
+            } else unknown_combo(self);
         } else if (self->a_held && self->has_plate) {
             char summary[5], action[9]; plate_summary(summary, self->plate);
             mark_ready(self, self->player);
@@ -681,6 +703,12 @@ static void render_progress(App *self) {
 
 static void button(App *self, u32 event) {
     u8 key = event & 0xff, kind = (event >> 8) & 0xff;
+    /* Track press/release edges before role/phase gates so a release during
+       radio startup cannot leave A or B latched into gameplay. */
+    if (kind <= 1) {
+        if (key == 0) self->a_held = kind == 0;
+        if (key == 1) self->b_held = kind == 0;
+    }
     if (self->role == ROLE_NONE && kind == 0) {
         if (key == 0) {
             self->role = ROLE_PLAYER_SETUP; self->player = 1;
@@ -705,8 +733,6 @@ static void button(App *self, u32 event) {
         PRINT("HTN26|GAME|START_GAME|240|3\n");
         apply_action(self, "GAME:START", 1); broadcast_control(self, 'S'); return;
     }
-    if (key == 0) self->a_held = kind == 0;
-    if (key == 1) self->b_held = kind == 0;
     if (kind == 1 && key == 0 && self->process_ticks) {
         self->held = self->process_from; self->process_ticks = 0; self->process_to = EMPTY;
         if (self->status) LABEL_TEXT(self->status, "CUT RESET - A RELEASED");
