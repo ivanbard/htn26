@@ -256,6 +256,11 @@ badge/
   nfc_display/
   slave/
   tests/
+server/
+  README.md
+  server.mjs
+  src/
+  test/
 pi/
   common/
   master/

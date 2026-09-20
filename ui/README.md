@@ -1,11 +1,6 @@
 # Burger Level UI
 
-This directory contains a separate local, offline-first HTN26 spectator and host
-UI prototype. Its browser surface is a React application styled with Tailwind
-CSS; the only runtime assets are files in this directory, and it makes no
-internet requests. The current v1 simulator instead serves its required plain,
-no-CSS page directly from `pi/server`; see
-[`../pi/server/README.md`](../pi/server/README.md).
+This directory contains the local, offline-first HTN26 spectator and host UI MVP. The browser surface is a React application styled with Tailwind CSS; the only runtime assets are files in this directory, and it makes no internet requests. The current/latest companion development server is the root [`server/`](../server/) surface; keep browser integration pointed at that server rather than creating another server under `pi/`.
 
 ## Run locally
 
@@ -19,8 +14,7 @@ npm run dev
 
 `npm run build` creates the production bundle in `dist/`.
 
-Open <http://127.0.0.1:4173>. The development page uses its mock authoritative
-transport. Try the prototype host flow:
+Open <http://127.0.0.1:4173>. The development page uses the mock master-Pi transport. Try the host flow:
 
 1. `Start` host mode.
 2. `Scan Room` to show the proposed floor plan.
@@ -30,10 +24,9 @@ transport. Try the prototype host flow:
 
 The mock also supports delivery fixtures for tests (`DELIVERY_SUCCESS` and `DELIVERY_FAILURE`). The UI renders the serving result and score supplied by the transport; it does not create a delivery result itself.
 
-## Prototype flow
+## Product flow
 
-The transport remains authoritative. This prototype mirrors the following
-fixture flow; it is not the current laptop simulator's run path:
+The master Pi remains authoritative. The UI mirrors this flow:
 
 ```text
 host Start
@@ -60,8 +53,8 @@ A burger uses buns, meat, cheese, and lettuce. Cheese, lettuce, and meat can be 
 }
 ```
 
-- `src/mock-transport.js` is the required offline development transport. It owns a fixture state and applies host commands as a stand-in for an authoritative server.
-- `src/transport.js` includes a local HTTP/SSE transport for integration with an authoritative server. It expects `GET /api/state`, `POST /api/command`, and `GET /api/events`; those endpoints remain outside this UI task.
+- `src/mock-transport.js` is the required offline development transport. It owns a fixture state and applies host commands as a stand-in for the master Pi.
+- `src/transport.js` includes a local HTTP/SSE transport for integration with a master Pi. It expects `GET /api/state`, `POST /api/command`, and `GET /api/events`; those endpoints remain outside this UI task.
 - Use `http://127.0.0.1:4173/?transport=http` to select the HTTP seam. A supplied `window.__HTN26_TRANSPORT__` takes precedence for integration tests.
 - `src/App.js` contains the React component tree for the staged setup flow, framed room board, order HUD, player/station overlays, and live notifications.
 - `src/render.js` renders the same React tree to static markup for contract tests. It does not create timers, move players, score deliveries, or infer station/order state.
@@ -74,13 +67,13 @@ The renderer uses three display modes so setup controls do not compete with the 
 - `gameplay`: one framed room board with up to four active orders across the top, the score at bottom-left, the round clock at bottom-right, live tracked players, and compact activity notifications. Operator health chrome is intentionally excluded from the player-facing HUD.
 - `results`: the completed round, score, serving result, and final room mirror.
 
-The frontend snapshot boundary is defined in `src/contracts.js` (version 2). Optional `orders` may retain completed history but must contain no more than four active objects, all with unique, non-empty IDs; snapshots without it continue to render the required legacy `order`. `floorPlan.coordinateSpace` must be `normalized-percent`; its `width` and `height` are positive finite values, and wall/station `x`, `y`, `width`, and `height` values are normalized to the 0–100 range. Present player positions use the same 0–100 coordinate space; a missing position is allowed so the UI can explicitly show tracking lost. A future camera-enabled adapter would be responsible for projecting room-camera coordinates into this display space before sending a snapshot. Invalid snapshots render an error state instead of partially rendering authoritative data.
+The frontend snapshot boundary is defined in `src/contracts.js` (version 2). Optional `orders` may retain completed history but must contain no more than four active objects, all with unique, non-empty IDs; snapshots without it continue to render the required legacy `order`. `floorPlan.coordinateSpace` must be `normalized-percent`; its `width` and `height` are positive finite values, and wall/station `x`, `y`, `width`, and `height` values are normalized to the 0–100 range. Present player positions use the same 0–100 coordinate space; a missing position is allowed so the UI can explicitly show tracking lost. A master-Pi adapter is responsible for projecting room-camera coordinates into this display space before sending a snapshot. Invalid snapshots render an error state instead of partially rendering authoritative data.
 
 Authoritative values stay explicit:
 
 - `floorPlan.accepted`, `floorPlan.stations`, and `burgerLevel.placementInstructions` describe the accepted map and where the physical burger level belongs.
-- `players[].position` and `players[].tracking.lastSeenAt` are optional transport observations for this prototype. The current v1 laptop simulator does not supply camera-tracked player positions. Missing players are rendered at no fabricated location; stale health remains available through accessible labels without adding large warning boxes to the game board. Player tokens never animate between snapshots.
-- `orders[].remainingSeconds`, `order.remainingSeconds`, `clock.remainingSeconds`, station `progress`, and cooking state are displayed values from the authoritative snapshot. The UI never decrements them locally.
+- `players[].position` and `players[].tracking.lastSeenAt` are master-Pi observations. Missing players are rendered at no fabricated location; stale health remains available through accessible labels without adding large warning boxes to the game board. Player tokens never animate between snapshots.
+- `orders[].remainingSeconds`, `order.remainingSeconds`, `clock.remainingSeconds`, station `progress`, and cooking state are displayed values from the master snapshot. The UI never decrements them locally.
 - `health.gateway`, `health.workers`, and `health.inference` remain available to the host integration, but system-health warnings are intentionally excluded from the player-facing gameplay HUD.
 - `stations[].item`, `stations[].status`, and `stations[].remainingSeconds` are rendered directly on their physical boards or plates. Empty stations explicitly show `EMPTY`; the player-facing screen has no separate live-activity feed.
 - `serving.lastEvent` remains available to results/integration surfaces, while `score` is rendered exactly as delivered by the transport.

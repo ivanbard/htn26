@@ -13,13 +13,17 @@ For badge deployment after the observed Lua/NimBLE memory failures, follow the
 whole-fleet native/rollback and factory-only safety gate in
 [`badge/native/README.md`](badge/native/README.md); never mix native and Lua radio profiles.
 
-Use the nearest component README as the implementation contract for [`badge/`](badge/README.md), [`pi/`](pi/README.md), and [`ui/`](ui/README.md).
+Use the nearest component README as the implementation contract for [`badge/`](badge/README.md), [`pi/`](pi/README.md), [`server/`](server/README.md), and [`ui/`](ui/README.md).
+
+The current/latest laptop development surfaces are root [`server/`](server/) and [`ui/`](ui/). Keep the HTTP/SSE, photo, provider, and AI layout implementation in `server/`; do not create a competing server under `pi/`.
 
 Keep product intent in the root README and implementation-specific packet, API, state, and transport details in their existing component owners.
 
 Do not change product code for documentation-only tasks.
 
 Run `npm test` in `ui/` for UI changes.
+
+Run `node --test server/test/*.test.mjs` for root server changes.
 
 Run `make -C pi/master test` for the portable master engine and follow [`pi/slave/README.md`](pi/slave/README.md) for worker validation.
 
