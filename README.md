@@ -49,11 +49,9 @@ If a product summary here conflicts with a component implementation contract, ke
 6. Select host mode on the host badge and player mode on the other badges.
 7. Start the round from the host badge.
 
-The setup photographs define the level layout only.
+The setup photographs define the level layout only. The default player-facing display uses a deterministic standard room inside the landscape game board; an explicit `floorPlan.layoutFromImage: true` switch keeps the image-derived room branch available when that is the desired presentation.
 
-The v1 product does not use the phone camera to maintain live player locations.
-
-The UI keeps player icons at the bottom of the screen and reports each player's held item and action state instead of claiming live locations.
+The v1 product does not use the phone camera to maintain live player locations. When the Pi receives a player scan, the UI projects that latest observation into the inset room and animates the display from the previous position to the new one. This is presentation-only; the Pi remains authoritative, and the room barriers are used to keep the visual projection inside the room and away from blocked geometry.
 
 ## Hardware and ownership
 

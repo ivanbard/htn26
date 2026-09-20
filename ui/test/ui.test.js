@@ -1,10 +1,29 @@
+import fs from "node:fs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createApp } from "../src/main.js";
 import { createInitialMockState, createMockTransport } from "../src/mock-transport.js";
 import { renderApp } from "../src/render.js";
 import { ROOM_COORDINATE_SPACE, validateFrontendSnapshot } from "../src/contracts.js";
+import { normalizeServerSnapshot } from "../src/server-snapshot.js";
+import { createHttpTransport } from "../src/transport.js";
+import {
+  isWalkablePosition,
+  pathsHaveAgentConflict,
+  planPlayerPaths,
+  playerPlansAreCollisionSafe,
+  projectPointIntoWalkableRoom,
+  routePlayerPath,
+  separatePlayerPositions,
+} from "../src/room-layout.js";
+import { plateableIngredientKeys } from "../src/food-rules.js";
+import {
+  createStandardRoomPlan,
+  hasStationTileCollisions,
+  stationTileKey,
+} from "../src/room-grid.js";
 import { displayModeForPhase, GAME_ACTIONS, SETUP_PHASES, UI_DISPLAY_MODES } from "../src/state.js";
+import { createInitialProjectionState } from "../../pi/server/src/projection.mjs";
 
 async function approvedTransport(now = 1_000) {
   const transport = createMockTransport({ now: () => now });
@@ -47,9 +66,10 @@ test("renders the approved setup flow with the aligned physical layout", async (
   assert.equal(countStations(state.floorPlan.stations, "chop"), 2);
   assert.equal(countStations(state.floorPlan.stations, "stove"), 2);
   assert.equal(countStations(state.floorPlan.stations, "delivery"), 1);
+  assert.equal(countStations(state.floorPlan.stations, "assembly"), 1);
   assert.equal(countStations(state.stations, "chop"), 2);
   assert.equal(countStations(state.stations, "stove"), 2);
-  assert.equal(state.burgerLevel.placementInstructions.length, 9);
+  assert.equal(state.burgerLevel.placementInstructions.length, 10);
   assert.equal(state.burgerLevel.placementInstructions.filter((item) => item.id.endsWith("-source")).length, 4);
   assert.equal(state.burgerLevel.placementInstructions.filter((item) => item.id.startsWith("chop")).length, 2);
   assert.equal(state.burgerLevel.placementInstructions.filter((item) => item.id.startsWith("stove")).length, 2);
@@ -57,9 +77,218 @@ test("renders the approved setup flow with the aligned physical layout", async (
   const placementIds = state.burgerLevel.placementInstructions.map((item) => item.id).sort();
   const runtimeIds = state.stations.map((station) => station.id).sort();
   assert.deepEqual(placementIds, planIds);
-  assert.deepEqual(runtimeIds, ["chop1", "chop2", "stove1", "stove2"]);
+  assert.deepEqual(runtimeIds, ["assembly", "chop1", "chop2", "stove1", "stove2"]);
   assert.equal(new Set(planIds).size, planIds.length);
   assert.doesNotMatch(JSON.stringify(state), /chop3/i);
+});
+
+test("uses the fixed standard room unless the plan explicitly depends on an image", () => {
+  const state = createInitialMockState(1_000);
+
+  assert.equal(state.floorPlan.layoutFromImage, false);
+  assert.equal(state.floorPlan.width, 100);
+  assert.equal(state.floorPlan.height, 100);
+  assert.equal(new Set(state.floorPlan.stations.map(({ width, height }) => `${width}x${height}`)).size, 1);
+  assert.equal(validateFrontendSnapshot(state).valid, true);
+});
+
+test("generates appliances from one collision-safe tile matrix", () => {
+  const plan = createStandardRoomPlan();
+  const stations = plan.stations;
+  const keys = stations.map(stationTileKey);
+
+  assert.deepEqual({ columns: plan.grid.columns, rows: plan.grid.rows }, { columns: 22, rows: 11 });
+  assert.equal(plan.grid.cells.length, 11);
+  assert.equal(plan.grid.cells.every((row) => row.length === 22), true);
+  assert.equal(hasStationTileCollisions(stations), false);
+  assert.equal(new Set(stations.map(({ width, height }) => `${width}x${height}`)).size, 1);
+  assert.equal(new Set(stations.map(({ display }) => `${display.width}x${display.height}`)).size, 1);
+  assert.ok(stations.every((station) => station.display.width >= station.width * 1.99));
+  assert.ok(stations.every((station) => station.display.height >= station.height * 1.99));
+  assert.equal(new Set(keys).size, stations.length);
+  stations.forEach((station) => {
+    const cell = plan.grid.cells[station.grid.row][station.grid.column];
+    assert.equal(cell.stationId, station.id);
+    assert.equal(station.grid.columnSpan, 1);
+    assert.equal(station.grid.rowSpan, 1);
+  });
+  assert.ok(plan.walls.some((wall) => wall.id === "pantry-counter"));
+  assert.ok(plan.walls.some((wall) => wall.id === "assembly-counter"));
+  assert.equal(plan.walls.some((wall) => wall.id === "central-island"), false);
+  // Every appliance's 2x2 art sits exactly on a counter that is as thick as it
+  // is, so no art overhangs the blue counters.
+  const counters = plan.walls.filter((wall) => wall.id.endsWith("-counter"));
+  const close = (left, right) => Math.abs(left - right) < 0.001;
+  stations.forEach((station) => {
+    const counter = counters.find((wall) => station.display.x >= wall.x - 0.001
+      && station.display.x + station.display.width <= wall.x + wall.width + 0.001
+      && station.display.y >= wall.y - 0.001
+      && station.display.y + station.display.height <= wall.y + wall.height + 0.001);
+    assert.ok(counter, `${station.id} art overhangs its counter`);
+    assert.ok(close(counter.height, station.display.height), `${station.id} counter is not as thick as its art`);
+  });
+});
+
+test("only canonical processed food states render as plateable ingredients", () => {
+  assert.deepEqual(
+    plateableIngredientKeys(["BUN", "COOKED MEAT", "CHOPPED CHEESE", "SHREDDED LETTUCE"]),
+    ["BUN", "MEAT", "CHEESE", "LETTUCE"],
+  );
+  assert.deepEqual(
+    plateableIngredientKeys(["RAW MEAT", "CHEESE", "LETTUCE", "BURNT MEAT"]),
+    [],
+  );
+});
+
+test("ships every room and team asset used by the board", () => {
+  for (const asset of [
+    "chef-player.svg",
+    "chef-player-red.svg",
+    "chef-player-blue.svg",
+    "chef-player-with-plate.svg",
+    "chef-player-with-plate-red.svg",
+    "chef-player-with-plate-blue.svg",
+    "player-plate.svg",
+    "floor-tile.svg",
+    "hazard-warning.svg",
+    "chop-knife.png",
+    "game-room-background.png",
+  ]) {
+    assert.equal(fs.existsSync(new URL(`../assets/${asset}`, import.meta.url)), true, asset);
+  }
+});
+
+test("keeps player targets inside the room and routes them around barrier walls", () => {
+  const walls = [
+    { x: 42, y: 28, width: 16, height: 44, blocksMovement: true },
+  ];
+  const safeEdge = projectPointIntoWalkableRoom({ x: -20, y: 130 }, walls, { x: 10, y: 10 });
+  const safeBarrier = projectPointIntoWalkableRoom({ x: 50, y: 50 }, walls, { x: 10, y: 10 });
+  const path = routePlayerPath({ x: 22, y: 50 }, { x: 78, y: 50 }, walls);
+
+  assert.deepEqual(safeEdge, { x: 11, y: 89 });
+  assert.equal(isWalkablePosition(safeBarrier, walls), true);
+  assert.ok(path.length >= 3);
+  assert.ok(path.every((point) => isWalkablePosition(point, walls)));
+});
+
+test("routes the default scan animation across the open room with sprite clearance", () => {
+  const state = createInitialMockState(1_000);
+  const path = routePlayerPath({ x: 20, y: 58 }, { x: 68, y: 58 }, state.floorPlan.walls);
+
+  assert.ok(path.length >= 2);
+  assert.ok(path.every((point) => isWalkablePosition(point, state.floorPlan.walls)));
+  path.slice(1).forEach((point, index) => {
+    const from = path[index];
+    for (let step = 0; step <= 20; step += 1) {
+      const progress = step / 20;
+      assert.equal(isWalkablePosition({
+        x: from.x + ((point.x - from.x) * progress),
+        y: from.y + ((point.y - from.y) * progress),
+      }, state.floorPlan.walls), true);
+    }
+  });
+});
+
+test("gives players who scan the same station stable, non-overlapping display slots", () => {
+  const players = [
+    { id: "p1", position: { x: 20, y: 20 } },
+    { id: "p2", position: { x: 20, y: 20 } },
+    { id: "p3", position: { x: 20, y: 20 } },
+  ];
+  const positioned = separatePlayerPositions(players, []);
+
+  assert.equal(positioned.length, 3);
+  assert.equal(new Set(positioned.map(({ position }) => `${position.x},${position.y}`)).size, 3);
+  assert.ok(positioned.every(({ position }) => isWalkablePosition(position, [])));
+});
+
+test("plans simultaneous chef movement with barrier-safe alternate lanes", () => {
+  const state = createInitialMockState(1_000);
+  const plans = planPlayerPaths([
+    { id: "p1", position: { x: 20, y: 58 }, targetPosition: { x: 80, y: 58 } },
+    { id: "p2", position: { x: 80, y: 58 }, targetPosition: { x: 20, y: 58 } },
+    // With two-tile counters the open lane is only ~23 units tall, so a third
+    // chef cannot cross between the two swapping chefs; it works the far side.
+    { id: "p3", position: { x: 12, y: 50 }, targetPosition: { x: 30, y: 50 } },
+  ], state.floorPlan.walls);
+
+  assert.equal(plans.size, 3);
+  assert.equal(playerPlansAreCollisionSafe(plans), true);
+  plans.forEach((plan) => {
+    assert.ok(plan.path.length >= 2);
+    assert.equal(plan.path.every((point) => isWalkablePosition(point, state.floorPlan.walls)), true);
+    assert.equal(plan.reachedTarget, true);
+  });
+  assert.equal(pathsHaveAgentConflict(plans.get("p1").path, plans.get("p2").path), false);
+});
+
+test("uses an alternate arc when two chefs would exchange positions", () => {
+  const walls = [];
+  const plans = planPlayerPaths([
+    { id: "p1", position: { x: 20, y: 50 }, targetPosition: { x: 80, y: 50 } },
+    { id: "p2", position: { x: 80, y: 50 }, targetPosition: { x: 20, y: 50 } },
+  ], walls);
+
+  assert.equal(plans.size, 2);
+  assert.equal(playerPlansAreCollisionSafe(plans), true);
+  assert.ok(plans.get("p2").path.length >= 3);
+  assert.ok([...plans.values()].every((plan) => plan.path.every((point) => isWalkablePosition(point, walls))));
+});
+
+test("handles duplicate targets, stale positions, and an impossible barrier without throwing", () => {
+  const state = createInitialMockState(1_000);
+  const duplicateTargetPlans = planPlayerPaths([
+    { id: "p1", position: { x: 20, y: 30 }, targetPosition: { x: 50, y: 50 } },
+    { id: "p2", position: { x: 80, y: 30 }, targetPosition: { x: 50, y: 50 } },
+    { id: "p3", position: { x: 50, y: 80 }, targetPosition: { x: 50, y: 50 } },
+  ], state.floorPlan.walls);
+  const endpoints = [...duplicateTargetPlans.values()].map((plan) => plan.path.at(-1));
+  assert.equal(new Set(endpoints.map((point) => `${point.x.toFixed(2)},${point.y.toFixed(2)}`)).size, 3);
+  assert.equal(playerPlansAreCollisionSafe(duplicateTargetPlans), true);
+
+  const impossibleWalls = [{ x: 0, y: 0, width: 100, height: 100, blocksMovement: true }];
+  const blocked = planPlayerPaths([{ id: "p1", position: { x: 50, y: 50 }, targetPosition: { x: 80, y: 80 } }], impossibleWalls);
+  assert.equal(blocked.size, 1);
+  assert.equal(blocked.get("p1").reachedTarget, false);
+});
+
+test("adapts the Pi server projection at the HTTP boundary", async () => {
+  const serverSnapshot = createInitialProjectionState(1_000);
+  const normalized = normalizeServerSnapshot(serverSnapshot);
+
+  assert.equal(normalized.version, 2);
+  assert.equal(normalized.floorPlan.coordinateSpace, ROOM_COORDINATE_SPACE);
+  assert.equal(normalized.floorPlan.units, "percent");
+  assert.equal(validateFrontendSnapshot(normalized).valid, true);
+  assert.deepEqual(normalized.players.map((player) => player.color), ["red", "blue", "green"]);
+  assert.deepEqual(normalized.floorPlan.stations.map((station) => station.assetKey), ["PANTRY", "FRIDGE", "CHOP", "STOVE"]);
+  assert.equal(new Set(normalized.floorPlan.stations.map((station) => `${station.display.width}x${station.display.height}`)).size, 1);
+
+  const fetchCalls = [];
+  let eventSource;
+  class FakeEventSource {
+    constructor(url) { this.url = url; this.onmessage = null; this.listeners = new Map(); this.closed = false; eventSource = this; }
+    addEventListener(name, listener) { this.listeners.set(name, listener); }
+    close() { this.closed = true; }
+  }
+  const transport = createHttpTransport({
+    baseUrl: "http://127.0.0.1:8787/",
+    fetchImpl: async (url, options) => {
+      fetchCalls.push({ url, options });
+      return { ok: true, json: async () => serverSnapshot };
+    },
+    eventSourceFactory: FakeEventSource,
+  });
+  let received;
+  const cleanup = await transport.connect((snapshot) => { received = snapshot; });
+  assert.equal(received.version, 2);
+  assert.equal(fetchCalls[0].url, "http://127.0.0.1:8787/api/state");
+  eventSource.listeners.get("state")({ data: JSON.stringify({ ...serverSnapshot, setup: { ...serverSnapshot.setup, phase: "running" } }) });
+  assert.equal(received.setup.phase, "running");
+  const commandResult = await transport.command({ type: "START_HOST" });
+  assert.equal(commandResult.version, 2);
+  cleanup();
 });
 
 test("renders gameplay as a framed room board with state shown on each station", async () => {
@@ -88,11 +317,20 @@ test("renders gameplay as a framed room board with state shown on each station",
   assert.match(html, /data-station="buns-source"[^>]*>[\s\S]*?data-station-content="BUN"/);
   assert.equal((html.match(/data-node-id="39:26"/g) || []).length, 4);
   assert.match(html, /data-order-count="4"/);
-  assert.match(html, /id="hud-title-order-1"[^>]*>CHEESE BURGER/);
+  assert.match(html, /id="hud-title-order-1"[^>]*>PLAIN MEAT BURGER/);
   assert.match(html, /data-ingredient-slot="1"/);
   assert.match(html, /data-node-id="20:2"/);
   assert.match(html, /class="game-board-score"/);
   assert.match(html, /class="game-board-timer"/);
+  assert.match(html, /data-layout-source="fixed"/);
+  assert.match(html, /data-grid-columns="22" data-grid-rows="11"/);
+  assert.match(html, /data-station="cheese-source"[^>]*data-grid-cell="1:1"/);
+  assert.doesNotMatch(html, /game-room-background\.png/);
+  assert.match(html, /data-barrier="assembly-counter"/);
+  assert.match(html, /data-player="p1"[\s\S]*?chef-player-with-plate-red\.svg/);
+  assert.match(html, /data-player="p2"[\s\S]*?chef-player-blue\.svg/);
+  assert.match(html, /data-player="p3"[\s\S]*?<span class="player-tag">P3<\/span>/);
+  assert.equal((html.match(/data-player-path="barrier-safe"/g) || []).length, 3);
   assert.match(html, /style="left:[^;]+%;top:[^;]+%;width:[^;]+%;height:[^;]+%" data-station="cheese-source"/);
   assert.ok(html.indexOf('class="game-board panel') < html.indexOf('data-node-id="20:2"'));
   assert.ok(html.indexOf('data-node-id="39:26"') < html.indexOf('class="game-board-score"'));
@@ -103,6 +341,68 @@ test("renders gameplay as a framed room board with state shown on each station",
   assert.doesNotMatch(html, /TRACKING DEGRADED/);
   assert.doesNotMatch(html, /id="stations-title"/);
   assert.doesNotMatch(html, /footer-note/);
+});
+
+test("makes raw, cooking, cooked, and burnt meat states explicit on the station art", () => {
+  const state = createInitialMockState(1_000);
+  state.setup.phase = SETUP_PHASES.RUNNING;
+  state.floorPlan.accepted = true;
+  state.clock.status = "running";
+  state.stations = [
+    { id: "stove1", label: "STOVE 1", kind: "stove", status: "cooking", progress: .4, remainingSeconds: 9, item: "RAW MEAT" },
+    { id: "stove2", label: "STOVE 2", kind: "stove", status: "burnt", progress: 1, remainingSeconds: 0, item: "BURNT MEAT" },
+  ];
+  const html = renderApp(state, 1_000);
+
+  assert.match(html, /data-station="stove1"[^>]*>[\s\S]*?data-station-phase="cooking"/);
+  assert.match(html, /data-station="stove2"[^>]*>[\s\S]*?data-station-phase="burnt"/);
+  assert.match(html, /data-station="stove1"[^>]*>[\s\S]*?COOKING/);
+  assert.match(html, /data-station="stove2"[^>]*>[\s\S]*?BURNT/);
+  assert.match(html, /data-station="stove1"[^>]*>[\s\S]*?data-cook-progress="40"/);
+});
+
+test("renders server-owned station timing and cooking warning state for the projector", () => {
+  const state = createInitialMockState(1_000);
+  state.setup.phase = SETUP_PHASES.RUNNING;
+  state.floorPlan.accepted = true;
+  state.clock.status = "running";
+  state.stations = [
+    {
+      id: "stove1",
+      label: "STOVE 1",
+      kind: "stove",
+      status: "cooking",
+      progress: .9,
+      remainingSeconds: 3,
+      totalSeconds: 30,
+      item: "RAW MEAT",
+      warning: true,
+      warningMessage: "MEAT IS NEARLY BURNT",
+    },
+  ];
+
+  const html = renderApp(state, 1_000);
+
+  assert.match(html, /data-station="stove1"[^>]*>[\s\S]*?data-station-warning="true"/);
+  assert.match(html, /hazard-warning\.svg/);
+  assert.match(html, /class="station-steam"/);
+  assert.match(html, /MEAT IS NEARLY BURNT/);
+  assert.match(html, /class="station-progress-track"[^>]*data-progress="90"/);
+  assert.match(html, /aria-valuemax="100"/);
+  assert.match(html, /data-station-item="MEAT"/);
+});
+
+test("retains the image-derived room branch behind the layout boolean", () => {
+  const state = createInitialMockState(1_000);
+  state.setup.phase = SETUP_PHASES.RUNNING;
+  state.floorPlan.accepted = true;
+  state.floorPlan.layoutFromImage = true;
+  state.clock.status = "running";
+
+  const html = renderApp(state, 1_000);
+
+  assert.match(html, /data-layout-source="image"/);
+  assert.match(html, /game-room-background\.png/);
 });
 
 test("shows a dismissible how-it-works explainer only in gameplay mode, open by default", async () => {
@@ -131,13 +431,14 @@ test("shows a dismissible how-it-works explainer only in gameplay mode, open by 
 
 test("keeps the room mirror geometry aligned to its normalized display bounds", () => {
   const state = createInitialMockState(1_000);
-  const verticalWalls = state.floorPlan.walls.filter((wall) => wall.width < 10);
-  const bottomWall = state.floorPlan.walls.find((wall) => wall.y > 0);
+  const boundaryWalls = state.floorPlan.walls.filter((wall) => wall.id.endsWith("-wall"));
+  const assemblyCounter = state.floorPlan.walls.find((wall) => wall.id === "assembly-counter");
 
   assert.equal(state.floorPlan.width, 100);
-  assert.equal(state.floorPlan.height, 68);
-  assert.ok(verticalWalls.every((wall) => wall.y === 0 && wall.height === 100));
-  assert.ok(Math.abs((bottomWall.y + bottomWall.height) - 100) < 0.001);
+  assert.equal(state.floorPlan.height, 100);
+  assert.equal(boundaryWalls.length, 4);
+  assert.ok(boundaryWalls.every((wall) => wall.blocksMovement === true));
+  assert.ok(assemblyCounter.blocksMovement);
   assert.equal(validateFrontendSnapshot(state).valid, true);
 });
 
@@ -146,17 +447,17 @@ test("marks old or missing player tracking and stale worker health", () => {
   state.setup.phase = SETUP_PHASES.RUNNING;
   state.floorPlan.accepted = true;
   state.clock.status = "running";
-  state.players[1].tracking.lastSeenAt = 0;
+  state.players[1].tracking.status = "stale";
   delete state.players[0].position;
   state.health.workers[1].lastSeenAt = 0;
 
   const html = renderApp(state, 7_000);
 
   assert.match(html, /data-player="p1" data-stale="true"/);
-  assert.match(html, /aria-label="PLAYER 1, tracking lost"/);
+  assert.match(html, /aria-label="PLAYER 1, location unavailable"/);
   assert.doesNotMatch(html, /data-player="p1"[^>]*style="left:0%;top:0%;/);
   assert.match(html, /data-player="p2" data-stale="true"/);
-  assert.match(html, /aria-label="PLAYER 2, tracking stale"/);
+  assert.match(html, /aria-label="PLAYER 2, last scan is stale"/);
   assert.doesNotMatch(html, />TRACKING (?:LOST|STALE)</);
   assert.doesNotMatch(html, /TRACKING DEGRADED/);
   assert.doesNotMatch(html, /LOCAL SYSTEM HEALTH/);
@@ -286,6 +587,8 @@ test("start game resets the authoritative clock, order, and score", async () => 
 
   assert.equal(state.setup.phase, SETUP_PHASES.RUNNING);
   assert.deepEqual(state.score, { value: 0, delivered: 0 });
+  assert.deepEqual(state.gold, { total: 0, earned: 0, lastChange: 0 });
+  assert.deepEqual(state.tips, { total: 0, earned: 0, lastChange: 0 });
   assert.equal(state.clock.status, "running");
   assert.equal(state.clock.remainingSeconds, state.clock.totalSeconds);
   assert.equal(state.order.status, "active");
@@ -307,31 +610,43 @@ test("delivery is accepted only during a running active round", async () => {
   await assertCommandUnchanged(transport, GAME_ACTIONS.DELIVERY_FAILURE);
 });
 
-test("successful delivery changes score and only the targeted order once", async () => {
+test("successful delivery awards the recipe's gold plus a patience-based tip, matching pi/server's formula", async () => {
   const transport = await approvedTransport(1_000);
   await transport.command(GAME_ACTIONS.START_GAME);
   await transport.command({ type: GAME_ACTIONS.DELIVERY_SUCCESS, orderId: "order-1" });
   const served = transport.snapshot();
 
-  assert.deepEqual(served.score, { value: 20, delivered: 1 });
+  // order-1 is PLAIN_MEAT (gold: 100); START_GAME resets it to full patience
+  // (remaining === total), so pi/server's tip formula — max(1, round(gold *
+  // 0.1 + ratio * 5)) — gives round(10 + 5) = 15 at a 1.0 ratio.
+  assert.deepEqual(served.score, { value: 100, delivered: 1 });
+  assert.deepEqual(served.gold, { total: 100, earned: 100, lastChange: 100 });
+  assert.deepEqual(served.tips, { total: 15, earned: 15, lastChange: 15 });
   assert.equal(served.orders[0].status, "completed");
   assert.ok(served.orders.slice(1).every((order) => order.status === "active"));
   assert.equal(served.order.id, "order-2");
   assert.equal(served.serving.lastEvent.status, "success");
+  assert.equal(served.serving.lastEvent.gold, 100);
+  assert.equal(served.serving.lastEvent.tip, 15);
+  assert.equal(served.serving.lastEvent.patienceSegments, 3);
 
   await assertCommandUnchanged(transport, { type: GAME_ACTIONS.DELIVERY_SUCCESS, orderId: "order-1" });
-  assert.deepEqual(transport.snapshot().score, { value: 20, delivered: 1 });
+  assert.deepEqual(transport.snapshot().score, { value: 100, delivered: 1 });
 });
 
-test("failed delivery does not score or complete the order", async () => {
+test("failed delivery applies the documented penalty and does not complete the order", async () => {
   const transport = await approvedTransport(1_000);
   await transport.command(GAME_ACTIONS.START_GAME);
   await transport.command(GAME_ACTIONS.DELIVERY_FAILURE);
   const state = transport.snapshot();
 
-  assert.deepEqual(state.score, { value: 0, delivered: 0 });
+  // README.md: "A failed submission applies a penalty and has no retry."
+  assert.deepEqual(state.score, { value: -25, delivered: 0 });
+  assert.equal(state.gold.lastChange, 0);
+  assert.equal(state.tips.lastChange, 0);
   assert.equal(state.order.status, "active");
   assert.equal(state.serving.lastEvent.status, "failure");
+  assert.equal(state.serving.lastEvent.penalty, 25);
 });
 
 test("unknown commands do not mutate state", async () => {
@@ -365,31 +680,39 @@ test("setup flow reaches gameplay and results display modes", async () => {
   assert.match(renderApp(transport.snapshot(), 1_000), /GAME ENDED/);
 });
 
-test("renders serving success and score update from the authoritative snapshot", async () => {
+test("renders serving success, gold/tip breakdown, and score update from the authoritative snapshot", async () => {
   const transport = await approvedTransport(1_000);
   await transport.command(GAME_ACTIONS.START_GAME);
   await transport.command(GAME_ACTIONS.DELIVERY_SUCCESS);
   const state = transport.snapshot();
 
-  assert.equal(state.score.value, 20);
+  assert.equal(state.score.value, 100);
   assert.equal(state.orders[0].status, "completed");
   const html = renderApp(state, 2_000);
   assert.doesNotMatch(html, /LIVE ACTIVITY/);
   assert.match(html, /data-node-id="31:25"/);
   assert.match(html, /score-coin-counter\.png/);
+  // The live delivery toast (age 1s, well inside its 3.2s lifetime) shows
+  // the gold/tip breakdown, not just the final score chip.
+  assert.match(html, /class="delivery-toast is-success"/);
+  assert.match(html, /BURGER SERVED/);
+  assert.match(html, /\+100 WATCOINS/);
+  assert.match(html, /\+15 TIP/);
 });
 
-test("renders rejected burger without changing score", async () => {
+test("renders a rejected burger's live penalty and updates the score", async () => {
   const transport = await approvedTransport(1_000);
   await transport.command(GAME_ACTIONS.START_GAME);
   await transport.command(GAME_ACTIONS.DELIVERY_FAILURE);
   const state = transport.snapshot();
 
-  assert.equal(state.score.value, 0);
+  assert.equal(state.score.value, -25);
   assert.equal(state.order.status, "active");
   const html = renderApp(state, 2_000);
   assert.doesNotMatch(html, /LIVE ACTIVITY/);
-  assert.doesNotMatch(html, /WRONG BURGER/);
+  assert.match(html, /class="delivery-toast is-failure"/);
+  assert.match(html, /WRONG BURGER/);
+  assert.match(html, /-25 PENALTY/);
 });
 
 test("renders one, two, and four active orders with unique accessible headings", () => {
@@ -407,7 +730,7 @@ test("renders one, two, and four active orders with unique accessible headings",
     assert.equal((html.match(/id="hud-title-order-/g) || []).length, count);
     assert.equal((html.match(/aria-label="\d{2}:\d{2} remaining"/g) || []).length, count);
     assert.equal((html.match(/role="progressbar"/g) || []).length, count);
-    const progressValues = [...html.matchAll(/aria-valuenow="(\d+)"/g)].map((match) => Number(match[1]));
+    const progressValues = [...html.matchAll(/class="hud-order-progress"[^>]*aria-valuenow="(\d+)"/g)].map((match) => Number(match[1]));
     assert.equal(progressValues.length, count);
     assert.ok(progressValues.every((value) => value >= 0 && value <= 100));
   }
