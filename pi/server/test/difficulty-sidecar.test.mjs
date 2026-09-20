@@ -120,6 +120,31 @@ test("projection requests asynchronously and makes the recipe decision from a va
   assert.equal(state.eventHistory.at(-1).difficulty, "hectic");
 });
 
+test("projection discards a recommendation stale from skipped spawn intervals", async () => {
+  const sidecar = {
+    recommend() {
+      return Promise.resolve({
+        difficulty: "hectic",
+        source: "local-opencv-rtrees",
+        model: validResponse.model,
+        latencyMs: 3,
+      });
+    },
+  };
+  const { advance } = startedProjection({
+    difficultySidecar: sidecar,
+    maxActiveOrders: 1,
+    orderPatienceSeconds: 10,
+  });
+  await settle();
+
+  advance(4_000);
+  const state = advance(8_000);
+  assert.deepEqual(state.orders.map((order) => order.recipe), ["PLAIN_MEAT", "CHEESEBURGER"]);
+  const latestOrderEvent = state.eventHistory.filter((event) => event.type === "order-created").at(-1);
+  assert.equal(latestOrderEvent.difficulty, undefined);
+});
+
 test("missing, failed, pending, or invalid sidecars preserve the existing order sequence", async () => {
   const baseline = startedProjection();
   assert.deepEqual(baseline.advance(4_000).orders.map((order) => order.recipe), ["PLAIN_MEAT", "CHEESEBURGER"]);
