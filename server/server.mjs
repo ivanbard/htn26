@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createFloorplanProvider } from "./src/provider.mjs";
@@ -9,6 +10,19 @@ import { PhotoStore, createHttpServer } from "./src/http.mjs";
 import { createRoomLayoutGenerator } from "./src/layout-generator.mjs";
 import { LayoutSubmissionStore } from "./src/layout-submission-store.mjs";
 import { DifficultySidecarClient } from "./src/difficulty-sidecar.mjs";
+
+function loadDotEnv(file = path.join(path.dirname(fileURLToPath(import.meta.url)), ".env")) {
+  if (!fs.existsSync(file)) return;
+  for (const line of fs.readFileSync(file, "utf8").split(/\r?\n/)) {
+    const match = line.match(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/);
+    if (!match) continue;
+    let value = match[2];
+    if ((value.startsWith("\\\"") && value.endsWith("\\\"")) || (value.startsWith("'") && value.endsWith("'"))) value = value.slice(1, -1);
+    if (process.env[match[1]] == null) process.env[match[1]] = value;
+  }
+}
+
+loadDotEnv();
 
 function parseArgs(argv) {
   const options = {};
