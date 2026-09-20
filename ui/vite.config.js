@@ -7,5 +7,11 @@ export default defineConfig({
     host: "127.0.0.1",
     allowedHosts: ["localhost", "127.0.0.1", "undercooked.ethanzhao.ca"],
     port: 4173,
+    proxy: {
+      "/api": {
+        target: process.env.HTN26_API_PROXY_TARGET || "http://127.0.0.1:8787",
+        changeOrigin: true,
+      },
+    },
   },
 });

@@ -48,9 +48,12 @@ export async function createRuntime({ env = process.env, now = () => Date.now(),
   await layoutSubmissionStore.init();
   const provider = createFloorplanProvider({ env, fetchImpl, now });
   const roomLayoutGenerator = createRoomLayoutGenerator({ env, fetchImpl, now });
-  const configuredDifficultySidecar = difficultySidecar === undefined && env.HTN26_DIFFICULTY_SIDECAR_URL
+  const difficultySidecarUrl = typeof env.HTN26_DIFFICULTY_SIDECAR_URL === "string"
+    ? env.HTN26_DIFFICULTY_SIDECAR_URL.trim()
+    : "";
+  const configuredDifficultySidecar = difficultySidecar === undefined && difficultySidecarUrl
     ? new DifficultySidecarClient({
-      baseUrl: env.HTN26_DIFFICULTY_SIDECAR_URL,
+      baseUrl: difficultySidecarUrl,
       timeoutMs: Number(env.HTN26_DIFFICULTY_SIDECAR_TIMEOUT_MS) || 200,
       fetchImpl,
     })

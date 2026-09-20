@@ -1,12 +1,16 @@
 import fs from "node:fs";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createApp } from "../src/main.js";
+import React from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { createApp, isPhotosPath } from "../src/main.js";
+import { PhotosPage, uploadRoomPhotos } from "../src/PhotosPage.js";
+import viteConfig from "../vite.config.js";
 import { advanceMockState, createInitialMockState, createMockTransport } from "../src/mock-transport.js";
 import { renderApp } from "../src/render.js";
 import { ROOM_COORDINATE_SPACE, validateFrontendSnapshot } from "../src/contracts.js";
 import { normalizeServerSnapshot } from "../src/server-snapshot.js";
-import { createHttpTransport } from "../src/transport.js";
+import { createBrowserTransport, createHttpTransport } from "../src/transport.js";
 import {
   isWalkablePosition,
   planPlayerPaths,
@@ -57,6 +61,56 @@ async function assertCommandUnchanged(transport, command) {
   await transport.command(command);
   assert.deepEqual(transport.snapshot(), before);
 }
+
+test("/photos renders only the minimal mobile upload surface", () => {
+  const html = renderToStaticMarkup(React.createElement(PhotosPage));
+
+  assert.equal(isPhotosPath("/photos"), true);
+  assert.equal(isPhotosPath("/photos/"), true);
+  assert.equal((html.match(/<input/g) || []).length, 1);
+  assert.match(html, /type="file"/);
+  assert.match(html, /multiple=""/);
+  assert.match(html, /Choose 4–5 photos/);
+  assert.doesNotMatch(html, /<button|UnderCooked|game-board|player/i);
+});
+
+test("photo selection requires 4-5 images and posts one layout generation request", async () => {
+  const calls = [];
+  const fetchImpl = async (url, options) => {
+    calls.push({ url, options });
+    return new Response(JSON.stringify({ presentationArea: {}, objects: [], playArea: {}, stations: [] }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  };
+  const photos = Array.from({ length: 4 }, (_, index) => new Blob([`photo-${index}`], { type: "image/jpeg" }));
+
+  await assert.rejects(uploadRoomPhotos(photos.slice(0, 3), { fetchImpl }), /Select 4 or 5/);
+  assert.equal(calls.length, 0);
+  await uploadRoomPhotos(photos, { fetchImpl });
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, "/api/layout/generate");
+  assert.equal(calls[0].options.method, "POST");
+  assert.equal(calls[0].options.body.getAll("photos").length, 4);
+});
+
+test("Vite proxies same-origin API requests to the laptop server", async () => {
+  assert.equal(viteConfig.server.proxy["/api"].target, process.env.HTN26_API_PROXY_TARGET || "http://127.0.0.1:8787");
+  const calls = [];
+  const transport = createBrowserTransport({
+    search: "?transport=http",
+    injected: null,
+    eventSourceFactory: null,
+    fetchImpl: async (url) => {
+      calls.push(url);
+      return { ok: true, json: async () => createInitialProjectionState(1_000) };
+    },
+  });
+
+  await transport.command({ type: "START_HOST" });
+  assert.deepEqual(calls, ["/api/command"]);
+});
 
 test("renders the UnderCooked onboarding start screen before host setup", async () => {
   const transport = createMockTransport({ now: () => 1_000 });
