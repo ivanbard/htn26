@@ -30,6 +30,8 @@ def scenario(nvs_error=0, radio_error=0, nfc_error=0, allocation_failure=False,
     cpu.reg_write(UC_RISCV_REG_SP, 0x3FCDF000)
     calls, registrations, texts, stages, prints = [], [], [], [], []
     app, old_app = 0x3FCC0000, 0x3FC9AB00
+    app_guard = b'HTN26-APP-GUARD' * 4
+    cpu.mem_write(app + 308, app_guard)
     label_count = 0
     handler, packets = [], []
     image_object = 0x3FCC2800
@@ -135,7 +137,8 @@ def scenario(nvs_error=0, radio_error=0, nfc_error=0, allocation_failure=False,
                 data = hardware["tag"].encode() if hardware["tag"] is not None else b""
                 cpu.mem_write(a0, data[:a1-1] + b'\0')
         elif address == 0x4200AED4:
-            value = {"rest": 0x447A0000, "tap": 0x44A00000, "shake": 0x44FA0000}[hardware["motion"]]
+            value = {"rest": 0x447A0000, "tap": 0x44A00000,
+                     "drop_shake": 0x44BB8000, "shake": 0x44FA0000}[hardware["motion"]]
             cpu.mem_write(a0, struct.pack('<3I', 0, 0, value))
         elif address == 0x4211BC16:
             fmt = string(machine.reg_read(UC_RISCV_REG_A0 + 2))
@@ -166,6 +169,7 @@ def scenario(nvs_error=0, radio_error=0, nfc_error=0, allocation_failure=False,
     assert cpu.reg_read(UC_RISCV_REG_PC) == HOOK + 8
     assert registrations == ([old_app] if allocation_failure else [old_app, app])
     if allocation_failure:
+        assert bytes(cpu.mem_read(app + 308, len(app_guard))) == app_guard
         return
     table, = struct.unpack("<I", cpu.mem_read(app, 4))
 
@@ -252,6 +256,7 @@ def scenario(nvs_error=0, radio_error=0, nfc_error=0, allocation_failure=False,
         assert calls.count(0x420109C6) == 1
         assert not packets and 'NFC READ 62760 - REMOVE AND RETAP' in texts
         invoke(0x58)
+        assert bytes(cpu.mem_read(app + 308, len(app_guard))) == app_guard
         return
     if role == "host":
         assert 0x4200FF2E not in calls  # The stationary gateway does not allocate/enable NFC.
@@ -342,6 +347,35 @@ def scenario(nvs_error=0, radio_error=0, nfc_error=0, allocation_failure=False,
                 invoke(0x60, 5); before = len(packets); scan('fridge')
                 assert len(packets) == before and 'UNKNOWN BUTTON COMBO' in texts
 
+                # B + a deliberate shake snapshots and clears a plate immediately,
+                # without waiting for the gateway ACK to update local state.
+                invoke(0x60, 1)
+                hardware["motion"] = "drop_shake"; invoke(0x5c)
+                assert packets[-1].endswith(b':DROP:P--L-')
+                assert cpu.mem_read(app + 228, 3) == b'\0\0\0'
+                assert_icon(None)
+                sent = len(packets); dropped_packet = packets[-1]
+                for _ in range(40): invoke(0x5c)
+                assert len(packets) == sent, "one held shake must emit only one DROP"
+                hardware["motion"] = "rest"
+                for _ in range(109): invoke(0x5c)
+                assert packets[-1] == dropped_packet and len(packets) == sent + 1
+                assert cpu.mem_read(app + 228, 3) == b'\0\0\0'
+                acknowledge('DROP:P--L-'); invoke(0x60, 0x101)
+                for _ in range(25): invoke(0x5c)
+
+                # B + shake with empty inventory is not a READY action and does not
+                # manufacture an empty DROP payload. Releasing B cannot replay it.
+                before = len(packets); invoke(0x60, 1)
+                hardware["motion"] = "shake"
+                for _ in range(40): invoke(0x5c)
+                assert len(packets) == before
+                invoke(0x60, 0x101)
+                for _ in range(10): invoke(0x5c)
+                assert len(packets) == before
+                hardware["motion"] = "rest"
+                for _ in range(25): invoke(0x5c)
+
                 # A + shake submits a fixed plate summary; the server validates consensus/order.
                 cpu.mem_write(app + 229, b'\x0f\x01')
                 for _ in range(50): invoke(0x5c)
@@ -355,7 +389,34 @@ def scenario(nvs_error=0, radio_error=0, nfc_error=0, allocation_failure=False,
                 for _ in range(25): invoke(0x5c)
                 invoke(0x60, 5); scan('pantry'); acknowledge('PU:B')
                 assert_icon('bun')
-                invoke(0x60, 1); hardware["motion"] = "shake"; invoke(0x5c); hardware["motion"] = "rest"
+
+                # A released B must not remain latched: this is READY, not DROP,
+                # and the held bun remains intact.
+                invoke(0x60, 1); invoke(0x60, 0x101)
+                hardware["motion"] = "shake"; invoke(0x5c); hardware["motion"] = "rest"
+                assert packets[-1].endswith(b':READY')
+                assert cpu.mem_read(app + 228, 1) == bytes([5])
+                assert_icon('bun')
+                for _ in range(25): invoke(0x5c)
+                before = len(packets); invoke(0x60, 1)
+                hardware["motion"] = "drop_shake"; invoke(0x5c)
+                assert len(packets) == before
+                assert cpu.mem_read(app + 228, 1) == bytes([5])
+                assert_icon('bun')
+                hardware["motion"] = "rest"; invoke(0x60, 0x101)
+                acknowledge('READY')
+                for _ in range(25): invoke(0x5c)
+
+                # B-held shake uses the lower deliberate-drop threshold, preserves
+                # the pre-clear hand snapshot, and clears locally before ACK.
+                invoke(0x60, 1); hardware["motion"] = "drop_shake"; invoke(0x5c)
+                assert packets[-1].endswith(b':DROP:HB')
+                assert cpu.mem_read(app + 228, 1) == b'\0'
+                assert_icon(None)
+                sent = len(packets)
+                for _ in range(40): invoke(0x5c)
+                assert len(packets) == sent, "sustained B-held shake must respect cooldown"
+                hardware["motion"] = "rest"
                 acknowledge('DROP:HB'); invoke(0x60, 0x101)
                 assert_icon(None)
 
@@ -467,6 +528,7 @@ def scenario(nvs_error=0, radio_error=0, nfc_error=0, allocation_failure=False,
     invoke(0x58)
     assert 0x42011252 in calls and stages[-1] == "exit"
     assert cpu.mem_read(app + 4, 24) == bytes(24)
+    assert bytes(cpu.mem_read(app + 308, len(app_guard))) == app_guard
     if handler:
         before = len(packets)
         incoming(b'OC2|000001|E|P1:READY');invoke(0x5c)
@@ -488,4 +550,4 @@ if __name__ == "__main__":
     scenario(nfc_error=-1)
     scenario(allocation_failure=True)
     scenario(send_error=-1)
-    print("PASS: native roles, held-state icon transitions, gateway ACK/serial, lifecycle, retries, cleanup")
+    print("PASS: native roles, B-held DROP hand/plate/empty/cooldown/release, gateway ACK/serial, lifecycle, cleanup")
