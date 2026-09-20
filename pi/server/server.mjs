@@ -6,6 +6,7 @@ import { ServerProjection } from "./src/projection.mjs";
 import { createSerialStreamAdapter } from "./src/protocol.mjs";
 import { openSerialDevice } from "./src/serial-device.mjs";
 import { PhotoStore, createHttpServer } from "./src/http.mjs";
+import { DifficultySidecarClient } from "./src/difficulty-sidecar.mjs";
 
 function parseArgs(argv) {
   const options = {};
@@ -23,11 +24,18 @@ function parseArgs(argv) {
   return options;
 }
 
-export async function createRuntime({ env = process.env, now = () => Date.now(), fetchImpl = globalThis.fetch, dataDir, authoritativeEngine } = {}) {
+export async function createRuntime({ env = process.env, now = () => Date.now(), fetchImpl = globalThis.fetch, dataDir, authoritativeEngine, difficultySidecar } = {}) {
   const directory = dataDir || env.HTN26_DATA_DIR || path.join(path.dirname(fileURLToPath(import.meta.url)), "data");
   const photoStore = new PhotoStore({ directory });
   await photoStore.init();
   const provider = createFloorplanProvider({ env, fetchImpl, now });
+  const configuredDifficultySidecar = difficultySidecar === undefined && env.HTN26_DIFFICULTY_SIDECAR_URL
+    ? new DifficultySidecarClient({
+      baseUrl: env.HTN26_DIFFICULTY_SIDECAR_URL,
+      timeoutMs: Number(env.HTN26_DIFFICULTY_SIDECAR_TIMEOUT_MS) || 200,
+      fetchImpl,
+    })
+    : difficultySidecar || null;
   const projection = new ServerProjection({
     provider,
     now,
@@ -39,6 +47,7 @@ export async function createRuntime({ env = process.env, now = () => Date.now(),
     locationHoldSeconds: env.HTN26_PLAYER_LOCATION_HOLD_SECONDS == null
       ? undefined : Number(env.HTN26_PLAYER_LOCATION_HOLD_SECONDS),
     authoritativeEngine,
+    difficultySidecar: configuredDifficultySidecar,
   });
   const serialAdapter = createSerialStreamAdapter({
     onRecord: (record) => {
@@ -63,6 +72,7 @@ export async function createRuntime({ env = process.env, now = () => Date.now(),
   return {
     directory,
     provider,
+    difficultySidecar: configuredDifficultySidecar,
     projection,
     photoStore,
     serialAdapter,
@@ -82,7 +92,8 @@ export function usage() {
     `Environment: HTN26_BIND_HOST, HTN26_PORT, HTN26_SERIAL_DEVICE, HTN26_DATA_DIR,\n` +
     `OPENAI_API_KEY (optional; server-side only), HTN26_ORDER_INTERVAL_MIN_SECONDS,\n` +
     `HTN26_ORDER_INTERVAL_MAX_SECONDS, HTN26_ORDER_PATIENCE_SECONDS,\n` +
-    `HTN26_MAX_ACTIVE_ORDERS, HTN26_PLAYER_LOCATION_HOLD_SECONDS.\n`;
+    `HTN26_MAX_ACTIVE_ORDERS, HTN26_PLAYER_LOCATION_HOLD_SECONDS,\n` +
+    `HTN26_DIFFICULTY_SIDECAR_URL, HTN26_DIFFICULTY_SIDECAR_TIMEOUT_MS.\n`;
 }
 
 export function startupGuide(baseUrl) {

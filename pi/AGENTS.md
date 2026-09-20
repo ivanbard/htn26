@@ -2,18 +2,25 @@
 
 Read [`../README.md`](../README.md), [`../updates/UPDATE_v1.md`](../updates/UPDATE_v1.md), [`../updates/UPDATE_v1.1.md`](../updates/UPDATE_v1.1.md), and [`../FLOW.md`](../FLOW.md) before changing Pi behavior.
 
-Use [`README.md`](README.md), [`master/README.md`](master/README.md), and [`slave/README.md`](slave/README.md) as the implementation owners for the Pi components.
+Use [`README.md`](README.md), [`difficulty/README.md`](difficulty/README.md),
+[`master/README.md`](master/README.md), and [`slave/README.md`](slave/README.md)
+as the implementation owners for the Pi components.
 
-The current server run, test, and deployment path is the captain's laptop. QNX,
-Pi-hosted execution, and multi-camera workers are possible future boundaries.
+The current authoritative server run, test, and deployment path is the
+captain's laptop. QNX may host only the optional label-only difficulty sidecar;
+QNX authoritative execution and multi-camera workers remain future boundaries.
 
-Keep authoritative game state, timers, order evaluation, and submission decisions in the laptop server or a future authoritative-engine adapter.
+Keep authoritative game state, timers, order/recipe selection, scoring,
+inventory, layout, badge state, and submission decisions in the laptop server
+or a future authoritative-engine adapter. The difficulty sidecar contract may
+return only `easy`, `normal`, or `hectic` with model/source metadata and
+latency; follow [`difficulty/README.md`](difficulty/README.md).
 
 Keep camera, inference, and worker code behind the adapter seams owned by the relevant Pi README.
 
 Do not add cloud dependencies or let worker telemetry mutate game state directly.
 
-Run the master and worker validation commands documented by their nearest README after changes.
+Run the sidecar, master, and worker validation commands documented by their nearest README after changes.
 
 Host-side tests do not prove QNX, AI-module qualification, phone-camera, or deployed hardware behavior.
 

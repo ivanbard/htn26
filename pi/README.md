@@ -1,11 +1,12 @@
 # FILE: `/pi/README.md`
 
-# Laptop server and possible future Raspberry Pi / QNX system
+# Laptop server and QNX advisory sidecar
 
-The current v1 server runs, is tested, and is deployed on the captain's laptop.
-It receives the host badge's USB serial stream and serves the local browser UI.
-QNX is only a possible future server target; the current path does not require
-or claim Raspberry Pi or QNX deployment validation.
+The current v1 authoritative server runs, is tested, and is deployed on the
+captain's laptop. It receives the host badge's USB serial stream and serves the
+local browser UI. A QNX Pi may run the isolated, optional difficulty service in
+[`difficulty/`](difficulty/README.md), but QNX is not the game server and this
+repository does not claim that sidecar was revalidated on QNX in this revision.
 
 The current laptop server slice owns:
 
@@ -13,16 +14,35 @@ The current laptop server slice owns:
 * authoritative game-state execution
 * host-badge and UI transport, with the local web/serial boundary documented in
   [`server/README.md`](server/README.md)
+* validation and local application of any bounded difficulty label returned by
+  the optional QNX sidecar
 
 The current v1 setup accepts still photographs from an Apple phone. Pi-hosted
 inference, workers, and multi-camera responsibilities below remain possible
 future seams, not the current deployment or current player-location tracking.
 
-No AI inference required for gameplay should depend on the cloud.
+No AI inference required for gameplay should depend on the cloud. The optional
+difficulty sidecar is local-network advisory inference; the game remains fully
+functional when it is absent.
 
 ---
 
 ## Roles
+
+### Optional QNX difficulty sidecar
+
+`pi/difficulty/`
+
+Runs separately from the laptop server and owns only OpenCV/NumPy inference for
+four normalized features. Its versioned HTTP response contains one of `easy`,
+`normal`, or `hectic` plus source/model metadata and latency. It cannot return
+or mutate recipes, orders, timers, score, gold, inventory, submissions, room
+layout, or badge state. The laptop queries it asynchronously and retains its
+existing order policy whenever no valid response is ready.
+
+This is the selective migration path for PR 22's model artifact and concept;
+the old synchronous `pi/server` child-process integration and any QNX-first
+server claim are superseded by the sidecar contract.
 
 ### Possible future master Pi/QNX adapter
 
@@ -47,9 +67,10 @@ Would own:
 
 The server slice is the laptop-hosted HTTP/SSE and USB-serial boundary for the
 current launch. It owns protocol adaptation, browser projections, photo
-upload/review plumbing, and the functional local game simulator; it does not
-replace the portable master engine as the future authoritative-engine seam.
-QNX is only a possible future deployment target for this server. Its routes,
+upload/review plumbing, the functional local game simulator, and the optional
+label-only sidecar adapter; it does not replace the portable master engine as
+the future authoritative-engine seam. QNX is only a possible future deployment
+target for this authoritative server. Its routes,
 serial setup, provider boundary, and validation limits are documented in
 [`server/README.md`](server/README.md).
 

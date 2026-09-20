@@ -9,8 +9,11 @@ from an Apple phone.
 
 The current setup path uploads Apple-phone room photographs to the laptop server.
 
-QNX is only a possible future server target. The current run, test, and
-deployment path does not require a Raspberry Pi or claim QNX validation.
+QNX is only a possible future authoritative-server target. An optional QNX Pi
+may instead run the isolated difficulty sidecar documented in
+[`pi/difficulty/README.md`](pi/difficulty/README.md); it returns only a bounded
+advisory label and never owns game state. The current run and test path does not
+require a Raspberry Pi or claim QNX validation.
 
 The v1 round uses one host or gateway badge and exactly three fixed player badges.
 
@@ -63,8 +66,8 @@ instead of claiming camera-tracked live locations.
 Apple phone setup photos
      |
      v
-captain's laptop - setup provider, authoritative game state, cooking/order timers, and UI transport
-     |
+captain's laptop - authoritative server/UI <-- async label-only HTTP --> optional QNX difficulty sidecar
+     |                                                               (easy / normal / hectic only)
      v
 host or gateway badge - radio and host controls
      |
@@ -84,6 +87,11 @@ submission results.
 Player badges read NFC and motion input, provide local feedback, and report player intent.
 
 The UI mirrors state from the laptop server and does not become a second game authority.
+
+The optional QNX difficulty service receives only normalized pressure/failure/
+stove/elapsed features. The laptop validates its label and chooses any recipe
+itself. Absence, timeout, network failure, or invalid output leaves the laptop's
+existing order policy unchanged. The sidecar is separate from room-layout AI.
 
 Badge API limits and gateway behavior belong to the badge guide and badge component READMEs.
 
@@ -228,6 +236,9 @@ Run the badge tests from the repository root as documented by the badge componen
 
 Run `make -C pi/master test` for the portable master engine.
 
+Run `python3 -m unittest discover -s pi/difficulty/test -v` for the optional
+sidecar protocol/model tests; see its README for the dependency-gated smoke path.
+
 Run the worker CMake and CTest commands in [`pi/slave/README.md`](pi/slave/README.md) when changing the worker core.
 
 Run `npm test` in `ui/` for the offline UI.
@@ -258,6 +269,7 @@ badge/
   tests/
 pi/
   common/
+  difficulty/
   master/
   slave/
 ui/
