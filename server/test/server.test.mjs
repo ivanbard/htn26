@@ -12,9 +12,9 @@ import { openSerialDevice } from "../src/serial-device.mjs";
 
 const MAC = "AA:BB:CC:DD:EE:01";
 
-async function withRuntime(callback, { now = () => Date.now(), env = {} } = {}) {
+async function withRuntime(callback, { now = () => Date.now(), env = {}, fetchImpl = globalThis.fetch } = {}) {
   const dataDir = await mkdtemp(path.join(tmpdir(), "htn26-server-"));
-  const runtime = await createRuntime({ dataDir, env, now });
+  const runtime = await createRuntime({ dataDir, env, now, fetchImpl });
   await new Promise((resolve) => runtime.server.listen(0, "127.0.0.1", resolve));
   const address = runtime.server.address();
   try { return await callback(`http://127.0.0.1:${address.port}`, runtime); }
@@ -61,6 +61,33 @@ async function approveAndStart(base) {
   assert.equal(started.data.result.ok, true);
   return started.data.state;
 }
+
+test("an absent QNX sidecar URL keeps the laptop order policy without connection attempts", async () => {
+  let now = 1_000;
+  let fetchCalls = 0;
+  await withRuntime(async (_base, runtime) => {
+    assert.equal(runtime.difficultySidecar, null);
+    runtime.projection.ingestHostControl({ control: "START", durationSeconds: 120 }, now);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(fetchCalls, 0);
+    assert.deepEqual(runtime.projection.snapshot(now).orders.map((order) => order.recipe), ["PLAIN_MEAT"]);
+
+    now += 1_000;
+    assert.deepEqual(runtime.projection.snapshot(now).orders.map((order) => order.recipe), ["PLAIN_MEAT", "CHEESEBURGER"]);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(fetchCalls, 0);
+  }, {
+    now: () => now,
+    env: {
+      HTN26_ORDER_INTERVAL_MIN_SECONDS: "1",
+      HTN26_ORDER_INTERVAL_MAX_SECONDS: "1",
+    },
+    fetchImpl: async () => {
+      fetchCalls += 1;
+      throw new Error("no network should be attempted");
+    },
+  });
+});
 
 test("fixture parser accepts noisy and chunk-framed gateway records", async () => {
   const fixture = await readFile(new URL("./fixtures/gateway-events.ndjson", import.meta.url));

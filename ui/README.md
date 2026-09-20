@@ -1,11 +1,8 @@
 # Burger Level UI
 
-This directory contains a separate local, offline-first HTN26 spectator and host
-UI prototype. Its browser surface is a React application styled with Tailwind
-CSS; the only runtime assets are files in this directory, and it makes no
-internet requests. The current v1 simulator instead serves its required plain,
-no-CSS page directly from `pi/server`; see
-[`../pi/server/README.md`](../pi/server/README.md).
+This directory contains the current laptop-hosted HTN26 browser UI. Its React
+surface can use the offline mock or the root `server/` HTTP/SSE transport. The
+server remains authoritative for photos, layouts, and game state.
 
 ## Run locally
 
@@ -19,8 +16,16 @@ npm run dev
 
 `npm run build` creates the production bundle in `dist/`.
 
-Open <http://127.0.0.1:4173>. The development page uses its mock authoritative
-transport. Try the prototype host flow:
+Open <http://127.0.0.1:4173>. The default development page uses its mock
+transport. Use `?transport=http` for the live root server; Vite proxies
+same-origin `/api` requests to `http://127.0.0.1:8787` by default. Override that
+target with `HTN26_API_PROXY_TARGET` when necessary.
+
+Open <http://127.0.0.1:4173/photos> on the phone for the minimal setup-photo
+page. Selecting 4-5 same-room images immediately sends one request to
+`POST /api/layout/generate`; this route does not render the game UI.
+
+Try the prototype host flow:
 
 1. `Start` host mode.
 2. `Scan Room` to show the proposed floor plan.
@@ -63,7 +68,8 @@ A burger uses buns, meat, cheese, and lettuce. Cheese, lettuce, and meat can be 
 - `src/mock-transport.js` is the required offline development transport. It owns a fixture state and applies host commands as a stand-in for an authoritative server. While a round runs it also ticks every second (`advanceMockState`, mirroring `pi/server/src/projection.mjs`): the four-minute (240 s) round clock, order patience, chop progress, and the stove cooking -> done -> warning -> burnt timeline. This is the only place timers advance; the renderer only displays the snapshot values.
 - Station progress bars appear only on stoves and chopping boards that hold an item or are cooking/chopping/done/burnt. Runtime stations are paired with plan stations by id first, then by kind, because the Pi's plan has one `stove` while its runtime stations are `stove-left`/`stove-right`.
 - `src/transport.js` includes a local HTTP/SSE transport for integration with an authoritative server. It expects `GET /api/state`, `POST /api/command`, and `GET /api/events`; those endpoints remain outside this UI task.
-- Use `http://127.0.0.1:4173/?transport=http` to select the HTTP seam. A supplied `window.__HTN26_TRANSPORT__` takes precedence for integration tests.
+- Use `http://127.0.0.1:4173/?transport=http` to select the HTTP seam. It uses same-origin `/api` routes so the Vite proxy also works for LAN clients; an explicit `api`/`apiBase` query value can override it. A supplied `window.__HTN26_TRANSPORT__` takes precedence for integration tests.
+- `src/PhotosPage.js` owns the isolated `/photos` upload surface and posts each 4-5 image selection directly to the server layout-generation route.
 - `src/App.js` contains the React component tree for the staged setup flow, framed room board, order HUD, player/station overlays, and live notifications.
 - `src/render.js` renders the same React tree to static markup for contract tests. It does not create timers, move players, score deliveries, or infer station/order state.
 - The gameplay display includes the Figma-derived order queue, goose-coin score rail, and round timer. Up to four cards come from `orders`; `order` remains the legacy primary-order fallback. The timer is redrawn from authoritative `clock` snapshots and is never decremented by the browser.

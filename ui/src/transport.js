@@ -61,10 +61,15 @@ export function createHttpTransport({ baseUrl = "", fetchImpl = globalThis.fetch
   };
 }
 
-export function createBrowserTransport({ search = globalThis.location?.search || "", injected = globalThis.__HTN26_TRANSPORT__ } = {}) {
+export function createBrowserTransport({
+  search = globalThis.location?.search || "",
+  injected = globalThis.__HTN26_TRANSPORT__,
+  fetchImpl = globalThis.fetch,
+  eventSourceFactory = globalThis.EventSource,
+} = {}) {
   if (injected) return injected;
   const params = new URLSearchParams(search);
   const mode = params.get("transport");
-  const baseUrl = params.get("api") || params.get("apiBase") || globalThis.__HTN26_API_BASE__ || (mode === "http" ? "http://127.0.0.1:8787" : "");
-  return mode === "http" ? createHttpTransport({ baseUrl }) : createMockTransport();
+  const baseUrl = params.get("api") || params.get("apiBase") || globalThis.__HTN26_API_BASE__ || "";
+  return mode === "http" ? createHttpTransport({ baseUrl, fetchImpl, eventSourceFactory }) : createMockTransport();
 }

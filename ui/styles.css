@@ -15,7 +15,19 @@
 * { box-sizing: border-box; }
 html, body, #app { min-width: 320px; min-height: 100%; }
 body { margin: 0; background: var(--bg); color: var(--text); }
-button:focus-visible { outline: 3px solid var(--yellow); outline-offset: 3px; }
+button:focus-visible, input:focus-visible { outline: 3px solid var(--yellow); outline-offset: 3px; }
+
+.photos-page {
+  width: min(100% - 2rem, 32rem);
+  margin: 0 auto;
+  padding: 3rem 0;
+}
+
+.photos-page h1 { margin: 0 0 .75rem; font-size: 2rem; }
+.photos-page > p { color: var(--muted); line-height: 1.5; }
+.photos-upload { display: grid; gap: .75rem; margin-top: 2rem; font-weight: 800; }
+.photos-upload input { width: 100%; padding: 1rem; border: 1px solid #45647d; background: #101c29; color: var(--text); font: inherit; }
+.photos-status { margin-top: 1.25rem; }
 
 .status-healthy, .status-ready, .status-success, .status-running { color: var(--green); border-color: var(--green); }
 .status-degraded, .status-warning, .status-cooking, .status-active { color: var(--yellow); border-color: var(--yellow); }

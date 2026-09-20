@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { App } from "./App.js";
 import { renderApp } from "./render.js";
 import { createBrowserTransport } from "./transport.js";
+import { PhotosPage } from "./PhotosPage.js";
 
 export function createApp({ root, transport, now = () => Date.now() }) {
   if (!root) throw new Error("A root element is required");
@@ -97,7 +98,16 @@ export function createApp({ root, transport, now = () => Date.now() }) {
   };
 }
 
+export function isPhotosPath(pathname = "") {
+  return String(pathname).replace(/\/+$/, "") === "/photos";
+}
+
 if (typeof document !== "undefined") {
   const root = document.querySelector("#app");
-  createApp({ root, transport: createBrowserTransport() });
+  if (isPhotosPath(globalThis.location?.pathname)) {
+    document.title = "Room photos";
+    createRoot(root).render(React.createElement(PhotosPage));
+  } else {
+    createApp({ root, transport: createBrowserTransport() });
+  }
 }

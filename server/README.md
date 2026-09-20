@@ -35,6 +35,11 @@ Use `--host 0.0.0.0` only for a trusted LAN. Useful environment variables:
   this server process. It may be omitted only for the deterministic path.
 - `OPENAI_LAYOUT_TIMEOUT_MS`: bounded Responses request timeout in
   milliseconds, default 12000.
+- `HTN26_DIFFICULTY_SIDECAR_URL`: optional QNX difficulty recommendation
+  adapter. When absent or blank, the runtime does not create or call a sidecar
+  client and uses the normal laptop order sequence.
+- `HTN26_DIFFICULTY_SIDECAR_TIMEOUT_MS`: optional bounded sidecar timeout,
+  default 200 ms; it has no effect when the URL is not configured.
 
 The deterministic default is an approximately 10 m x 10 m room with exactly
 four station types: pantry, fridge, cutting board, and stove. Review it through
@@ -220,9 +225,10 @@ projection routes. They do not prove QNX serial enumeration, Node availability
 on a target image, phone capture, physical badges, OpenAI connectivity, or a
 QNX sidecar.
 
-A future QNX difficulty director is a sidecar only: it may observe canonical
-snapshots and return bounded recommendations through an adapter, but it must
-not own HTTP routes, duplicate orders/timers/scoring, mutate state directly, or
-become a second room-layout server. There is no current difficulty-sidecar
-endpoint or runtime. A future QNX serial adapter may replace
-`src/serial-device.mjs` while retaining the platform-independent parser.
+The optional QNX difficulty director is a sidecar only: it may receive bounded
+features and return bounded recommendations through `src/difficulty-sidecar.mjs`,
+but it does not own HTTP routes, duplicate orders/timers/scoring, mutate state
+directly, or become a second room-layout server. It is disabled unless
+`HTN26_DIFFICULTY_SIDECAR_URL` is explicitly configured. A future QNX serial
+adapter may replace `src/serial-device.mjs` while retaining the
+platform-independent parser.
