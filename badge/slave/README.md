@@ -49,7 +49,7 @@ files** and **Push**. The app is otherwise self-contained.
 
 Before a round, each badge is provisioned once: **LEFT/RIGHT** chooses player
 1, 2, or 3 and **A** saves it. The stored number is fixed for the session.
-There are exactly three accepted player numbers and no join or late-join
+There are three accepted player numbers and no join or late-join
 operation. While inactive, **START** reopens this setup screen if a badge must
 be reassigned; the new number is stored only when **A** saves it.
 
@@ -86,7 +86,7 @@ stoves.
   plate.
 - Hold **A** and shake while holding a plate to submit. The submitting plate is
   consumed immediately. Every fixed player broadcasts either `READY` or
-  `SUB:<BMLC>` in the 0.5-second window; when all three are observed, every
+  `SUB:<BMLC>` in the 0.5-second window; when all active players are observed, every
   badge discards any remaining held item/plate. The app never asks the laptop
   server for an order or response, so it only reports the local submission transition.
 
@@ -117,12 +117,12 @@ responses.
 The gateway's fixed-session control broadcasts are:
 
 ```text
-OC2|000001|G|S
-OC2|000002|G|E
+OC2|000001|G|S|2
+OC2|000002|G|E|2
 ```
 
 `START` and `END` are accepted as the long aliases for `S` and `E`. The host
-must send these controls at the beginning/end of the same three-player round;
+must send these controls at the beginning/end of the same one-to-three-player round;
 players do not discover or enroll themselves over radio.
 
 ## Host-side validation and hardware limits
@@ -138,7 +138,7 @@ The tests cover all four NFC choices and invalid combinations, plate assembly,
 duplicate prevention, six-step chopping and early release, cooking/done/warning/
 burnt transitions, peer cooking-clock replication, tap-transfer merge/swap
 rules, compact sequence packets,
-fixed three-player readiness, and state discard. They execute helpers from the
+active-player readiness, and state discard. They execute helpers from the
 production Lua file rather than a second protocol model.
 
 Host tests cannot validate NFC field coupling, tap or shake thresholds, BLE

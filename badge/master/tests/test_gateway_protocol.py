@@ -97,8 +97,8 @@ class GatewayProtocolTests(LuaTestMixin, unittest.TestCase):
             'local finish = gateway_test.serial_end_frame()\n'
             'assert(start == "HTN26|GAME|START_GAME|240|3")\n'
             'assert(finish == "HTN26|GAME|GAME_END|3")\n'
-            'assert(gateway_test.lifecycle_radio_frame("START_GAME") == "OC2|000001|G|S")\n'
-            'assert(gateway_test.lifecycle_radio_frame("GAME_END") == "OC2|000002|G|E")\n'
+            'assert(gateway_test.lifecycle_radio_frame("START_GAME") == "OC2|000001|G|S|3")\n'
+            'assert(gateway_test.lifecycle_radio_frame("GAME_END") == "OC2|000002|G|E|3")\n'
             'assert(#start <= 44 and #finish <= 44)\n'
             'assert(#gateway_test.lifecycle_radio_frame("START_GAME") <= 44)'
         )
@@ -163,21 +163,22 @@ class HostLifecycleTests(LuaTestMixin, unittest.TestCase):
             "  sys = {ms = function() return now end, log = function(value) logs[#logs + 1] = value end},\n"
             "  led = {clear = noop, show = noop, set = noop, set_all = noop},\n"
             "  ui = {label = make_label},\n"
-            "  input = {BUTTON = {START = 8}, KIND = {PRESSED = 1}},\n"
+            "  input = {BUTTON = {START = 8, LEFT = 4, RIGHT = 5}, KIND = {PRESSED = 1}},\n"
             "}\n"
             "on_enter({})\n"
+            "on_button(4, 1)\n"
             "on_button(8, 1)\n"
-            'assert(logs[2] == "HTN26|GAME|START_GAME|240|3")\n'
-            'assert(logs[3] == "HTN26|HOST|CONTROL|OC2|000001|G|S")\n'
-            'assert(broadcasts[1] == "OC2|000001|G|S")\n'
+            'assert(logs[2] == "HTN26|GAME|START_GAME|240|2")\n'
+            'assert(logs[3] == "HTN26|HOST|CONTROL|OC2|000001|G|S|2")\n'
+            'assert(broadcasts[1] == "OC2|000001|G|S|2")\n'
             "now = 239999\n"
             "on_tick()\n"
-            'assert(logs[4] ~= "HTN26|GAME|GAME_END|3")\n'
+            'assert(logs[4] ~= "HTN26|GAME|GAME_END|2")\n'
             "now = 240000\n"
             "on_tick()\n"
-            'assert(logs[5] == "HTN26|GAME|GAME_END|3")\n'
-            'assert(logs[6] == "HTN26|HOST|CONTROL|OC2|000002|G|E")\n'
-            'assert(broadcasts[2] == "OC2|000002|G|E")'
+            'assert(logs[5] == "HTN26|GAME|GAME_END|2")\n'
+            'assert(logs[6] == "HTN26|HOST|CONTROL|OC2|000002|G|E|2")\n'
+            'assert(broadcasts[2] == "OC2|000002|G|E|2")'
         )
 
 

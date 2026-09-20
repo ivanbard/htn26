@@ -12,7 +12,7 @@ The deterministic floorplan and authoritative game engine remain available. QNX/
 
 The qualifying open-source QNX AI module is still unresolved and its status is owned by [`pi/README.md`](pi/README.md).
 
-The v1 round uses one host or gateway badge and exactly three fixed player badges.
+The v1 round uses one host or gateway badge and one to three fixed player badges.
 
 Players receive unique player numbers before a round and do not join dynamically during play.
 
@@ -78,7 +78,7 @@ player badge 1      player badge 2      player badge 3
 The host badge is the gateway between the player badges and the Pi.
 
 The host badge owns the four-minute round lifecycle, START_GAME/GAME_END records,
-and reset of the three fixed-player session. The Pi owns authoritative game
+and reset of the active fixed-player session. The Pi owns authoritative game
 state, cooking and order timers, orders, score, and submission results.
 
 Player badges read NFC and motion input, provide local feedback, and report player intent.
@@ -183,7 +183,7 @@ Connection reliability beyond this v1 behavior remains an implementation concern
 
 A player submits by holding A and shaking while holding a plate.
 
-The other two fixed players must also be shaking at the same time, but they do not need to hold A.
+The other active players must also be shaking at the same time, but they do not need to hold A.
 
 A detected shaking state persists for one half second to cover the large change in g force during the gesture.
 
@@ -223,12 +223,12 @@ These commands validate host-side behavior and do not claim physical badge, phon
 
 ## v1 success criteria
 
-1. The host badge starts a clean round for three fixed players.
+1. The host badge starts a clean round for one to three fixed players.
 2. The Pi receives player NFC and motion intent through the gateway path.
 3. The four NFC zones support the ingredient, cutting, and stove interactions above.
 4. Plate transfer and duplicate prevention follow the v1 rules.
 5. Cooking follows the 15-second, done, warning, and burnt timeline.
-6. All three players can perform the simultaneous shake submission.
+6. All active players can perform the simultaneous shake submission.
 7. The Pi accepts or rejects the submission once and the UI shows the result.
 8. The host badge ends the round after approximately four minutes and all round state is wiped.
 9. The first playable run completes using the reliable-enough radio assumption; the deterministic layout path does not require cloud services.
