@@ -8,9 +8,9 @@ All geometry is in a square unit coordinate system: x and y increase right and d
 
 Output JSON only. Do not return prose, markdown, measurements, aspect-ratio fields, image URLs, tools, or any properties not in the schema.`;
 
-export function layoutResponsesRequest(images, { model = "gpt-5.6-luna" } = {}) {
+export function layoutResponsesRequest(images) {
   return {
-    model,
+    model: "gpt-5.6-luna",
     store: false,
     reasoning: { effort: "low" },
     instructions: ROOM_LAYOUT_PROMPT,

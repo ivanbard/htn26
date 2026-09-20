@@ -27,9 +27,8 @@ export class RoomLayoutGenerationError extends Error {
 }
 
 export class OpenAIRoomLayoutGenerator {
-  constructor({ apiKey, model = "gpt-5.6-luna", fetchImpl = globalThis.fetch, requestTimeoutMs = DEFAULT_REQUEST_TIMEOUT_MS, now = () => Date.now() } = {}) {
+  constructor({ apiKey, fetchImpl = globalThis.fetch, requestTimeoutMs = DEFAULT_REQUEST_TIMEOUT_MS, now = () => Date.now() } = {}) {
     this.apiKey = apiKey;
-    this.model = model;
     this.fetchImpl = fetchImpl;
     this.requestTimeoutMs = Number.isFinite(Number(requestTimeoutMs)) && Number(requestTimeoutMs) > 0
       ? Math.max(1, Math.trunc(Number(requestTimeoutMs)))
@@ -51,7 +50,7 @@ export class OpenAIRoomLayoutGenerator {
       response = await this.fetchImpl("https://api.openai.com/v1/responses", {
         method: "POST",
         headers: { authorization: `Bearer ${this.apiKey}`, "content-type": "application/json" },
-        body: JSON.stringify(layoutResponsesRequest(images, { model: this.model })),
+        body: JSON.stringify(layoutResponsesRequest(images)),
         signal: AbortSignal.timeout(this.requestTimeoutMs),
       });
     } catch {
@@ -88,7 +87,6 @@ export class OpenAIRoomLayoutGenerator {
 export function createRoomLayoutGenerator({ env = process.env, fetchImpl = globalThis.fetch, now } = {}) {
   return new OpenAIRoomLayoutGenerator({
     apiKey: env.OPENAI_API_KEY,
-    model: env.OPENAI_LAYOUT_MODEL || "gpt-5.6-luna",
     requestTimeoutMs: env.OPENAI_LAYOUT_TIMEOUT_MS || DEFAULT_REQUEST_TIMEOUT_MS,
     fetchImpl,
     now,
