@@ -7,6 +7,7 @@ if __package__:
     from .contract import bootstrap_label
 else:
     import sys
+
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     from difficulty.contract import bootstrap_label
 
@@ -21,7 +22,7 @@ def main():
     features = rng.random((2400, 4))
     labels = np.array([bootstrap_label(*row) for row in features], dtype=np.int32)
     cv2.setRNGSeed(2026)
-    model = cv2.ml.RTrees_create()
+    model = cv2.ml.RTrees_create()  # pyright: ignore[reportAttributeAccessIssue]
     model.setMaxDepth(6)
     model.setMinSampleCount(8)
     model.setTermCriteria((cv2.TERM_CRITERIA_MAX_ITER, 80, 0))

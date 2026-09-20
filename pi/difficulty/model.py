@@ -20,7 +20,7 @@ class OpenCvDifficultyModel:
         self.artifact_path = Path(artifact_path).resolve()
         if not self.artifact_path.is_file():
             raise FileNotFoundError(f"model artifact not found: {self.artifact_path}")
-        self._model = cv2.ml.RTrees_load(str(self.artifact_path))
+        self._model = cv2.ml.RTrees_load(str(self.artifact_path))  # pyright: ignore[reportAttributeAccessIssue]
         if self._model is None or self._model.empty():
             raise RuntimeError(f"could not load OpenCV model: {self.artifact_path}")
         self._lock = threading.Lock()
