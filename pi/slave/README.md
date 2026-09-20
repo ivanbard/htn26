@@ -1,16 +1,17 @@
 # Camera Worker Pi
 
 This directory contains the portable worker core for a future multi-camera
-deployment. The current v1 uses one Raspberry Pi and an Apple phone camera for
-setup photographs, not live player-location tracking. The core does not run
-game rules, ingest badge events, or own authoritative state.
+deployment. The current v1 uses the captain's laptop plus Apple-phone still
+photographs for setup, not a Raspberry Pi worker or live player-location
+tracking. The core does not run game rules, ingest badge events, or own
+authoritative state.
 
 ## Future multi-camera flow
 
-When multi-camera tracking is enabled, the master Pi owns the room-scan/floor-plan
-workflow. It captures the room, presents the floor plan for approval, and then
-provides each camera Pi with a camera-specific homography in one approved
-shared coordinate frame. The worker receives that result through
+If multi-camera tracking is enabled in the future, the authoritative adapter
+owns the room-scan/floor-plan workflow. It captures the room, presents the floor
+plan for approval, and then provides each camera Pi with a camera-specific
+homography in one approved shared coordinate frame. The worker receives that result through
 `WorkerCore::set_calibration()` (or initial `WorkerConfig::calibration`). It
 remains `WaitingForCalibration` before approval, so it cannot publish guessed
 locations. Once configured, each worker reports live marker/person positions in

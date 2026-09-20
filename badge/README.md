@@ -38,15 +38,17 @@ The player path is responsible for:
 Player badges are **not authoritative**.
 
 They keep local interaction state for immediate feedback and report the
-resulting intent; the Pi remains authoritative for orders and scoring.
+resulting intent; the laptop server remains authoritative for orders and
+scoring.
 
 ---
 
 ### Stationary Gateway Badge
 
-One badge is permanently connected by USB to the main Raspberry Pi.
+One badge is connected by USB to the captain's laptop for the current launch.
 
-This badge is the radio gateway between the three player badges and the QNX server.
+This badge is the radio gateway between the three player badges and the laptop
+server. A QNX/Pi server remains only a possible future target.
 
 V1 submission is a simultaneous-shake action between the three fixed players.
 There is no delivery-zone or serving-plate NFC contract in the current product.
@@ -67,27 +69,28 @@ badge.sys.log()
     ↓
 USB serial
     ↓
-main QNX Raspberry Pi
+captain's laptop server
 ```
 
-The host badge owns only the host lifecycle: its START action resets the three
-fixed-player session, starts the four-minute countdown, and emits START_GAME;
-timeout emits GAME_END and resets the session. It does not own player intent,
-inventory, orders, scoring, or resulting game state. Player events are still
-forwarded to the Pi.
+The host badge initiates the physical lifecycle: its START action resets the
+three fixed-player badge session, starts its local four-minute countdown, and
+emits START_GAME; timeout emits GAME_END and resets that session. The laptop
+server applies the authoritative round transitions and owns authoritative
+processing of player intent, inventory, orders, scoring, and resulting game
+state. Players originate intent; their events are forwarded to the laptop.
 
 ---
 
 ## Game Setup Flow
 
-The stationary gateway badge is plugged into the main Raspberry Pi before hosting begins.
+The stationary gateway badge is plugged into the captain's laptop before hosting begins.
 
 Each player badge is provisioned as player 1, 2, or 3 before the round. The
 host starts the fixed session over radio; there is no radio enrollment or late
 join path. The player app's exact install files and controls are owned by
 [`slave/README.md`](slave/README.md).
 
-The game should not depend on arbitrary direct Raspberry Pi ↔ player badge Bluetooth communication.
+The game should not depend on arbitrary direct laptop/server ↔ player badge Bluetooth communication.
 
 The documented and supported architecture is:
 
@@ -100,7 +103,7 @@ stationary badge
       ↓
 USB serial
       ↓
-main Pi
+laptop server
 ```
 
 ---
@@ -145,7 +148,7 @@ control contract is owned by [`master/README.md`](master/README.md) and
 Important actions may be retransmitted, but retransmissions must reuse the same sequence number.
 The native host acknowledges these retries but never forwards ACK packets.
 
-The gateway and Pi may deduplicate using:
+The gateway and laptop server may deduplicate using:
 
 ```text
 sender MAC + sequence number
@@ -162,7 +165,7 @@ badges together.
 
 ## Gateway Serial Format
 
-The stationary badge should forward radio packets to the Pi in an easily searchable format such as:
+The stationary badge should forward radio packets to the laptop server in an easily searchable format such as:
 
 ```text
 HTN26|RX|<mac>|<rssi>|<payload>
@@ -176,7 +179,8 @@ HTN26|RX|AA:BB:CC:DD:EE:FF|-48|OC1|42|N|ING:TOM
 
 The badge runtime may add additional logging text around `badge.sys.log()` output.
 
-The Pi should therefore search each serial line for the `HTN26|` marker instead of assuming the serial line starts with it.
+The laptop server should therefore search each serial line for the `HTN26|`
+marker instead of assuming the serial line starts with it.
 
 ---
 
@@ -222,7 +226,8 @@ yellow   currently performing action
 red      error
 ```
 
-The primary cooking-state indicators, however, are the physical station lights described by the Pi/game system.
+The primary cooking-state indicators, however, are the physical station lights
+described by the authoritative game system.
 
 Do not make badge LEDs the only mechanism for knowing whether food is cooked.
 
@@ -239,7 +244,7 @@ Do not assume:
 * Wi-Fi from badge Lua
 * HTTP from badge Lua
 * arbitrary BLE/GATT
-* direct Pi participation in `badge.radio`
+* direct laptop/server participation in `badge.radio`
 * serial input into the badge Lua app
 * reliable packet delivery
 
@@ -262,7 +267,7 @@ gateway badge receives event
         ↓
 gateway logs it over USB
         ↓
-main Pi sees event
+laptop server sees event
 ```
 
 After this works, add the remaining station, motion, and player-feedback interactions.

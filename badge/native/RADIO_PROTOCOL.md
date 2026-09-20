@@ -53,7 +53,7 @@ The six decimal event digits are randomized at each native player-app boot and
 increase monotonically during that boot. Player numbers are explicitly selected
 as 1, 2, or 3 before radio starts. Host control sequences begin at one. The
 private 15-byte ACK echoes the event sequence; it is native reliability
-machinery and is never forwarded to the Pi.
+machinery and is never forwarded to the laptop server.
 
 Application action values match `../slave/main.lua`: `PU:B|R|Q|K`,
 `PL:NEW` or `PL:<BMLC>`, `CH:S|F` and `CH:D:M|L|C`, `ST:L|R:P|T|X`,
@@ -71,7 +71,7 @@ all three players together, or roll all four back to Lua together.
 A player waits 150 ticks (nominally three seconds) and makes at most three
 attempts using the exact same sequence and packet. Only the badge in **host
 role** sends ACKs. This prevents another player from stopping a retry before
-the single Pi's gateway has observed and logged the event. An ACK is advertised
+the single host gateway has observed and logged the event. An ACK is advertised
 for 100 ticks (nominally two seconds). A later duplicate is acknowledged again
 but produces only one gateway serial frame:
 
@@ -83,8 +83,8 @@ The host emits `HTN26|GW|UP|<forwarded>|<drops>` every 250 ticks and emits
 `HTN26|GW|DOWN|0|0` if its NVS preflight or radio initialization fails. START
 emits `HTN26|GAME|START_GAME|240|3` and `OC1|000001|G|S`; timeout emits
 `HTN26|GAME|GAME_END|3` and `OC1|000002|G|E`. Events are ignored before start.
-The Pi remains authoritative for inventory, orders, score, and submission
-results.
+The laptop server remains authoritative for the game countdown, inventory,
+orders, score, and submission results.
 
 Overcooked uses 30 ms minimum/maximum advertising intervals, matching Share's
 existing send setup. Scanning timing stays at the stock HAL default. The receive

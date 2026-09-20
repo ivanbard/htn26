@@ -2,9 +2,9 @@ import { createReadStream } from "node:fs";
 import { createSerialStreamAdapter } from "./protocol.mjs";
 
 /**
- * QNX/USB boundary. The server does not know whether the path is a QNX
- * /dev/ser* node or a Linux tty; it only consumes byte chunks from this
- * adapter. No serial package is required for the first slice.
+ * Laptop USB-serial boundary. The server consumes byte chunks from a configured
+ * device path without coupling protocol parsing to a laptop OS. The same seam
+ * can be replaced for a possible future deployment target.
  */
 export function openSerialDevice(devicePath, { onRecord = () => {}, onError = () => {}, parser: suppliedParser, reconnectDelayMs = 250 } = {}) {
   if (!devicePath) throw new Error("a serial device path is required");
