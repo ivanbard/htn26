@@ -101,6 +101,20 @@ test("projection keeps four recipes, validates submissions, and computes gold/ti
   assert.ok(state.activeOrders[0].patience.segments === 3);
 });
 
+test("QNX difficulty output selects only valid burger recipes", async () => {
+  let now = 1_000;
+  const projection = new ServerProjection({
+    provider: new LocalFloorplanProvider({ now: () => now }), now: () => now,
+    difficultyDirector: { infer: () => ({ level: "hectic", source: "qnx-opencv", latencyMs: 4, detail: "Local QNX OpenCV inference" }) },
+  });
+  await projection.proposeFloorplan({ photos: [{ id: "fixture" }] }, now);
+  projection.approveFloorplan(true, now);
+  const state = projection.command("START_GAME", {}, now);
+  assert.equal(state.order.recipe, "CHEESE_LETTUCE_MEAT");
+  assert.equal(state.order.difficulty, "hectic");
+  assert.equal(state.health.difficultyInference.status, "healthy");
+});
+
 test("HTTP upload, review, approval, serial projection, and browser reads work", async () => {
   await withRuntime(async (base) => {
     const initial = await fetch(`${base}/api/state`).then((response) => response.json());

@@ -10,7 +10,8 @@ The phone camera is an Apple phone connected to the Pi for room photographs and 
 
 The v1 Pi remains the QNX target, and AI inference for setup runs on the Pi without cloud services.
 
-The qualifying open-source QNX AI module is still unresolved and its status is owned by [`pi/README.md`](pi/README.md).
+Local QNX difficulty inference uses the NumPy/OpenCV ML stack; its deployment
+status is owned by [`pi/README.md`](pi/README.md).
 
 The v1 round uses one host or gateway badge and exactly three fixed player badges.
 

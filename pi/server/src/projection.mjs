@@ -1,4 +1,5 @@
 import { LocalFloorplanProvider, localPlan } from "./provider.mjs";
+import { DifficultyDirector } from "./difficulty-director.mjs";
 
 const ROUND_SECONDS = 240;
 const DEFAULT_ORDER_INTERVAL_SECONDS = 30;
@@ -22,7 +23,7 @@ function numeric(value, fallback = 0) {
   return Number.isFinite(number) ? number : fallback;
 }
 
-function makeOrder(id = "order-1", recipe = BURGER_RECIPES[0], now = Date.now(), patienceSeconds = DEFAULT_ORDER_INTERVAL_SECONDS) {
+function makeOrder(id = "order-1", recipe = BURGER_RECIPES[0], now = Date.now(), patienceSeconds = DEFAULT_ORDER_INTERVAL_SECONDS, difficulty = "normal") {
   return {
     id,
     dish: "BURGER",
@@ -38,6 +39,7 @@ function makeOrder(id = "order-1", recipe = BURGER_RECIPES[0], now = Date.now(),
     toppings: [...recipe.toppings],
     components: [...recipe.components],
     goldValue: recipe.gold,
+    difficulty,
   };
 }
 
@@ -73,6 +75,7 @@ export function createInitialProjectionState(now = Date.now()) {
     health: {
       gateway: { id: "gateway", label: "GATEWAY BADGE", status: "unknown", lastSeenAt: null, detail: "Waiting for host-badge serial" },
       inference: { id: "inference", label: "SETUP INFERENCE", status: "healthy", lastSeenAt: iso(now), detail: plan.reviewMessage },
+      difficultyInference: { id: "difficulty-inference", label: "DIFFICULTY DIRECTOR", status: "degraded", lastSeenAt: iso(now), detail: "QNX OpenCV director is not configured" },
       trackingCoverage: "unknown",
       workers: [],
     },
@@ -82,7 +85,7 @@ export function createInitialProjectionState(now = Date.now()) {
 export class ServerProjection {
   constructor({ provider, now = () => Date.now(), roundSeconds = ROUND_SECONDS,
     orderIntervalSeconds, orderIntervalMinSeconds = 8, orderIntervalMaxSeconds = 35,
-    maxActiveOrders = 3, random = Math.random, authoritativeEngine } = {}) {
+    maxActiveOrders = 3, random = Math.random, authoritativeEngine, difficultyDirector } = {}) {
     this.now = now;
     this.provider = provider || new LocalFloorplanProvider({ now });
     this.roundSeconds = roundSeconds;
@@ -92,6 +95,7 @@ export class ServerProjection {
     this.maxActiveOrders = Math.max(1, Math.min(6, Number(maxActiveOrders) || 3));
     this.random = typeof random === "function" ? random : Math.random;
     this.authoritativeEngine = authoritativeEngine || null;
+    this.difficultyDirector = difficultyDirector || new DifficultyDirector();
     this._nextOrderAt = null;
     this._orderSequence = 0;
     this._state = createInitialProjectionState(now());
@@ -148,10 +152,33 @@ export class ServerProjection {
     this._state.order = active[0] || this._state.order;
   }
 
+  _difficultyFeatures(now) {
+    const recent = this._state.submissions.slice(-6);
+    return {
+      activeOrders: this._activeOrders().length / this.maxActiveOrders,
+      failureRate: recent.length ? recent.filter((event) => event.status === "failure").length / recent.length : 0,
+      busyStoves: this._state.stations.filter((station) => station.kind === "stove" && station.status !== "idle").length / 2,
+      elapsed: this._roundStartedAt == null ? 0 : Math.min(1, Math.max(0, (now - this._roundStartedAt) / (this.roundSeconds * 1000))),
+    };
+  }
+
+  _recipeForDifficulty(level) {
+    if (level === "easy") return BURGER_RECIPES[0];
+    if (level === "hectic") return BURGER_RECIPES[3];
+    if (this._orderSequence === 0) return BURGER_RECIPES[0];
+    return BURGER_RECIPES[1 + (this._orderSequence % 2)];
+  }
+
   _issueOrder(now = this.now()) {
-    const recipe = BURGER_RECIPES[this._orderSequence % BURGER_RECIPES.length];
+    const decision = this.difficultyDirector.infer(this._difficultyFeatures(now));
+    const recipe = this._recipeForDifficulty(decision.level);
     this._orderSequence += 1;
-    const order = makeOrder(`order-${this._orderSequence}`, recipe, now, this._patienceSeconds());
+    this._state.health.difficultyInference = {
+      id: "difficulty-inference", label: "DIFFICULTY DIRECTOR",
+      status: decision.source === "qnx-opencv" ? "healthy" : "degraded",
+      lastSeenAt: iso(now), detail: decision.detail,
+    };
+    const order = makeOrder(`order-${this._orderSequence}`, recipe, now, this._patienceSeconds(), decision.level);
     this._state.orders.push(order);
     while (this._state.orders.length > 32) this._state.orders.shift();
     this._syncActiveOrder();
@@ -281,10 +308,9 @@ export class ServerProjection {
         this._state.setup.message = "Burger game running. Orders, gold, tips, timer, and submissions are server projections.";
         this._state.timer = { status: "running", remainingSeconds: this.roundSeconds, totalSeconds: this.roundSeconds };
         this._state.clock = { ...this._state.timer };
-        this._orderSequence = 1;
-        this._state.order = makeOrder("order-1", BURGER_RECIPES[0], now, this._patienceSeconds());
-        this._state.orders = [clone(this._state.order)];
-        this._state.activeOrders = [clone(this._state.order)];
+        this._orderSequence = 0;
+        this._state.orders = [];
+        this._issueOrder(now);
         this._nextOrderAt = now + this._patienceSeconds() * 1000;
         this._state.burgerLevel.status = "in-play";
         this._state.submissions = [];

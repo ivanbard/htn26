@@ -79,31 +79,25 @@ Keep platform-independent game logic separated from QNX-specific device code whe
 
 ## AI requirement
 
-At least one AI component must use a qualifying open-source AI module available from:
-
-`https://oss.qnx.com/`
-
-Before final submission, record:
-
-```text
-Qualifying QNX AI module:
-Version:
-Source URL:
-Where used:
-```
-
-in this README.
+At least one AI component must run locally on the QNX Pi without cloud services.
+Before final submission, record the installed model-stack versions and an
+on-target command/output in this README.
 
 Current MVP status:
 
 ```text
-Qualifying QNX AI module: unresolved
-Version: unresolved
-Source URL: https://oss.qnx.com/ (candidate must be verified there)
-Where used: not yet selected; the worker exposes an InferenceAdapter seam
+Model stack: NumPy + OpenCV ML
+Version: QNX packages `python3-numpy` 2.4.1-r0 and `python3-opencv` 4.12.0-r1
+Source URL: https://opencv.org/
+Where used: `difficulty/difficulty_infer.py` classifies the next burger order
+as easy, normal, or hectic from current round state. The server invokes it
+locally through `HTN26_DIFFICULTY_INFER`.
 ```
 
-Do not assume that merely using any open-source ML library satisfies the sponsor track.
+The included model is trained on synthetic round states. On 2026-09-20,
+`qnxpi72` generated `difficulty.xml` and inferred `normal`, `easy`, and
+`hectic` locally. This validates the model process on QNX only; it does not
+validate physical badges, phone camera, or full server deployment.
 
 ---
 

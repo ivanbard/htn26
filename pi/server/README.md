@@ -27,6 +27,10 @@ Useful environment variables:
   `HTN26_ORDER_INTERVAL_MAX_SECONDS`: randomized order-spawn interval,
   default 8-35 seconds.
 - `HTN26_MAX_ACTIVE_ORDERS`: active order-card limit, default 3.
+- `HTN26_DIFFICULTY_INFER`: absolute path to the QNX
+  `difficulty_infer.py` executable. When set, it makes a local OpenCV ML
+  decision before each new order; when absent, the server visibly stays on its
+  normal-difficulty fallback.
 - `OPENAI_API_KEY`: optional server-only image provider credential. It is
   never included in an API response or browser bundle.
 
@@ -184,3 +188,12 @@ The UI worker can keep its current transport seam and should:
    may be added through `POST /api/players/assign`.
 
 The server does not claim live camera player positions in this first slice.
+
+## Local difficulty inference
+
+`../difficulty/` contains the local NumPy/OpenCV ML runner and its generated
+model. It receives bounded round-state features and chooses only among the
+existing valid burger recipes: plain meat for easy, a one-topping burger for
+normal, and cheese-and-lettuce meat for hectic. It cannot change score rules,
+player inventory, or the active-order cap. See [`../difficulty/README.md`](../difficulty/README.md)
+for the QNX cross-build and on-target command.
