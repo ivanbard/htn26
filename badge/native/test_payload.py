@@ -460,28 +460,45 @@ def scenario(nvs_error=0, radio_error=0, nfc_error=0, allocation_failure=False,
                 for _ in range(150): invoke(0x5c)
                 acknowledge('CH:D:D'); invoke(0x60, 0x100)
                 assert_icon('chopped_meat')
-                invoke(0x60, 5); scan('stove'); acknowledge('ST:R:P')
+                invoke(0x60, 5); scan('stove')
+                assert cpu.mem_read(app + 266, 2) == b'\0\x01', cpu.mem_read(app + 266, 2)
+                acknowledge('ST:R:P')
                 assert_icon(None)
                 for _ in range(750): invoke(0x5c)
                 invoke(0x60, 5); scan('stove'); acknowledge('ST:R:T')
                 assert_icon('cooked_meat')
 
-                # A peer plate receives our cooked meat; the local hand is now empty.
+                # Room-wide transfer advertisements do not mutate an uninvolved
+                # third badge. A matching local tap arms the bilateral exchange.
                 before = len(packets)
                 incoming(b'OC2|222220|E|P1:X:P----'); invoke(0x5c)
                 assert len(packets) == before
+                assert_icon('cooked_meat')
+                hardware["motion"] = "tap"; invoke(0x5c); hardware["motion"] = "rest"
+                assert packets[-1].endswith(b':X:HM')
+                incoming(b'OC2|222225|E|P1:X:P----'); invoke(0x5c)
                 assert_icon(None)
+                acknowledge('X:HM')
+                for _ in range(25): invoke(0x5c)
 
+                hardware["motion"] = "tap"; invoke(0x5c); hardware["motion"] = "rest"
                 incoming(b'OC2|222223|E|P1:X:HD'); invoke(0x5c)
                 assert_icon('chopped_meat')
+                acknowledge('X:E----')
+                for _ in range(25): invoke(0x5c)
+                hardware["motion"] = "tap"; invoke(0x5c); hardware["motion"] = "rest"
                 incoming(b'OC2|222224|E|P1:X:E----'); invoke(0x5c)
                 assert_icon(None)
+                acknowledge('X:HD')
+                for _ in range(25): invoke(0x5c)
 
                 # An invalid raw-item merge swaps inventories, removing our plate.
                 invoke(0x60, 3); scan('pantry'); acknowledge('PL:NEW')
                 assert_icon('plate')
+                hardware["motion"] = "tap"; invoke(0x5c); hardware["motion"] = "rest"
                 incoming(b'OC2|222221|E|P1:X:HR'); invoke(0x5c)
                 assert_icon('raw_meat')
+                acknowledge('X:P----')
 
                 incoming(b'OC2|000002|G|E'); invoke(0x5c)
                 assert_icon(None)
@@ -489,8 +506,9 @@ def scenario(nvs_error=0, radio_error=0, nfc_error=0, allocation_failure=False,
                 assert_icon(None)
 
                 before = len(packets)
+                for _ in range(25): invoke(0x5c)
                 incoming(b'OC2|222222|E|P1:X:PB---'); invoke(0x5c)
-                assert len(packets) == before  # A player applies peer state but never ACKs it.
+                assert len(packets) == before  # Unarmed player ignores peer transfer and never ACKs it.
                 assert cpu.mem_read(app + 229, 2) == b'\0\0'  # Empty hand cannot take a peer plate.
                 assert_icon(None)
 

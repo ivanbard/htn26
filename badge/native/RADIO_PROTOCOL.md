@@ -64,6 +64,15 @@ is cooked meat, so transfer snapshots preserve the native held state without
 context-dependent decoding. Payload validation remains bounded to the
 documented 44-byte application limit.
 
+`ST:<side>:P` is both the placement event and the distributed cooking-clock
+edge. The sender starts its local 15-second timer when the event is queued;
+player peers start their copies on first receipt; the laptop records the
+authoritative wall-clock `startedAt` when the gateway serial record arrives and
+projects the same timeline to the frontend. No badge polls the host for stove
+state. `X:<snapshot>` remains room-wide transport, but a player consumes it only
+after detecting its own tap in the same half-second window, so a third listening
+badge does not participate.
+
 OC2 is the only active sequence-first namespace. It introduces the distinct
 chopped/cooked meat encoding and is intentionally incompatible with OC1. The
 application bytes match the current Lua rollback contract, but the physical

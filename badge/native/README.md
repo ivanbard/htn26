@@ -121,7 +121,11 @@ does not. Program the four NDEF Text tags as `pantry`, `fridge`,
 - DOWN + pantry takes a plate with an empty hand or a prepared held item.
 - Prepared pickups go directly onto a held plate; duplicates and raw items are rejected.
 - Hold A + cutting board chops meat, lettuce, or cheese; releasing A resets progress.
-- LEFT/RIGHT + stove selects stove 1/2, then puts, checks, or takes meat.
+- LEFT/RIGHT + stove selects stove 1/2, then puts, checks, or takes meat. A
+  successful placement broadcast is also the shared cooking-clock edge: the
+  sender starts immediately when it queues `ST:<side>:P`, every listening
+  player starts on first receipt, and the gateway forwards that same event so
+  the server/UI records its authoritative `startedAt` without a badge query.
 - Hold B + shake discards; hold A + shake submits the plate. The native B-held
   path uses a 1,400 mg threshold (versus 1,600 mg for unmodified shakes), queues
   the pre-drop OC2 snapshot before clearing the local hand or plate, and requires
@@ -129,7 +133,10 @@ does not. Program the four NDEF Text tags as `pantry`, `fridge`,
   inventory is invalid and does not become `READY`. A shake without either
   button broadcasts `READY` for server-side team submission consensus.
 - Bump two badges to merge a platable hand item onto the other plate, or swap
-  inventories when that merge is invalid or both badges have the same plate state.
+  inventories when that merge is invalid or both badges have the same plate
+  state. Because advertisements are room-wide, a player applies a peer `X`
+  snapshot only while its own half-second tap window is active; an uninvolved
+  third player ignores the transfer.
 
 Invalid station/button combinations show `UNKNOWN BUTTON COMBO` and red LEDs
 for one second. Meat cooks for 15 seconds, is done for two, flashes a three-second

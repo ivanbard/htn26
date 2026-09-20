@@ -198,7 +198,10 @@ The canonical fields and lifecycle are:
   evidence of phone-camera tracking. Missing `position` means unavailable and
   does not cause the UI to invent a location.
 - `stations`: authoritative status, progress, remaining seconds, and
-  item/contents, aligned by ID with the accepted floor plan.
+  item/contents, aligned by ID with the accepted floor plan. Stove records also
+  retain `startedAt`, `doneAt`, `warningAt`, and `burntAt`; the server derives
+  them once from the forwarded `ST:<side>:P` event and pushes projections over
+  SSE, so reconnecting frontends receive the complete cooking timeline.
 - `submissions`, `serving`, `score`, `gold`, and `tips`: authoritative
   validation outcomes and rewards. The browser never validates or scores a
   plate.

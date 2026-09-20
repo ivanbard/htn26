@@ -445,6 +445,26 @@ test("stoves and transfers preserve authoritative processing and native bump rul
   assert.equal(state.players[1].heldItem, "RAW_CHEESE");
 });
 
+test("native bump halves still pair when one badge arrives on its first three-second retry", () => {
+  let now = 46_000;
+  const projection = new ServerProjection({ now: () => now, random: () => 0 });
+  projection.ingestHostControl({ control: "START", durationSeconds: 120 }, now);
+  projection.ingestBadgeEvent({ senderMac: "AA:BB:CC:DD:EE:01", sequence: 1, type: "E", value: "P1:PL:B---" }, now);
+  projection.ingestBadgeEvent({ senderMac: "AA:BB:CC:DD:EE:02", sequence: 2, type: "E", value: "P2:PU:C" }, now);
+
+  let result = projection.ingestBadgeEvent({ senderMac: "AA:BB:CC:DD:EE:01", sequence: 3, type: "E", value: "P1:X:PB---" }, now);
+  assert.equal(result.accepted, true);
+  assert.match(result.detail, /ready to transfer/);
+
+  now += 3_000;
+  result = projection.ingestBadgeEvent({ senderMac: "AA:BB:CC:DD:EE:02", sequence: 4, type: "E", value: "P2:X:HC" }, now);
+  assert.equal(result.accepted, true);
+  assert.match(result.detail, /transferred held state/);
+  const state = projection.snapshot(now);
+  assert.deepEqual(state.players[0].plate, ["BUN", "CHEESE"]);
+  assert.equal(state.players[1].heldItem, "EMPTY");
+});
+
 test("action-inferred station occupancy allows groups and returns players to center after the hold delay", () => {
   let now = 45_000;
   const projection = new ServerProjection({ now: () => now, locationHoldSeconds: 2, orderPatienceSeconds: 30, random: () => 0 });
@@ -586,16 +606,19 @@ test("native GAME and complete E event path is parsed and projected by the lapto
     state = event(1, "PU:R");
     assert.equal(state.players[0].heldItem, "RAW_MEAT");
     event(1, "CH:S");
-    state = event(1, "CH:D:M");
+    state = event(1, "CH:D:D");
     assert.equal(state.players[0].heldItem, "RAW_MEAT");
     assert.equal(state.eventHistory.at(-1).type, "rejected-action");
     now += GAME_TIMINGS.chopSeconds * 1_000;
-    state = event(1, "CH:D:M");
+    state = event(1, "CH:D:D");
     assert.equal(state.players[0].heldItem, "CHOPPED_MEAT");
     assert.match(state.eventHistory.at(-1).message, /confirmed completed chop/);
 
     state = event(1, "ST:L:P");
-    assert.equal(state.stations.find((station) => station.id === "stove-left").status, "cooking");
+    const startedStove = state.stations.find((station) => station.id === "stove-left");
+    assert.equal(startedStove.status, "cooking");
+    assert.equal(startedStove.startedAt, new Date(now).toISOString());
+    assert.equal(startedStove.doneAt, new Date(now + GAME_TIMINGS.cookSeconds * 1_000).toISOString());
     now += GAME_TIMINGS.cookSeconds * 1_000;
     state = event(1, "ST:L:C:DONE");
     assert.equal(state.stations.find((station) => station.id === "stove-left").status, "done");
@@ -627,7 +650,7 @@ test("native GAME and complete E event path is parsed and projected by the lapto
     assert.equal(state.submissions[1].playerId, "p1");
     assert.deepEqual(state.submissions[1].consumedSubmissions.map((submission) => submission.playerId), ["p1", "p2"]);
 
-    for (const [code, expected] of [["M", "CHOPPED_MEAT"], ["X", "BURNT_MEAT"], ["L", "LETTUCE"], ["C", "CHEESE"]]) {
+    for (const [code, expected] of [["X", "BURNT_MEAT"], ["L", "LETTUCE"], ["C", "CHEESE"]]) {
       state = event(3, `PU:${code}`);
       assert.equal(state.players[2].heldItem, expected);
       state = event(3, `DROP:H${code}`);
@@ -651,6 +674,12 @@ test("native GAME and complete E event path is parsed and projected by the lapto
     state = event(3, "ST:R:C:EMPTY");
     assert.equal(state.players[2].actionState, "checked stove 2: idle");
     event(3, "PU:M");
+    assert.equal(runtime.projection.snapshot(now).players[2].heldItem, "COOKED_MEAT");
+    event(3, "DROP:HM");
+    event(3, "PU:R");
+    event(3, "CH:S");
+    now += GAME_TIMINGS.chopSeconds * 1_000;
+    event(3, "CH:D:D");
     event(3, "ST:R:P");
     now += (GAME_TIMINGS.cookSeconds + GAME_TIMINGS.doneSeconds + GAME_TIMINGS.warningSeconds) * 1_000;
     state = event(3, "ST:R:X");

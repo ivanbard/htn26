@@ -133,7 +133,10 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
   if (options.help) { console.log(usage()); return null; }
   const runtime = await createRuntime({ env, serialDevicePath: options.serial });
   const host = options.host || env.HTN26_BIND_HOST || "127.0.0.1";
-  const port = options.port || Number(env.HTN26_PORT) || 8787;
+  const configuredPort = options.port ?? Number(env.HTN26_PORT || 8787);
+  const port = Number.isInteger(configuredPort) && configuredPort >= 0 && configuredPort <= 65_535
+    ? configuredPort
+    : 8787;
   await new Promise((resolve) => runtime.server.listen(port, host, resolve));
   const address = runtime.server.address();
   console.log(`HTN26 server listening on http://${host}:${address.port}`);

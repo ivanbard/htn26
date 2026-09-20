@@ -421,6 +421,16 @@ static void apply_bump(App *self, const char *state) {
     else self->held = remote_item;
 }
 
+static void apply_peer_bump(App *self, const char *state) {
+    /* Advertising is room-wide, but a transfer is physical and bilateral.
+       Only a badge that detected its own tap in the same half-second window
+       may consume the peer snapshot; uninvolved player badges ignore it. */
+    if (!self->tap_cooldown) return;
+    apply_bump(self, state);
+    if (self->status) LABEL_TEXT(self->status, "TAP TRANSFER COMPLETE");
+    render_game(self);
+}
+
 static void mark_ready(App *self, int player) {
     if (player >= 1 && player <= 3) self->ready_ticks[player - 1] = 25;
     if (self->ready_ticks[0] && self->ready_ticks[1] && self->ready_ticks[2]) {
@@ -454,8 +464,11 @@ static void apply_action(App *self, const char *action, int local) {
     } else if (starts(action, "ST:")) {
         int stove = action[3] == 'R';
         if (action[5] == 'P') {
-            set_stove(self, stove, STOVE_COOKING);
-            if (local) self->held = EMPTY;
+            /* A repeated host ACK must not restart an already-running clock. */
+            if (self->stove_state[stove] == STOVE_EMPTY) {
+                set_stove(self, stove, STOVE_COOKING);
+                if (local) self->held = EMPTY;
+            }
         } else if (action[5] == 'T' || action[5] == 'X') {
             if (local) take_item(self, action[5] == 'X' ? BURNT_MEAT : COOKED_MEAT);
             set_stove(self, stove, STOVE_EMPTY);
@@ -467,7 +480,7 @@ static void apply_action(App *self, const char *action, int local) {
     } else if (starts(action, "SUB:") && local) {
         self->plate = self->has_plate = 0;
         if (self->status) LABEL_TEXT(self->status, "PLATE SUBMITTED");
-    } else if (starts(action, "X:") && !local) apply_bump(self, action + 2);
+    }
     render_game(self);
 }
 
@@ -554,7 +567,12 @@ static void station_scan(App *self, const char *station) {
         if (verb == 'C') FORMAT(dynamic, sizeof(dynamic), "ST:%c:C:%s",
                                 stove ? 'R' : 'L', stove_phase(self->stove_state[stove]));
         else FORMAT(dynamic, sizeof(dynamic), "ST:%c:%c", stove ? 'R' : 'L', verb);
-        start_action(self, dynamic); return;
+        /* The placement packet itself is the shared start signal. Start the
+           sender's local clock as soon as that broadcast is queued; peers and
+           the laptop start from their first receipt instead of waiting for a
+           later query or for the gateway ACK to return. */
+        if (start_action(self, dynamic) && verb == 'P') apply_action(self, dynamic, 1);
+        return;
     }
     if (action) start_action(self, action);
     else unknown_combo(self);
@@ -674,7 +692,7 @@ static void poll_motion(App *self) {
     } else if (!self->tap_cooldown && value > TAP_ABS_BITS) {
         char state[6], action[10]; snapshot(self, state);
         FORMAT(action, sizeof(action), "X:%s", state);
-        self->tap_cooldown = 25; start_action(self, action);
+        if (start_action(self, action)) self->tap_cooldown = 25;
     }
 }
 
@@ -855,7 +873,10 @@ static void consume_radio(App *self) {
                 PRINT("HTN26|RX|%02x:%02x:%02x:%02x:%02x:%02x|%d|%s\n",
                   peer[5], peer[4], peer[3], peer[2], peer[1], peer[0], rssi, packet);
             }
-            apply_action(self, packet + 16, 0);
+            if (self->role == ROLE_PLAYER && starts(packet + 16, "X:") &&
+                packet[14] != (char)('0' + self->player))
+                apply_peer_bump(self, packet + 18);
+            else if (!starts(packet + 16, "X:")) apply_action(self, packet + 16, 0);
         }
         if (ack && self->wait_ticks && equal(packet + 4, self->pending + 4, 6)) {
             self->wait_ticks = self->advertise_ticks = 0; RADIO_PAUSE();
