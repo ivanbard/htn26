@@ -72,10 +72,11 @@ The frontend snapshot boundary is defined in `src/contracts.js` (version 2). Opt
 Authoritative values stay explicit:
 
 - `floorPlan.accepted`, `floorPlan.stations`, and `burgerLevel.placementInstructions` describe the accepted map and where the physical burger level belongs.
-- `players[].position` and `players[].tracking.lastSeenAt` are master-Pi observations. Missing or old observations are rendered at no fabricated location with a visible `TRACKING LOST` or `TRACKING STALE` marker. Player tokens never animate between snapshots.
+- `players[].position` and `players[].tracking.lastSeenAt` are master-Pi observations. Missing players are rendered at no fabricated location; stale health remains available through accessible labels without adding large warning boxes to the game board. Player tokens never animate between snapshots.
 - `orders[].remainingSeconds`, `order.remainingSeconds`, `clock.remainingSeconds`, station `progress`, and cooking state are displayed values from the master snapshot. The UI never decrements them locally.
 - `health.gateway`, `health.workers`, and `health.inference` remain available to the host integration, but system-health warnings are intentionally excluded from the player-facing gameplay HUD.
-- `serving.lastEvent` and `score` are rendered exactly as delivered by the transport.
+- `stations[].item`, `stations[].status`, and `stations[].remainingSeconds` are rendered directly on their physical boards or plates. Empty stations explicitly show `EMPTY`; the player-facing screen has no separate live-activity feed.
+- `serving.lastEvent` remains available to results/integration surfaces, while `score` is rendered exactly as delivered by the transport.
 
 ## Tests
 

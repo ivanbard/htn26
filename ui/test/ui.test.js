@@ -56,7 +56,7 @@ test("renders the approved setup flow with the aligned physical layout", async (
   assert.doesNotMatch(JSON.stringify(state), /chop3/i);
 });
 
-test("renders gameplay as a framed room board with live activity state", async () => {
+test("renders gameplay as a framed room board with state shown on each station", async () => {
   const transport = await approvedTransport();
   await transport.command(GAME_ACTIONS.START_GAME);
   const state = transport.snapshot();
@@ -73,8 +73,13 @@ test("renders gameplay as a framed room board with live activity state", async (
   assert.match(html, /02:00/);
   assert.match(html, /class="game-board panel\s/);
   assert.match(html, /class="board-score"/);
-  assert.match(html, /LIVE ACTIVITY/);
-  assert.equal((html.match(/class="board-notification /g) || []).length, 2);
+  assert.doesNotMatch(html, /LIVE ACTIVITY/);
+  assert.doesNotMatch(html, /class="board-notification /);
+  assert.match(html, /data-station="stove1"[^>]*>[\s\S]*?data-station-content="MEAT"/);
+  assert.match(html, /data-station="stove2"[^>]*>[\s\S]*?data-station-content="EMPTY"/);
+  assert.match(html, /data-station="chop1"[^>]*>[\s\S]*?data-station-content="LETTUCE"/);
+  assert.match(html, /data-station="chop2"[^>]*>[\s\S]*?data-station-content="CHEESE"/);
+  assert.match(html, /data-station="buns-source"[^>]*>[\s\S]*?data-station-content="BUN"/);
   assert.equal((html.match(/data-node-id="39:26"/g) || []).length, 4);
   assert.match(html, /data-order-count="4"/);
   assert.match(html, /id="hud-title-order-1"[^>]*>CHEESE BURGER/);
@@ -118,10 +123,11 @@ test("marks old or missing player tracking and stale worker health", () => {
   const html = renderApp(state, 7_000);
 
   assert.match(html, /data-player="p1" data-stale="true"/);
-  assert.match(html, /P1[\s\S]*TRACKING LOST/);
+  assert.match(html, /aria-label="PLAYER 1, tracking lost"/);
   assert.doesNotMatch(html, /data-player="p1"[^>]*style="left:0%;top:0%;/);
   assert.match(html, /data-player="p2" data-stale="true"/);
-  assert.match(html, /P2[\s\S]*TRACKING STALE/);
+  assert.match(html, /aria-label="PLAYER 2, tracking stale"/);
+  assert.doesNotMatch(html, />TRACKING (?:LOST|STALE)</);
   assert.doesNotMatch(html, /TRACKING DEGRADED/);
   assert.doesNotMatch(html, /LOCAL SYSTEM HEALTH/);
 });
@@ -338,11 +344,9 @@ test("renders serving success and score update from the authoritative snapshot",
   assert.equal(state.score.value, 20);
   assert.equal(state.orders[0].status, "completed");
   const html = renderApp(state, 2_000);
-  assert.match(html, /BURGER SERVED/);
-  assert.match(html, /\+20/);
+  assert.doesNotMatch(html, /LIVE ACTIVITY/);
   assert.match(html, /data-node-id="31:25"/);
   assert.match(html, /score-coin-counter\.png/);
-  assert.match(html, /notification-success/);
 });
 
 test("renders rejected burger without changing score", async () => {
@@ -354,9 +358,8 @@ test("renders rejected burger without changing score", async () => {
   assert.equal(state.score.value, 0);
   assert.equal(state.order.status, "active");
   const html = renderApp(state, 2_000);
-  assert.match(html, /WRONG BURGER/);
-  assert.match(html, /CHECK ORDER/);
-  assert.match(html, /notification-failure/);
+  assert.doesNotMatch(html, /LIVE ACTIVITY/);
+  assert.doesNotMatch(html, /WRONG BURGER/);
 });
 
 test("renders one, two, and four active orders with unique accessible headings", () => {
@@ -378,6 +381,21 @@ test("renders one, two, and four active orders with unique accessible headings",
     assert.equal(progressValues.length, count);
     assert.ok(progressValues.every((value) => value >= 0 && value <= 100));
   }
+});
+
+test("renders readable burger stacks and full-width time remaining rails", () => {
+  const state = createInitialMockState(1_000);
+  state.setup.phase = SETUP_PHASES.RUNNING;
+  state.floorPlan.accepted = true;
+  state.clock.status = "running";
+  state.orders[0] = { ...state.orders[0], remainingSeconds: 60, totalSeconds: 120 };
+
+  const html = renderApp(state, 1_000);
+
+  assert.equal((html.match(/data-burger-preview=/g) || []).length, 4);
+  assert.match(html, /data-order-id="order-1"[\s\S]*data-burger-layer="BUN"[\s\S]*data-burger-layer="MEAT"[\s\S]*data-burger-layer="CHEESE"[\s\S]*data-burger-layer="LETTUCE"/);
+  assert.match(html, /data-order-id="order-1"[\s\S]*role="progressbar"[\s\S]*aria-valuenow="50"[\s\S]*style="width:50%"/);
+  assert.equal((html.match(/class="hud-order-progress"/g) || []).length, 4);
 });
 
 test("falls back to the legacy single order when an orders array is absent", () => {
