@@ -181,21 +181,26 @@ HTN26|1|SUBMIT|2|CHEESEBURGER
 ```
 
 The last field is normally the submitted `BMLC` plate summary; recipe IDs are
-also accepted as assertions. `SUBMIT` counts as the submitting player's shake;
+also accepted as simulator consistency data. `SUBMIT` counts as the submitting
+player's shake;
 the other two fixed players must each have sent `READY` within the same
 0.5-second server window. Arrival order does not matter: an early `SUBMIT` is
 held only until that window closes. The submitter must hold an authoritative
 server plate. At the shared submission boundary the server atomically snapshots
-and consumes that plate before waiting for consensus or checking the submitted
-summary. The summary or recipe is only a consistency assertion; the server
-never constructs inventory from it. Deferred scoring uses the retained plate
-snapshot, and consensus expiry or assertion rejection never restores stale
-inventory. Once consensus and the assertion pass, the server matches the
-snapshot against active orders and clears all three players' held state. A
+and consumes that plate before waiting for consensus. Every additional `SUBMIT`
+inside that window likewise counts as readiness and has its authoritative plate
+snapshotted and consumed; `READY`-only teammates need no plate. The server
+retains all submitter snapshots while consensus is pending and deterministically
+scores the lowest fixed player number if several players submitted. Supplied
+summaries remain trusted simulator consistency data and are recorded with their
+match status, but a mismatch alone is not a rejection. Deferred scoring uses
+the selected authoritative plate snapshot, and consensus expiry never restores
+stale inventory. Once consensus passes, the server matches the snapshot against
+active orders and clears all three players' held state. A
 successful early order awards recipe gold and a positive server-calculated tip.
 A wrong or already expired order applies a penalty. Missing consensus, missing
-inventory, and assertion mismatches are rejected without scoring. The browser
-cannot provide a score or validation result.
+inventory is rejected without scoring. READY and SUBMIT may arrive in any order
+inside the window. The browser cannot provide a score or validation result.
 
 ## Legacy badge compatibility
 
@@ -254,10 +259,11 @@ and native radio profiles.
   Tips are 20%, 10%, or 5% of recipe gold in patience tier 3/2/1, with a
   minimum positive tip for a successful active order.
 - Submission requires the submitter's authoritative plate plus all three fixed
-  players' fresh 0.5-second shake state. A submitted BMLC/recipe value is only
-  a consistency assertion and cannot create or replace server inventory. The
-  submitter's plate is consumed immediately and its snapshot is retained for
-  deferred consensus/scoring.
+  players' fresh 0.5-second shake state. Submitted BMLC/recipe values are
+  trusted simulator consistency data and cannot replace an already snapshotted
+  authoritative plate. Every SUBMIT plate is consumed immediately and retained
+  for deferred consensus; with multiple submitters, the lowest fixed player
+  number is scored deterministically.
 - `money.net = gold + tips - penalties`; `score.value` mirrors net money.
 - Chopping takes 3 seconds. Releasing/failing before completion loses progress
   while retaining the raw item.
@@ -351,10 +357,11 @@ node --test test/*.test.mjs
 Tests cover canonical and legacy protocol parsing, chunked/noisy serial input,
 deduplication, native physical-host `GAME` authority and fixed-player `E`
 processing, lifecycle timing and cleanup, natural orders, all four patience
-states, expiration/wrong-order penalties, immediate plate consumption with
-deferred three-player consensus, early gold/tips, authoritative chopping and
-cooking acknowledgements, bump location reset, legacy sender isolation, player
-plates, browser HTML, SSE/JSON projections, and diagnostic serial injection.
+states, expiration/wrong-order penalties, immediate consumption and retained
+snapshots for one or more submitters, arrival-order-independent three-player
+consensus, early gold/tips, authoritative chopping and cooking acknowledgements,
+bump location reset, legacy sender isolation, player plates, browser HTML,
+SSE/JSON projections, and diagnostic serial injection.
 They are laptop-hosted simulator tests only. They do not prove
 physical badge/NFC/radio/USB behavior, phone-camera capture, OpenAI
 connectivity, or any possible future QNX deployment.

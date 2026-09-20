@@ -432,9 +432,12 @@ export class ServerProjection {
       }
     }
     if (this._pendingSubmission && now > this._pendingSubmission.deadline) {
-      this._record("rejected-submission", "Submission consensus window expired before all three players were ready", now, { playerId: this._pendingSubmission.playerId });
-      const submitter = this._player(this._pendingSubmission.playerId);
-      if (submitter) submitter.actionState = "submission consensus expired";
+      const playerIds = this._pendingSubmission.candidates.map((candidate) => candidate.playerId);
+      this._record("rejected-submission", "Submission consensus window expired before all three players were ready", now, { playerIds });
+      for (const playerId of playerIds) {
+        const submitter = this._player(playerId);
+        if (submitter) submitter.actionState = "submission consensus expired";
+      }
       this._pendingSubmission = null;
       changed = true;
     }
@@ -953,15 +956,10 @@ export class ServerProjection {
     }
     const result = this._applyPlayerAction(player, action, now);
     if (result.accepted && action.action === "READY" && this._pendingSubmission) {
-      const pending = this._pendingSubmission;
-      const allReady = this._state.players.every((candidate) => {
-        const readyUntil = candidate.submissionReadyUntil ? Date.parse(candidate.submissionReadyUntil) : 0;
-        return readyUntil >= now;
-      });
-      if (allReady && now <= pending.deadline) {
-        const completion = this._completeSubmission(this._player(pending.playerId), pending.value, pending.submittedItems, now);
+      const completion = this._completePendingSubmission(now);
+      if (completion) {
         result.submissionResult = completion;
-        if (!completion.accepted) this._record("rejected-submission", completion.detail, now, { playerId: pending.playerId });
+        if (!completion.accepted) this._record("rejected-submission", completion.detail, now, { playerId: completion.playerId || null });
       }
     }
     this._record(result.accepted ? "player-action" : "rejected-action", result.detail, now, { playerId: player.id, action: action.action });
@@ -974,11 +972,15 @@ export class ServerProjection {
     this._tick(now);
     if (this._state.timer.status !== "running") return { accepted: false, ignored: true, detail: "submission ignored while round is not running" };
     if (!player) return { accepted: false, detail: "unknown fixed player" };
-    if (this._pendingSubmission) {
-      return { accepted: false, detail: `submission already pending from ${this._pendingSubmission.playerId}` };
-    }
     player.submissionReadyUntil = iso(now + 500);
-    if (!player.hasPlate) return { accepted: false, detail: "submitter does not hold an authoritative server plate" };
+    if (!player.hasPlate) {
+      const completion = this._completePendingSubmission(now);
+      return {
+        accepted: false,
+        detail: "submitter does not hold an authoritative server plate",
+        ...(completion ? { submissionResult: completion } : {}),
+      };
+    }
     const submittedItems = [...player.plate];
     player.hand = null;
     player.hasPlate = false;
@@ -995,24 +997,40 @@ export class ServerProjection {
     const claimedRecipe = RECIPE_BY_ID.get(claimed) || null;
     const claimMatchesPlate = (summaryItems && sameComponents(summaryItems, submittedItems))
       || (claimedRecipe && sameComponents(claimedRecipe.components, submittedItems));
-    if (!claimMatchesPlate) {
-      for (const candidate of this._state.players) candidate.submissionReadyUntil = null;
-      player.actionState = "submission assertion rejected; plate consumed";
-      return { accepted: false, detail: "submitted plate assertion does not match the consumed authoritative server plate" };
-    }
+
+    if (!this._pendingSubmission) this._pendingSubmission = { deadline: now + 500, candidates: [] };
+    this._pendingSubmission.candidates.push({
+      playerId: player.id,
+      value,
+      submittedItems,
+      submittedAt: iso(now),
+      claimMatchesPlate: Boolean(claimMatchesPlate),
+    });
+
+    const completion = this._completePendingSubmission(now);
+    if (completion) return completion;
 
     const missingReady = this._state.players.filter((candidate) => {
       const readyUntil = candidate.submissionReadyUntil ? Date.parse(candidate.submissionReadyUntil) : 0;
       return readyUntil < now;
     });
-    if (missingReady.length) {
-      this._pendingSubmission = { playerId: player.id, value, submittedItems, deadline: now + 500 };
-      return { accepted: true, pending: true, detail: `submission waiting for ${missingReady.map((candidate) => candidate.label).join(", ")} within the 0.5-second window` };
-    }
-    return this._completeSubmission(player, value, submittedItems, now);
+    return { accepted: true, pending: true, detail: `submission waiting for ${missingReady.map((candidate) => candidate.label).join(", ")} within the 0.5-second window` };
   }
 
-  _completeSubmission(player, value, submittedItems, now = this.now()) {
+  _completePendingSubmission(now = this.now()) {
+    const pending = this._pendingSubmission;
+    if (!pending || now > pending.deadline) return null;
+    const allReady = this._state.players.every((candidate) => {
+      const readyUntil = candidate.submissionReadyUntil ? Date.parse(candidate.submissionReadyUntil) : 0;
+      return readyUntil >= now;
+    });
+    if (!allReady) return null;
+    const candidates = [...pending.candidates].sort((left, right) => left.playerId.localeCompare(right.playerId));
+    const selected = candidates[0];
+    return this._completeSubmission(this._player(selected.playerId), selected.value, selected.submittedItems, now, candidates);
+  }
+
+  _completeSubmission(player, value, submittedItems, now = this.now(), consumedSubmissions = []) {
     if (!player) return { accepted: false, detail: "unknown fixed player" };
     const raw = String(value || "").toUpperCase();
     const claimed = raw.replace(/^SUBMIT[:=]/, "").replace(/^RECIPE[:=]/, "").split(/[|,;]/)[0];
@@ -1028,9 +1046,7 @@ export class ServerProjection {
 
     const active = this._activeOrders();
     const current = active[0] || null;
-    let target = null;
-    if (claimedRecipe) target = active.find((order) => order.recipe === claimedRecipe.id) || null;
-    else if (summaryItems) target = active.find((order) => sameComponents(order.components, submittedItems)) || null;
+    const target = active.find((order) => sameComponents(order.components, submittedItems)) || null;
     const success = this._state.timer.status === "running" && Boolean(target)
       && sameComponents(target.components, submittedItems);
     const recipe = target ? RECIPE_BY_ID.get(target.recipe) : claimedRecipe;
@@ -1052,6 +1068,14 @@ export class ServerProjection {
       penalty: success ? 0 : WRONG_ORDER_PENALTY,
       at: iso(now),
       raw: value,
+      claimMatchesPlate: Boolean((summaryItems && sameComponents(summaryItems, submittedItems))
+        || (claimedRecipe && sameComponents(claimedRecipe.components, submittedItems))),
+      consumedSubmissions: consumedSubmissions.map((candidate) => ({
+        playerId: candidate.playerId,
+        submittedPlate: plateSummary(candidate.submittedItems),
+        raw: candidate.value,
+        claimMatchesPlate: candidate.claimMatchesPlate,
+      })),
       validation: success ? "server plate and active-order match" : expiredMatch ? "matching order had already expired" : "plate did not match an active order",
     };
     this._state.submissions.push(event);

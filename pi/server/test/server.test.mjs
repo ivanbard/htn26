@@ -331,7 +331,7 @@ test("action-inferred station occupancy allows groups and returns players to cen
   assert.equal(projection.snapshot(now).players[0].currentStation, "serving");
 });
 
-test("submissions require authoritative inventory, matching assertions, and three fresh players", () => {
+test("submissions consume every submitter and arbitrate after three fresh players", () => {
   let now = 47_000;
   const projection = new ServerProjection({ now: () => now, roundSeconds: 20, orderPatienceSeconds: 30, random: () => 0 });
   projection.ingestHostControl({ control: "START", durationSeconds: 20 }, now);
@@ -366,19 +366,26 @@ test("submissions require authoritative inventory, matching assertions, and thre
 
   projection.ingestPlayerAction({ playerId: "p1", action: "PLATE", plate: "BM-C" }, now);
   readyOtherPlayers(projection, "p1", now);
-  const moneyBeforeMismatch = projection.snapshot(now).money.net;
+  const moneyBeforeTrustedSummary = projection.snapshot(now).money.net;
   result = projection.ingestSubmission({ playerId: "p1", plate: "BMLC" }, now);
-  assert.equal(result.accepted, false);
-  assert.match(result.detail, /assertion/);
-  assert.equal(projection.snapshot(now).money.net, moneyBeforeMismatch);
-  assert.equal(projection.snapshot(now).players[0].hasPlate, false);
-
-  projection.ingestPlayerAction({ playerId: "p1", action: "PLATE", plate: "BM-C" }, now);
-  const moneyBeforeCorrect = projection.snapshot(now).money.net;
-  result = submitWithTeam(projection, "p1", "BM-C", now);
   assert.equal(result.accepted, true);
   assert.equal(result.submission.status, "success");
-  assert.ok(projection.snapshot(now).money.net > moneyBeforeCorrect);
+  assert.equal(result.submission.claimMatchesPlate, false);
+  assert.equal(result.submission.submittedPlate, "BM-C");
+  assert.ok(projection.snapshot(now).money.net > moneyBeforeTrustedSummary);
+  assert.equal(projection.snapshot(now).players[0].hasPlate, false);
+
+  projection.ingestPlayerAction({ playerId: "p2", action: "PLATE", plate: "B---" }, now);
+  projection.ingestPlayerAction({ playerId: "p1", action: "PLATE", plate: "BML-" }, now);
+  projection.ingestPlayerAction({ playerId: "p3", action: "READY" }, now);
+  result = projection.ingestSubmission({ playerId: "p2", plate: "B---" }, now);
+  assert.equal(result.pending, true);
+  assert.equal(projection.snapshot(now).players[1].hasPlate, false);
+  result = projection.ingestSubmission({ playerId: "p1", plate: "BML-" }, now);
+  assert.equal(result.submission.status, "success");
+  assert.equal(result.submission.playerId, "p1");
+  assert.deepEqual(result.submission.consumedSubmissions.map((submission) => submission.playerId), ["p1", "p2"]);
+  assert.equal(projection.snapshot(now).players[0].hasPlate, false);
   assert.ok(projection.snapshot(now).players.every((player) => player.heldItem === "EMPTY"));
 
   projection.ingestPlayerAction({ playerId: "p1", action: "PLATE", plate: "B---" }, now);
@@ -388,7 +395,7 @@ test("submissions require authoritative inventory, matching assertions, and thre
   result = projection.ingestSubmission({ playerId: "p1", plate: "B---" }, now);
   assert.equal(result.accepted, false);
   assert.equal(result.ignored, true);
-  assert.equal(projection.snapshot(now).submissions.length, 2);
+  assert.equal(projection.snapshot(now).submissions.length, 3);
   assert.equal(projection.snapshot(now).money.net, moneyBefore);
 });
 
@@ -464,6 +471,19 @@ test("native GAME and complete E event path is parsed and projected by the lapto
     state = event(3, "READY");
     assert.equal(state.submissions[0].status, "success");
     assert.ok(state.tips.total > 0);
+
+    event(2, "PL:B---");
+    event(1, "PL:BM-C");
+    state = event(2, "SUB:B---");
+    assert.equal(state.players[1].hasPlate, false);
+    assert.equal(state.submissions.length, 1);
+    state = event(1, "SUB:BM-C");
+    assert.equal(state.players[0].hasPlate, false);
+    assert.equal(state.submissions.length, 1);
+    state = event(3, "READY");
+    assert.equal(state.submissions[1].status, "success");
+    assert.equal(state.submissions[1].playerId, "p1");
+    assert.deepEqual(state.submissions[1].consumedSubmissions.map((submission) => submission.playerId), ["p1", "p2"]);
 
     for (const [code, expected] of [["M", "CHOPPED_MEAT"], ["X", "BURNT_MEAT"], ["L", "LETTUCE"], ["C", "CHEESE"]]) {
       state = event(3, `PU:${code}`);
