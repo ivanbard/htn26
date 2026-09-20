@@ -8,6 +8,31 @@ export const SETUP_PHASES = Object.freeze({
   ENDED: "ended",
 });
 
+export const UI_DISPLAY_MODES = Object.freeze({
+  SETUP: "setup",
+  GAMEPLAY: "gameplay",
+  RESULTS: "results",
+});
+
+// Alias kept intentionally so renderer code can use the shorter domain name.
+export const DISPLAY_MODES = UI_DISPLAY_MODES;
+
+const SETUP_PHASE_DISPLAY_MODES = Object.freeze({
+  [SETUP_PHASES.IDLE]: UI_DISPLAY_MODES.SETUP,
+  [SETUP_PHASES.SCANNING]: UI_DISPLAY_MODES.SETUP,
+  [SETUP_PHASES.LAYOUT_PROPOSED]: UI_DISPLAY_MODES.SETUP,
+  [SETUP_PHASES.BURGER_PLACEMENT]: UI_DISPLAY_MODES.SETUP,
+  [SETUP_PHASES.LAYOUT_ACCEPTED]: UI_DISPLAY_MODES.SETUP,
+  [SETUP_PHASES.RUNNING]: UI_DISPLAY_MODES.GAMEPLAY,
+  [SETUP_PHASES.ENDED]: UI_DISPLAY_MODES.RESULTS,
+});
+
+export function displayModeForPhase(phase) {
+  return SETUP_PHASE_DISPLAY_MODES[phase] ?? null;
+}
+
+export const modeForSetupPhase = displayModeForPhase;
+
 export const GAME_ACTIONS = Object.freeze({
   START_HOST: "START_HOST",
   SCAN_ROOM: "SCAN_ROOM",
