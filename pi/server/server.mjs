@@ -87,9 +87,10 @@ export function usage() {
   return `HTN26 laptop server simulator\n\n` +
     `  node pi/server/server.mjs [--host HOST] [--port PORT] [--serial DEVICE]\n\n` +
     `Environment: HTN26_BIND_HOST, HTN26_PORT, HTN26_SERIAL_DEVICE, HTN26_DATA_DIR,\n` +
-    `OPENAI_API_KEY (optional; server-side only), HTN26_ORDER_INTERVAL_MIN_SECONDS,\n` +
-    `HTN26_ORDER_INTERVAL_MAX_SECONDS, HTN26_ORDER_PATIENCE_SECONDS,\n` +
-    `HTN26_MAX_ACTIVE_ORDERS, HTN26_PLAYER_LOCATION_HOLD_SECONDS.\n`;
+    `OPENAI_API_KEY (optional; server-side only), OPENAI_LAYOUT_TIMEOUT_MS,\n` +
+    `HTN26_ORDER_INTERVAL_MIN_SECONDS, HTN26_ORDER_INTERVAL_MAX_SECONDS,\n` +
+    `HTN26_ORDER_PATIENCE_SECONDS, HTN26_MAX_ACTIVE_ORDERS,\n` +
+    `HTN26_PLAYER_LOCATION_HOLD_SECONDS.\n`;
 }
 
 export function startupGuide(baseUrl) {

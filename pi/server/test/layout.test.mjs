@@ -1,9 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { createRuntime } from "../server.mjs";
+import { LayoutSubmissionStore } from "../src/layout-submission-store.mjs";
 import {
   REQUIRED_STATION_TYPES,
   sanitizeRoomLayout,
@@ -24,9 +25,9 @@ function responseFor(value, ok = true, status = 200) {
   return { ok, status, async json() { return value; } };
 }
 
-async function withRuntime(fetchImpl, callback) {
+async function withRuntime(fetchImpl, callback, env = {}) {
   const dataDir = await mkdtemp(path.join(tmpdir(), "htn26-layout-"));
-  const runtime = await createRuntime({ dataDir, env: { OPENAI_API_KEY: "test-key" }, fetchImpl, now: () => 10_000 });
+  const runtime = await createRuntime({ dataDir, env: { OPENAI_API_KEY: "test-key", ...env }, fetchImpl, now: () => 10_000 });
   await new Promise((resolve) => runtime.server.listen(0, "127.0.0.1", resolve));
   const address = runtime.server.address();
   try { return await callback(`http://127.0.0.1:${address.port}`, runtime); }
@@ -112,7 +113,9 @@ test("retains isolated audit submissions across failure and retry", async () => 
     assert.equal(successfulResponse.status, 200);
     await successfulResponse.json();
 
-    const legacyPhotos = await fetch(`${base}/api/photos`).then((response) => response.json());
+    const legacyResponse = await fetch(`${base}/api/photos`);
+    const legacyPhotos = await legacyResponse.json();
+    assert.equal(legacyResponse.headers.get("deprecation"), "true");
     assert.equal(legacyPhotos.count, 0);
     const audit = await fetch(`${base}/api/layout/submissions`).then((response) => response.json());
     assert.equal(audit.submissions.length, 2);
@@ -123,6 +126,10 @@ test("retains isolated audit submissions across failure and retry", async () => 
     assert.equal(successfulResponse.headers.get("x-htn26-layout-audit-folder"), audit.submissions[1].folder);
     assert.equal(audit.submissions[0].metrics.preprocessMs, 42);
     assert.equal(audit.submissions[1].metrics.preprocessMs, 21);
+    assert.ok(audit.submissions[0].metrics.totalMs >= 42);
+    assert.ok(audit.submissions[1].metrics.totalMs >= 21);
+    assert.equal(audit.submissions[0].metrics.validationMs, null);
+    assert.doesNotMatch(failedResponse.headers.get("server-timing"), /validation/);
     assert.deepEqual(Object.keys(audit.submissions[0].metrics).sort(), ["preprocessMs", "requestMs", "totalMs", "validationMs"]);
     assert.deepEqual(audit.submissions[0].failure, { code: "generation_unavailable" });
     assert.equal(audit.submissions[1].failure, null);
@@ -134,14 +141,56 @@ test("retains isolated audit submissions across failure and retry", async () => 
       assert.equal(persisted.photos.length, 5);
       assert.equal(persisted.status, submission.status);
     }
-
-    for (let index = 0; index < 5; index += 1) {
-      const upload = await fetch(`${base}/api/photos`, {
-        method: "POST",
-        body: Buffer.from(`legacy-${index}`),
-        headers: { "content-type": "image/jpeg", "x-photo-name": `legacy-${index}.jpg` },
-      });
-      assert.equal(upload.status, 201);
-    }
   });
+});
+
+test("times out an unavailable provider with a safe audited failure", async () => {
+  await withRuntime((_url, { signal }) => new Promise((_resolve, reject) => {
+    signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+  }), async (base) => {
+    const response = await formPhotos(base, 3, { "x-htn26-photo-preprocess-ms": "7" });
+    const body = await response.json();
+    assert.equal(response.status, 503);
+    assert.deepEqual(body, { error: "Room layout generation is unavailable. Try again." });
+    const audit = await fetch(`${base}/api/layout/submissions`).then((value) => value.json());
+    assert.equal(audit.submissions[0].status, "failure");
+    assert.equal(audit.submissions[0].metrics.preprocessMs, 7);
+    assert.ok(audit.submissions[0].metrics.requestMs >= 1);
+    assert.equal(audit.submissions[0].metrics.validationMs, null);
+    assert.ok(audit.submissions[0].metrics.totalMs >= 8);
+  }, { OPENAI_LAYOUT_TIMEOUT_MS: "5" });
+});
+
+test("reconciles interrupted and corrupt audit submissions on restart", async () => {
+  const dataDir = await mkdtemp(path.join(tmpdir(), "htn26-layout-recovery-"));
+  try {
+    const firstStore = new LayoutSubmissionStore({ directory: dataDir, now: () => 10_000 });
+    await firstStore.init();
+    const uploads = Array.from({ length: 3 }, (_, index) => ({
+      bytes: Buffer.from(`photo-${index}`),
+      filename: `room-${index}.jpg`,
+      mime: "image/jpeg",
+    }));
+    const interrupted = await firstStore.create(uploads, { preprocessMs: 12 });
+
+    const restartedStore = new LayoutSubmissionStore({ directory: dataDir, now: () => 20_000 });
+    await restartedStore.init();
+    assert.equal(restartedStore.list()[0].status, "failure");
+    assert.deepEqual(restartedStore.list()[0].failure, { code: "generation_interrupted" });
+    assert.equal(restartedStore.list()[0].metrics.preprocessMs, 12);
+
+    await writeFile(path.join(dataDir, interrupted.folder, "metadata.json"), "{incomplete");
+    const recoveredStore = new LayoutSubmissionStore({ directory: dataDir, now: () => 30_000 });
+    await recoveredStore.init();
+    const recovered = recoveredStore.list()[0];
+    assert.equal(recovered.status, "failure");
+    assert.equal(recovered.photoCount, 3);
+    assert.deepEqual(recovered.failure, { code: "generation_interrupted" });
+    assert.deepEqual(recovered.metrics, { preprocessMs: null, requestMs: null, validationMs: null, totalMs: null });
+    const metadata = JSON.parse(await readFile(path.join(dataDir, recovered.folder, "metadata.json"), "utf8"));
+    assert.equal(metadata.status, "failure");
+    assert.equal(metadata.photos.length, 3);
+  } finally {
+    await rm(dataDir, { recursive: true, force: true });
+  }
 });

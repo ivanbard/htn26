@@ -259,7 +259,7 @@ export function createHttpServer({ projection, photoStore, layoutSubmissionStore
 
   function timingHeader(metrics = {}) {
     const entries = [["preprocess", metrics.preprocessMs], ["openai", metrics.requestMs], ["validation", metrics.validationMs], ["total", metrics.totalMs]]
-      .filter(([, value]) => Number.isFinite(Number(value)))
+      .filter(([, value]) => value !== null && value !== undefined && value !== "" && Number.isFinite(Number(value)))
       .map(([name, value]) => `${name};dur=${Number(value).toFixed(1)}`);
     return entries.length ? { "server-timing": entries.join(", "), "x-htn26-layout-metrics": JSON.stringify(metrics) } : {};
   }
@@ -285,7 +285,11 @@ export function createHttpServer({ projection, photoStore, layoutSubmissionStore
       projection.proposeRoomLayout(result.layout, Date.now(), { photoCount: submission.photoCount });
       send(res, 200, result.layout, { ...headers, ...auditHeaders, ...timingHeader(completed.metrics) });
     } catch (error) {
-      const metrics = { preprocessMs, ...error?.metrics, totalMs: error?.metrics?.totalMs ?? Number(process.hrtime.bigint() - totalStart) / 1_000_000 };
+      const metrics = {
+        preprocessMs,
+        ...error?.metrics,
+        totalMs: error?.metrics?.totalMs ?? (Number.isFinite(preprocessMs) ? Math.max(0, preprocessMs) : 0) + Number(process.hrtime.bigint() - totalStart) / 1_000_000,
+      };
       const completed = await layoutSubmissionStore.finish(submission.requestId, { status: "failure", metrics });
       send(res, Number(error?.statusCode) || 503, { error: "Room layout generation is unavailable. Try again." }, { ...headers, ...auditHeaders, ...timingHeader(completed.metrics) });
     }
@@ -308,7 +312,7 @@ export function createHttpServer({ projection, photoStore, layoutSubmissionStore
       if (req.method === "GET" && url.pathname === "/api/floorplan") { send(res, 200, projection.snapshot().floorPlan, headers); return; }
       if (req.method === "GET" && url.pathname === "/api/layout") { send(res, 200, projection.snapshot().roomLayout || null, headers); return; }
       if (req.method === "GET" && url.pathname === "/api/layout/submissions") { send(res, 200, { submissions: layoutSubmissionStore.list() }, headers); return; }
-      if (req.method === "GET" && url.pathname === "/api/photos") { send(res, 200, { photos: photoStore.list(), count: photoStore.photos.length, reviewReady: photoStore.photos.length >= 3 }, headers); return; }
+      if (req.method === "GET" && url.pathname === "/api/photos") { send(res, 200, { photos: photoStore.list(), count: photoStore.photos.length, reviewReady: photoStore.photos.length >= 3 }, { ...headers, deprecation: "true", link: "</api/layout/generate>; rel=\"successor-version\"" }); return; }
       if (req.method === "GET" && url.pathname === "/api/orders") { const state = projection.snapshot(); send(res, 200, { order: state.order, activeOrders: state.activeOrders, orders: state.orders }, headers); return; }
       if (req.method === "GET" && url.pathname === "/api/gold") { send(res, 200, projection.snapshot().gold, headers); return; }
       if (req.method === "GET" && url.pathname === "/api/tips") { send(res, 200, projection.snapshot().tips, headers); return; }
@@ -327,7 +331,7 @@ export function createHttpServer({ projection, photoStore, layoutSubmissionStore
         return;
       }
       if (req.method === "POST" && url.pathname === "/api/photos") {
-        send(res, 201, await uploadPhotos(req, res), headers); return;
+        send(res, 201, await uploadPhotos(req, res), { ...headers, deprecation: "true", link: "</api/layout/generate>; rel=\"successor-version\"" }); return;
       }
       if (req.method === "POST" && url.pathname === "/api/layout/generate") {
         await generateRoomLayout(req, res, headers); return;

@@ -11,6 +11,7 @@ function extensionFor(mime, filename = "") {
 }
 
 function finiteDuration(value) {
+  if (value === null || value === undefined || value === "") return null;
   return Number.isFinite(Number(value)) ? Math.max(0, Number(value)) : null;
 }
 
@@ -43,15 +44,59 @@ export class LayoutSubmissionStore {
       if (!entry.isDirectory()) continue;
       const absolutePath = path.join(this.directory, entry.name);
       const metadataPath = path.join(absolutePath, "metadata.json");
+      let submission;
       try {
         const saved = JSON.parse(await fs.readFile(metadataPath, "utf8"));
-        if (saved?.requestId === entry.name) this.submissions.push({ ...saved, absolutePath, metadataPath });
-      } catch (error) {
-        if (error.code !== "ENOENT") throw error;
+        if (saved?.requestId !== entry.name) throw new Error("layout submission identity mismatch");
+        submission = { ...saved, absolutePath, metadataPath };
+      } catch {
+        submission = await this.recover(entry.name, absolutePath, metadataPath);
       }
+      if (submission.status === "processing") {
+        submission.status = "failure";
+        submission.completedAt = new Date(this.now()).toISOString();
+        submission.failure = { code: "generation_interrupted" };
+        submission.metrics = timingMetrics(submission.metrics);
+        await this.persist(submission);
+      }
+      this.submissions.push(submission);
     }
-    this.submissions.sort((left, right) => left.submittedAt.localeCompare(right.submittedAt));
+    this.submissions.sort((left, right) => String(left.submittedAt).localeCompare(String(right.submittedAt)));
     this.sequence = this.submissions.length;
+  }
+
+  async recover(requestId, absolutePath, metadataPath) {
+    const entries = await fs.readdir(absolutePath, { withFileTypes: true });
+    const photos = [];
+    for (const entry of entries) {
+      if (!entry.isFile() || entry.name === "metadata.json" || entry.name.endsWith(".tmp")) continue;
+      const stat = await fs.stat(path.join(absolutePath, entry.name));
+      photos.push({
+        id: path.basename(entry.name, path.extname(entry.name)),
+        file: entry.name,
+        filename: entry.name,
+        mime: ({ ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp", ".heic": "image/heic" })[path.extname(entry.name).toLowerCase()] || "application/octet-stream",
+        bytes: stat.size,
+      });
+    }
+    photos.sort((left, right) => left.file.localeCompare(right.file));
+    const stat = await fs.stat(absolutePath);
+    const completedAt = new Date(this.now()).toISOString();
+    const submission = {
+      requestId,
+      folder: path.posix.join("layout-submissions", requestId),
+      status: "failure",
+      submittedAt: stat.birthtime.toISOString(),
+      completedAt,
+      photoCount: photos.length,
+      photos,
+      metrics: timingMetrics(),
+      failure: { code: "generation_interrupted" },
+      absolutePath,
+      metadataPath,
+    };
+    await this.persist(submission);
+    return submission;
   }
 
   async create(uploads, { preprocessMs } = {}) {
@@ -119,6 +164,12 @@ export class LayoutSubmissionStore {
   }
 
   async persist(submission) {
-    await fs.writeFile(submission.metadataPath, JSON.stringify(publicSubmission(submission), null, 2));
+    const temporaryPath = path.join(submission.absolutePath, `.metadata-${randomUUID()}.tmp`);
+    try {
+      await fs.writeFile(temporaryPath, JSON.stringify(publicSubmission(submission), null, 2));
+      await fs.rename(temporaryPath, submission.metadataPath);
+    } finally {
+      await fs.rm(temporaryPath, { force: true });
+    }
   }
 }
