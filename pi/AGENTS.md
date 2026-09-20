@@ -6,15 +6,16 @@ Use [`README.md`](README.md), [`difficulty/README.md`](difficulty/README.md),
 [`master/README.md`](master/README.md), and [`slave/README.md`](slave/README.md)
 as the implementation owners for the Pi components.
 
-The current authoritative server run, test, and deployment path is the
-captain's laptop. QNX may host only the optional label-only difficulty sidecar;
-QNX authoritative execution and multi-camera workers remain future boundaries.
+The current authoritative server and UI run on the captain's laptop, with
+phone photographs used only for setup inference. QNX may host only the optional
+label-only difficulty sidecar; QNX authoritative execution, portable-engine
+integration, and multi-camera workers remain future boundaries.
 
-Keep authoritative game state, timers, order/recipe selection, scoring,
-inventory, layout, badge state, and submission decisions in the laptop server
-or a future authoritative-engine adapter. The difficulty sidecar contract may
-return only `easy`, `normal`, or `hectic` with model/source metadata and
-latency; follow [`difficulty/README.md`](difficulty/README.md).
+Keep authoritative game state, timers, order and recipe selection, scoring,
+inventory, layout, badge state, and submission decisions in `server/`. Treat
+`master/` as a future portable engine unless the product contract explicitly
+adopts it. The difficulty sidecar may return only `easy`, `normal`, or `hectic`
+with model/source metadata and latency; follow `difficulty/README.md`.
 
 Keep camera, inference, and worker code behind the adapter seams owned by the relevant Pi README.
 

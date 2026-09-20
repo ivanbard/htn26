@@ -2,7 +2,10 @@
 
 Inspection date: 2026-09-19. The initial investigation was read-only; subsequent
 native implementation and hardware validation are recorded in `native/`.
-Addresses below apply only to the inspected build. Function names are recovered
+[`native/README.md`](native/README.md) owns current status: native is the
+production/live whole-fleet profile, Lua is rollback-only, the production host
+is a laptop, and physical two-badge bumping remains unverified. Addresses below
+apply only to the inspected build. Function names are recovered
 roles, not original symbols, unless explicitly identified as embedded strings.
 
 ## Baseline
@@ -73,16 +76,17 @@ reduction in this repository that recovers the approximately 49 KiB gap, so
 this revision does not claim that cosmetic Lua simplification would fix either
 badge.
 
-The supported low-memory deployment consequently uses the native Overcooked
-app on the host **and all three players**. Native packets carry the same
-`OC1|<sequence>|E|P<player>:<action>` application bytes and host lifecycle/
+The production/live deployment consequently uses the native Overcooked app on
+the host **and all three players**. Native packets carry the same current
+`OC2|<sequence>|E|P<player>:<action>` application bytes and host lifecycle/
 serial records as the current Lua contracts, but use the recovered stock HAL
 directly. Lua `badge.radio` adds and filters a private `LUA1` carrier prefix, so
 a mixed native/Lua round is not supported. The Lua files remain installable as
-an explicit whole-fleet rollback; they are not deleted or silently replaced.
-The current native contract changes after the historical measurements below
-have only offline build/emulator coverage until the physical gate in
-`native/README.md` is repeated.
+an explicit whole-fleet rollback and must be refreshed to the matching OC2
+revision before native deployment; they are not deleted by the factory write.
+The historical measurements below are not evidence for later source revisions.
+Use `native/README.md` for the captain-reported hardware boundary and for the
+separate offline-only status of the generated-icon display revision.
 
 ## Native registration and Share
 
@@ -159,8 +163,8 @@ That common stop routine does not perform full NimBLE/controller deinit;
 the subsequent reboot provides the clean memory reset.
 
 This supports reusing the BLE advertising HAL, without Share's file-transfer
-protocol or a new BLE/GATT stack. Direct Pi participation and the exact custom
-packet API still require decoding. There is no demonstrated Wi-Fi app path;
+protocol or a new BLE/GATT stack. Direct laptop participation in badge radio is
+not part of the architecture; the gateway serial path remains the host boundary. There is no demonstrated Wi-Fi app path;
 generic Wi-Fi error strings are insufficient evidence.
 
 ### Existing NVS recovery branch
@@ -187,6 +191,8 @@ Reference: https://raw.githubusercontent.com/espressif/esp-idf/v5.5.3/components
 | My Badge | name method `0x42014A1A`, string `My Badge` |
 | Buttons | embedded `main/hal/hal_buttons.cpp`; boot init call to `0x4200B254` |
 | Display | embedded `main/hal/hal_display.cpp`; boot call to `0x4200E408`; LVGL9 port present |
+| Image widget | create `0x420CCC76`, set source `0x420CD1AC`; recovered from the stock Lua image binding. The installed 42×42 `icon.bin` confirms header magic `0x19`, RGB565A8 format `0x14`, 84-byte stride, then RGB565 and alpha planes. |
+| Object visibility | add flag `0x420A73C4`, clear flag `0x420A6C5C`; the stock Lua `hidden()` binding uses flag `1` |
 | LEDs | `hal_lights`, boot call to `0x4200F424`, RMT LED-strip driver strings |
 | NFC | enable `0x4200FF2E`, stop `0x42010016`, card `0x42010062`, clear `0x420100FC`, NDEF Text `0x42010138` |
 | Accelerometer | cached XYZ read `0x4200AED4`; Update 1.1 uses integer IEEE-754 shake/tap thresholds pending calibration |

@@ -44,9 +44,9 @@ AD parser with the new invoker, rather than merely imitating that ABI.
 Native mode preserves the current player payload and host-control shapes:
 
 ```text
-OC1|012345|E|P2:PU:R
-OC1|000001|G|S
-OC1|012345|A|OK
+OC2|012345|E|P2:PU:R
+OC2|000001|G|S
+OC2|012345|A|OK
 ```
 
 The six decimal event digits are randomized at each native player-app boot and
@@ -56,16 +56,20 @@ private 15-byte ACK echoes the event sequence; it is native reliability
 machinery and is never forwarded to the laptop server.
 
 Application action values match `../slave/main.lua`: `PU:B|R|Q|K`,
-`PL:NEW` or `PL:<BMLC>`, `CH:S|F` and `CH:D:M|L|C`, `ST:L|R:P|T|X`,
+`PL:NEW` or `PL:<BMLC>`, `CH:S|F` and `CH:D:D|L|C`, `ST:L|R:P|T|X`,
 `ST:L|R:C:<phase>`, `DROP:<snapshot>`, `X:<snapshot>`, `READY`, and
 `SUB:<BMLC>`. A snapshot is `P` plus four fixed plate columns, `H` plus one
-item code, or `E----`; `-` means absent. Payload validation remains bounded to
-the documented 44-byte application limit.
+item code, or `E----`; `-` means absent. Hand code `D` is chopped meat and `M`
+is cooked meat, so transfer snapshots preserve the native held state without
+context-dependent decoding. Payload validation remains bounded to the
+documented 44-byte application limit.
 
-The application bytes match the Lua contract, but the physical profiles are
-not interoperable. `badge.radio` adds and filters a firmware-private `LUA1`
+OC2 is the only active sequence-first namespace. It introduces the distinct
+chopped/cooked meat encoding and is intentionally incompatible with OC1. The
+application bytes match the current Lua rollback contract, but the physical
+profiles are not interoperable. `badge.radio` adds and filters a firmware-private `LUA1`
 carrier prefix. The native app calls the recovered HAL directly and therefore
-advertises `OC1` as the manufacturer payload. Deploy native mode to the host and
+advertises `OC2` as the manufacturer payload. Deploy native mode to the host and
 all three players together, or roll all four back to Lua together.
 
 A player waits 150 ticks (nominally three seconds) and makes at most three
@@ -76,22 +80,24 @@ for 100 ticks (nominally two seconds). A later duplicate is acknowledged again
 but produces only one gateway serial frame:
 
 ```text
-HTN26|RX|<sender_mac>|<rssi>|OC1|012345|E|P2:PU:R
+HTN26|RX|<sender_mac>|<rssi>|OC2|012345|E|P2:PU:R
 ```
 
 The host emits `HTN26|GW|UP|<forwarded>|<drops>` every 250 ticks and emits
 `HTN26|GW|DOWN|0|0` if its NVS preflight or radio initialization fails. START
-emits `HTN26|GAME|START_GAME|240|3` and `OC1|000001|G|S`; timeout emits
-`HTN26|GAME|GAME_END|3` and `OC1|000002|G|E`. Events are ignored before start.
+emits `HTN26|GAME|START_GAME|240|3` and `OC2|000001|G|S`; timeout emits
+`HTN26|GAME|GAME_END|3` and `OC2|000002|G|E`. Events are ignored before start.
 The laptop server remains authoritative for the game countdown, inventory,
-orders, score, and submission results.
+orders, score, and submission results. QNX is only a possible future target,
+not a current deployment requirement or validation claim.
 
 Overcooked uses 30 ms minimum/maximum advertising intervals, matching Share's
 existing send setup. Scanning timing stays at the stock HAL default. The receive
 callback validates and copies into one fixed slot and never calls LVGL or
 transmits. The app tick consumes that slot. Aligned 32-bit accesses plus RISC-V
 fences publish it without an atomic runtime. A full slot increments the drop
-counter. The app object remains 300 bytes.
+counter. The app object is 308 bytes with the held-item image handles;
+generated pixel data remains const flash-mapped DROM.
 
 LED 0: green ready. LED 1: blue send. LED 2: yellow receive. LED 5: red error.
 Normal pulses last 25 ticks; invalid-combination red lasts 50 ticks. Inputs
@@ -121,7 +127,7 @@ python badge/native/ble_receiver.py --peer d0:86:29:c1:3d:e8 --count 20
 python badge/native/ble_receiver.py --peer d0:86:29:c1:3d:e8 --listen-only --seconds 60
 ```
 
-The receiver filters that peer and the OC1 prefix, bounds its receive queue,
+The receiver filters that peer and the OC2 prefix, bounds its receive queue,
 and stops scanning/advertising on exit. It does not open COM4. Windows controls
 advertisement scheduling, so latency must be measured rather than assumed.
 

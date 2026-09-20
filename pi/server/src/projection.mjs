@@ -26,7 +26,7 @@ const DEFAULT_PLAYERS = [
   { id: "p3", label: "P3", name: "PLAYER 3", color: "violet" },
 ];
 const SHORT_ITEMS = Object.freeze({
-  B: "BUN", R: "RAW_MEAT", M: "CHOPPED_MEAT", X: "BURNT_MEAT",
+  B: "BUN", R: "RAW_MEAT", D: "CHOPPED_MEAT", M: "COOKED_MEAT", X: "BURNT_MEAT",
   Q: "RAW_LETTUCE", L: "LETTUCE", K: "RAW_CHEESE", C: "CHEESE",
 });
 const PLATE_ITEMS = new Set(["BUN", "COOKED_MEAT", "MEAT", "LETTUCE", "CHEESE"]);
@@ -1229,15 +1229,15 @@ export class ServerProjection {
     let translated = null;
     let submission = null;
     let item;
-    if ((item = action.match(/^PU:([BRMXQLKC])$/))) translated = { playerId, action: "PICKUP", item: SHORT_ITEMS[item[1]] };
+    if ((item = action.match(/^PU:([BRDMXQLKC])$/))) translated = { playerId, action: "PICKUP", item: SHORT_ITEMS[item[1]] };
     else if (/^PL:(NEW|(?:B|-)(?:M|-)(?:L|-)(?:C|-))$/.test(action)) translated = { playerId, action: "PLATE", plate: action.slice(3) };
     else if (action === "CH:S") translated = { playerId, action: "CHOP", phase: "START" };
     else if (action === "CH:F") translated = { playerId, action: "CHOP", phase: "FAIL" };
-    else if ((item = action.match(/^CH:D:([MLC])$/))) translated = { playerId, action: "CHOP", phase: "DONE", item: item[1] };
+    else if ((item = action.match(/^CH:D:([DLC])$/))) translated = { playerId, action: "CHOP", phase: "DONE", item: item[1] };
     else if ((item = action.match(/^ST:([LR]):([PTX])$/))) translated = { playerId, action: "STOVE", side: item[1] === "L" ? "LEFT" : "RIGHT", operation: item[2] === "P" ? "PLACE" : "TAKE" };
     else if ((item = action.match(/^ST:([LR]):C:(EMPTY|COOKING|DONE|WARNING|BURNT)$/))) translated = { playerId, action: "STOVE", side: item[1] === "L" ? "LEFT" : "RIGHT", operation: "STATUS", reportedStatus: item[2] };
-    else if (/^DROP:(?:P(?:B|-)(?:M|-)(?:L|-)(?:C|-)|H[BRMXQLKC]|E----)$/.test(action)) translated = { playerId, action: "DROP" };
-    else if (/^X:(?:P(?:B|-)(?:M|-)(?:L|-)(?:C|-)|H[BRMXQLKC]|E----)$/.test(action)) translated = { playerId, action: "TRANSFER_READY" };
+    else if (/^DROP:(?:P(?:B|-)(?:M|-)(?:L|-)(?:C|-)|H[BRDMXQLKC]|E----)$/.test(action)) translated = { playerId, action: "DROP" };
+    else if (/^X:(?:P(?:B|-)(?:M|-)(?:L|-)(?:C|-)|H[BRDMXQLKC]|E----)$/.test(action)) translated = { playerId, action: "TRANSFER_READY" };
     else if (action === "READY") translated = { playerId, action: "READY" };
     else if ((item = action.match(/^SUB:((?:B|-)(?:M|-)(?:L|-)(?:C|-))$/))) submission = { playerId, plate: item[1] };
     if (submission) return this.ingestSubmission(submission, now);

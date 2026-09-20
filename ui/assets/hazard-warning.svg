@@ -1,0 +1,8 @@
+<!-- Adapted from Font Awesome's Triangle Exclamation icon:
+     https://fontawesome.com/icons/triangle-exclamation -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">Cooking warning</title>
+  <desc id="desc">Red warning triangle with a white exclamation mark</desc>
+  <path fill="#e21d2f" stroke="#fff8e8" stroke-width="18" stroke-linejoin="round" d="M256 32c13.8 0 26.5 7.2 33.7 19l208 352c7.4 12.6 7.4 28.2.1 40.8S476.9 464 462.4 464H49.6c-14.5 0-28-7.6-35.4-20.2s-7.3-28.2.1-40.8l208-352C229.5 39.2 242.2 32 256 32Z"/>
+  <path fill="#fff8e8" d="M224 144h64l-5.3 168h-53.4L224 144Zm0 200h64v64h-64v-64Z"/>
+</svg>

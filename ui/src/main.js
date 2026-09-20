@@ -12,12 +12,21 @@ export function createApp({ root, transport, now = () => Date.now() }) {
   let destroyed = false;
   let unsubscribe;
   let connectionError = "";
+  let uploadStatus = "";
   const reactRoot = typeof root.nodeType === "number" ? createRoot(root) : null;
 
   const render = (nextState) => {
     if (destroyed) return;
     state = nextState;
-    const props = { state, now: now(), connectionError, onCommand };
+    const props = {
+      state,
+      now: now(),
+      connectionError,
+      uploadStatus,
+      transportKind: transport.kind,
+      onCommand,
+      onUploadPhotos,
+    };
     if (reactRoot) reactRoot.render(React.createElement(App, props));
     else root.innerHTML = renderApp(state, props.now, connectionError);
   };
@@ -33,6 +42,21 @@ export function createApp({ root, transport, now = () => Date.now() }) {
       connectionError = `COMMAND NOT SENT — ${error.message}`;
       render(state);
     }
+  };
+
+  const onUploadPhotos = async (files) => {
+    if (typeof transport.uploadPhotos !== "function") return;
+    connectionError = "";
+    uploadStatus = "Uploading room photos to the master Pi…";
+    render(state);
+    try {
+      const result = await transport.uploadPhotos(files);
+      uploadStatus = `${result.count || 0}/4 room photos on the master Pi${result.reviewReady ? " — ready to scan" : " — add at least 3"}.`;
+    } catch (error) {
+      uploadStatus = "";
+      connectionError = `PHOTO UPLOAD FAILED — ${error.message}`;
+    }
+    render(state);
   };
 
   const onFallbackClick = async (event) => {
@@ -52,7 +76,7 @@ export function createApp({ root, transport, now = () => Date.now() }) {
     }
     unsubscribe = resolvedCleanup;
   }).catch((error) => {
-    connectionError = `MASTER PI UNAVAILABLE — ${error.message}`;
+    connectionError = `LAPTOP SERVER UNAVAILABLE — ${error.message}`;
     render(state);
   });
 

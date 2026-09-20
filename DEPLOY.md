@@ -19,7 +19,7 @@ fallback.
   the label-only contract and QNX deployment assumptions.
 - `ui/`: separate styled UI prototype; it is not the current plain simulator
   page.
-- `badge/native/`: pinned low-memory firmware extension used by all four badges.
+- `badge/native/`: production/live pinned firmware extension used by all four badges.
 - `badge/master/`: retained stationary-host Lua rollback profile.
 - `badge/slave/`: retained fixed-player Lua rollback profile.
 
@@ -37,9 +37,11 @@ Player badges own local interaction feedback and send intent through the host.
 - NFC zones for pantry, fridge, cutting board, and stove.
 - One Apple phone for setup photographs.
 
-The current v1 does not require cloud services or live camera tracking. The
-server temporarily infers station occupancy from player actions and does not
-present it as physical-position evidence.
+The current v1 does not require cloud services or camera/live player-location
+tracking. The server and UI use badge events to infer simulated station or
+center/default occupancy; a paired bump displays both participants side by
+side at the shared center. These cues are neither physical-position evidence
+nor physical bump validation.
 
 ## Badge deployment profile
 
@@ -55,17 +57,33 @@ fresh per-device backup, read-only security inspection, factory-only write and
 readback, and an explicit factory-only rollback. Never erase the device, write
 other partitions, alter security configuration, or change eFuses.
 
-Do not mix native and Lua badges. Their OC1 application bytes agree, but Lua's
+Preserve this order separately for every badge:
+
+1. Before any mutation, complete the read-only security inspection and fresh
+   full-device, partition-table, and factory backups in the native guide.
+   Verify and preserve those original files off the badge.
+2. Boot the unchanged stock firmware, push the current `badge/master/` rollback
+   app to the host or the current `badge/slave/` rollback app to each player,
+   and verify the matching OC2 app on all four badges.
+3. Return each badge to bootloader mode, write only the pinned native factory
+   candidate, and verify its factory readback as documented.
+
+The checked-in rollback apps remain in LittleFS across the factory-only write.
+The laptop parser intentionally rejects OC1, so do not flash over badges whose
+retained rollback apps have not been refreshed as the matching whole-fleet set.
+
+Do not mix native and Lua badges. Their OC2 application bytes agree, but Lua's
 restricted radio API uses a private `LUA1` carrier wrapper and native mode uses
 the recovered HAL directly. The `badge/master/` and `badge/slave/` Lua apps are
 retained as a whole-fleet rollback for restored stock factory firmware.
 
-The current native role/payload changes have offline build/emulator coverage,
-not physical acceptance. Complete the four-badge hardware gate before calling
-the OOM resolved.
+The captain reports the native game binary working on physical badges except
+that bumping two badges together remains unverified. The generated-icon display
+revision has offline build/emulator coverage only and still needs a physical
+visual check; offline tests do not establish bump or display acceptance.
 
 For NixOS-WSL, use the interactive backup-first deploy helper from the repository
-root:
+root after the original pre-mutation backup and OC2 rollback installation above:
 
 ```sh
 python -m pip install pyserial esptool
@@ -73,10 +91,12 @@ python badge/native/deploy.py
 ```
 
 The helper lists every discovered serial port with its description, lets you
-choose the port and `host` or `player` role, builds the native image, prints the
-read-only security check, saves full/partition/factory backups, requires typing
-`FLASH`, writes only the factory partition, and verifies the readback. It never
-erases flash or writes the bootloader, partition table, NVS, PHY, or storage.
+choose the port and `host` or `player` role, builds the native image, repeats the
+read-only security check, saves an additional post-LittleFS
+full/partition/factory backup, requires typing `FLASH`, writes only the factory
+partition, and verifies the readback. Its additional backup does not replace
+the preserved pre-mutation backup. It never erases flash or writes the
+bootloader, partition table, NVS, PHY, or storage.
 Backups default to `~/htn26-badge-backups/`. Use `--skip-build` only when the
 candidate image has already been built and `--image PATH` to select a specific
 candidate. Do not run it until the selected badge is in its established
@@ -234,7 +254,8 @@ python badge/native/ble_receiver.py --self-test
 
 The native build requires the pinned Zig 0.14.1 compiler and the payload test's
 Unicorn dependency as documented in its README. These tests do not prove the
-OOM fixed on-device, physical NFC, four-badge radio and ACK behavior, LED
-appearance, timing, stock-app regressions, phone capture, OpenAI connectivity,
-QNX sidecar deployment, or any future authoritative-server deployment on QNX.
-Perform the native physical acceptance gate and then the first playable run.
+OOM fix on-device, physical NFC, badge-to-badge bump behavior, generated-icon
+appearance, four-badge radio and ACK behavior, LED appearance, timing,
+stock-app regressions, phone capture, OpenAI connectivity, QNX sidecar
+deployment, or any future authoritative-server deployment on QNX. Perform the
+native physical acceptance gate and then the first playable run.
